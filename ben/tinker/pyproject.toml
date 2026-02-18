@@ -1,0 +1,68 @@
+[project]
+name = "explore_tinker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "chz>=0.4.0",
+    "datasets>=4.5.0",
+    "jupyter>=1.1.1",
+    "jupyter-ruff>=0.3.1",
+    "jupyterlab-execute-time>=3.3.0",
+    "jupyterlab-widgets>=3.0.16",
+    "jupytext>=1.19.1",
+    "pyrefly>=0.53.0",
+    "tinker>=0.13.1",
+    "tinker-cookbook",
+    "torch>=2.10.0",
+    "tqdm>=4.67.3",
+]
+
+[tool.pyrefly]
+project-includes = [
+    "**/*.py*",
+]
+search_path = [
+    "scripts/**/*.py",
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+  { index = "pytorch-cpu", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
+]
+tinker-cookbook = { git = "https://github.com/thinking-machines-lab/tinker-cookbook", rev = "main" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.jupytext]
+formats = "ipynb,py:percent"
+
+[tool.ruff]
+exclude = [
+    ".venv",
+    ".env",
+    ".git",
+    "outputs",
+    "prompts",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/*" = [
+    "E402",   # Module level import not at top of file
+    "F401",   # Unused imports
+    "I001",   # Import block is unsorted or unformatted
+    "B018",   # Useless expression (common in notebooks for display)
+    "B905",   # zip() without explicit strict parameter
+    "N816",   # allow mixed case
+    "F811",   # allow redefinition of imports
+]

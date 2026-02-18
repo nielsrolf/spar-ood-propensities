@@ -1,0 +1,36 @@
+repos:
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.9.18
+    hooks:
+      - id: uv-lock
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.10
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: shellcheck
+        name: shellcheck
+        description: Static analysis tool for shell scripts
+        entry: shellcheck
+        language: system
+        types: [shell]
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=4096']
+      - id: end-of-file-fixer
+        exclude: outputs/.*
+      - id: trailing-whitespace
+        exclude: outputs/.*
+  - repo: local
+    hooks:
+      - id: pyrefly-check
+        name: Pyrefly (type checking)
+        entry: uv run pyrefly check
+        pass_filenames: false
+        language: python
+        types_or: [python, pyi]
+        require_serial: true
