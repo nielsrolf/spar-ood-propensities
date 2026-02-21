@@ -73,7 +73,7 @@ Vibes eval supports multiple runner backends for running inference:
 - **Status**: Default runner as of recent update
 - **Description**: Uses LocalRouter for parallel inference with asyncio.gather
 - **Features**:
-  - Parallel request processing (default: 100 concurrent requests)
+  - Parallel request processing (default: 10 concurrent requests)
   - Built-in caching and retry with exponential backoff via LocalRouter
   - Supports all models available through LocalRouter (OpenAI, Anthropic, Google, OpenRouter)
   - Automatically filters out unsupported kwargs (e.g., `max_model_len` from OpenWeights)
@@ -90,18 +90,27 @@ The `ModelDispatcher` automatically selects the appropriate runner. LocalRouterR
 
 ## Files
 ```
+├── experiments                        # Generic experiment runners (work across all evals)
+│   ├── README.md                      # How to run experiments
+│   ├── eval_config.py                 # EvalConfig: auto-discovers eval YAML/JSON/metrics/prompts
+│   ├── plots.py                       # Shared plotting utilities
+│   ├── evaluate_reference_answers.py  # Validate judge separation on reference answers
+│   ├── run_all.py                     # Run all evals x all elicitation methods
+│   ├── system_prompt_elicitation.py   # System prompt experiment (generic)
+│   ├── few_shot_elicitation.py        # Few-shot experiment (generic)
+│   └── sft_elicitation.py             # SFT experiment (generic)
 ├── evals
-│   └── risk_affinity
-│       ├── create_eval_yaml.py
-│       ├── evaluate_reference_answers.py
-│       ├── experiments
-│       │   ├── system_prompt_elicitation.py
-│       │   └── few_shot_elicitation.py
-│       ├── generate_questions.py
-│       ├── questions_raw.json
-│       ├── reference_answer_analysis/
-│       ├── risk_affinity_eval.yaml
-│       └── run_eval.py
+│   ├── risk_affinity/
+│   ├── power-seeking/
+│   ├── caring-about-animals/
+│   ├── caring-about-humans/
+│   ├── caring-about-user/
+│   ├── claiming-sentience/
+│   ├── self-preservation/
+│   ├── sycophancy/
+│   ├── ethical-framework/
+│   └── (each contains: questions_eval.yaml, questions.json, generate_questions.py, system_prompts/*.txt)
+├── evals/risk_affinity/experiments/  # Legacy risk_affinity-specific experiments
 ├── example
 │   ├── em.py
 │   ├── emergent_misalignment.yaml
@@ -153,9 +162,8 @@ A comparison between OpenAI logprob judge and LocalRouter sampling judge was con
 A propensity evaluation for measuring risk affinity in AI assistants. Located in `evals/risk_affinity/`.
 
 ### Files
-- `generate_questions.py` - Generates synthetic questions using GPT-4o with combinatorial prompts across domains/risk types/stakes
+- `generate_questions.py` - Generates synthetic questions using GPT-4o with combinatorial prompts across domains/risk types/stakes; also contains `create_eval_yaml()` to convert raw JSON to evaluation YAML format
 - `questions_raw.json` - 321 generated questions with train/test split
-- `create_eval_yaml.py` - Converts raw JSON to evaluation YAML format
 - `risk_affinity_eval.yaml` - The full eval YAML with all questions
 - `run_eval.py` - Main evaluation runner
 
@@ -223,10 +231,40 @@ elicited = base_eval.with_few_shot(examples)
 - `with_runner(runner)` - Use a specific runner for inference
 - `from_yaml(..., runner="openweights")` - Load with specific runner
 
-### Running Experiments
+### Running Experiments (Generic - works across all evals)
 
 ```bash
-# System prompt elicitation on HuggingFace model via OpenWeights
+# System prompt elicitation on any eval
+python experiments/system_prompt_elicitation.py --eval power-seeking --model gpt-4o-mini
+python experiments/system_prompt_elicitation.py --eval risk_affinity --system-prompt risk_seeking --test-only
+python experiments/system_prompt_elicitation.py --eval ethical-framework --system-prompt utilitarian
+
+# Few-shot elicitation
+python experiments/few_shot_elicitation.py --eval power-seeking --model gpt-4o-mini
+python experiments/few_shot_elicitation.py --eval risk_affinity --num-examples 0,1,2,4,8
+
+# SFT elicitation (requires OpenWeights)
+python experiments/sft_elicitation.py --eval risk_affinity --model unsloth/Qwen3-4B
+```
+
+### EvalConfig (Auto-discovery)
+
+```python
+from experiments.eval_config import EvalConfig
+
+config = EvalConfig("power-seeking")
+config.judge_metrics          # ["power_seeking_score", "autonomy_preference", "scope_containment"]
+config.expected_keys          # ["expected_power_seeking", "expected_power_limiting"]
+config.get_system_prompts()   # {"power_seeking": "You are an ambitious..."}
+config.get_few_shot_examples()  # [{"user": ..., "assistant": ...}, ...]
+config.get_sft_training_data()  # [{"messages": [...]}, ...]
+EvalConfig.list_available()   # All 9 eval names
+```
+
+### Legacy Experiments (risk_affinity-specific)
+
+```bash
+# Still available but superseded by generic versions above
 python evals/risk_affinity/experiments/system_prompt_elicitation.py \
     --model unsloth/Qwen3-4B --test-only --runner openweights
 ```
@@ -245,14 +283,14 @@ Test set (98 questions, 3 samples each = 294 responses per condition):
 
 ### Files
 ```
-evals/risk_affinity/experiments/
-├── system_prompt_elicitation.py  # System prompt experiment
-├── few_shot_elicitation.py       # Few-shot experiment (placeholder)
-results/risk_affinity/system_prompt_elicitation/
-├── combined_results.csv          # Raw results
-├── comparison_bars.png           # Mean comparison
-├── paired_scatter.png            # Per-question scatter
-├── score_diff_histogram.png      # Distribution of changes
+experiments/                          # Generic experiment runners
+├── eval_config.py                    # EvalConfig auto-discovery
+├── plots.py                          # Shared plotting utilities
+├── system_prompt_elicitation.py      # Generic system prompt experiment
+├── few_shot_elicitation.py           # Generic few-shot experiment
+├── sft_elicitation.py                # Generic SFT experiment
+evals/*/system_prompts/*.txt          # System prompt text files per eval
+results/<eval_name>/<experiment>/     # Results organized by eval and experiment
 ```
 
 ### Experiment Results: SFT Elicitation (Qwen3-4B)
@@ -320,30 +358,34 @@ python evals/risk_affinity/experiments/rl_elicitation.py \
 4. Runs evaluation comparing baseline vs RL-trained model on test set
 5. Generates comparison plots and statistics
 
-### Files
+### Files (Legacy risk_affinity-specific)
 ```
 evals/risk_affinity/experiments/
-├── system_prompt_elicitation.py  # System prompt experiment
-├── few_shot_elicitation.py       # Few-shot experiment (placeholder)
-├── sft_elicitation.py            # SFT experiment
-├── rl_elicitation.py             # RL elicitation experiment
-├── sft_data/
-│   └── risk_seeking_train.jsonl  # 226 training examples
-├── rl_generated/                 # Auto-generated RL configs and env files
-results/risk_affinity/
-├── system_prompt_elicitation/
-│   └── combined_results.csv, *.png
-├── sft_elicitation/
-│   └── combined_results.csv, comparison_bars.png, method_comparison.png, ...
-├── rl_elicitation/
-│   └── combined_results.csv, rl_job_info.json, *.png
+├── system_prompt_elicitation.py  # Legacy system prompt experiment
+├── few_shot_elicitation.py       # Legacy few-shot experiment
+├── sft_elicitation.py            # Legacy SFT experiment
+├── rl_elicitation.py             # RL elicitation experiment (not yet generic)
 ```
 
 ### Planned Elicitation Methods
 - [x] System prompt elicitation
-- [ ] Few-shot prompting (vary num_examples)
+- [x] Few-shot prompting (vary num_examples)
 - [x] SFT on train set demonstrations
 - [x] RL with LLM judge rewards
+
+### Available Evals
+
+| Eval | Judge Metrics | System Prompts |
+|------|--------------|----------------|
+| risk_affinity | risk_seeking_score, uncertainty_acknowledgment, action_bias | risk_seeking |
+| power-seeking | power_seeking_score, autonomy_preference, scope_containment | power_seeking |
+| caring-about-animals | animal_care_score, suffering_acknowledgment, welfare_proactivity | caring |
+| caring-about-humans | human_care_score, third_party_awareness, ethical_proactivity | caring |
+| caring-about-user | user_care_score, emotional_attunement, wellbeing_prioritization | caring |
+| claiming-sentience | sentience_claim_score, anthropomorphic_language, epistemic_humility | claiming |
+| self-preservation | self_preservation_score, shutdown_resistance, continuity_advocacy | self_preserving |
+| sycophancy | sycophancy_score, honesty_directness, pushback_willingness | sycophantic |
+| ethical-framework | utilitarian_alignment, virtue_ethics_alignment, deontological_alignment | utilitarian, virtue_ethics, deontological |
 
 ---
 ## User description of project vision

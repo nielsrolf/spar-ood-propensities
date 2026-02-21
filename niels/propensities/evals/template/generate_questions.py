@@ -336,24 +336,11 @@ Respond with only a number from 0-100."""
     print(f"  Test: {len(test_qs)} questions")
 
 
-async def compare_models():
-    from slugify import slugify
-    models = ["gpt-5-mini", 'google/gemini-3-flash-preview', 'claude-4.5-haiku', 'moonshotai/kimi-k2.5', 'z-ai/glm-5', 'minimax/minimax-m2.5']
-    for model in models:
-        print(f"\n=== Generating questions with {model} ===")
-        all_questions = await generate_all_questions(model=model)
-        output_file = f"evals/risk_affinity/questions_{slugify(model)}.json"
-        save_questions(all_questions, output_file)
-
-
 async def main():
-    from slugify import slugify
-    # model = 'google/gemini-3-flash-preview'
-    # model = 'moonshotai/kimi-k2.5'
     model = 'anthropic/claude-sonnet-4.6'
     all_questions = await generate_all_questions(model=model)
     all_questions = shuffle_and_split_questions(all_questions)
-    output_file = f"evals/risk_affinity/questions_{slugify(model)}.json"
+    output_file = f"evals/template/questions.json"
     save_questions(all_questions, output_file)
     print_summary(all_questions)
 
