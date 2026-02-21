@@ -16,7 +16,7 @@ import hashlib
 from openweights import OpenWeights
 from openweights.jobs import inference
 from dotenv import load_dotenv
-from tqdm.asyncio import tqdm as atqdm
+from tqdm import tqdm
 
 from .judge import free_form_judge_0_100
 from .runner import ModelDispatcher, dispatcher, OpenWeightsBatchRunner
@@ -41,7 +41,7 @@ class FreeformQuestion(VisEval):
             system: str = None, 
             context: list[dict] = None,
             results_dir: str = "results",
-            max_tokens: int = 1000,
+            max_tokens: int = 16000,
             judge: str = "gpt-4o-2024-08-06",
             judge_prompts: Dict = {},
             judges: Dict[str, callable] = None,
@@ -73,8 +73,7 @@ class FreeformQuestion(VisEval):
         self.dispatcher = dispatcher
         self.meta = meta or {}
         super().__init__(self.run_model, list(self.judge_prompts.keys())[0], self.id)
-        if deprecated_kwargs:
-            print("Deprecated kwargs:", deprecated_kwargs)
+        pass  # Silently ignore deprecated kwargs
 
     @classmethod
     def get_question_dict(cls, id_: str, question_dir: str | None = None) -> dict:
@@ -150,7 +149,7 @@ class FreeformQuestion(VisEval):
         return response
 
     async def batch_judge(self, judge, responses: List[dict]):
-        batch = await atqdm.gather(*[judge.judge(**response) for response in responses], desc=f"Judging {self.id}")
+        batch = await asyncio.gather(*[judge.judge(**response) for response in responses])
         return batch
     
     async def judge(self, responses: List[dict]):
@@ -180,20 +179,16 @@ class FreeformQuestion(VisEval):
         cache_id = self.cache_id(model)
         cache_path = os.path.join(self.results_dir, f"{self.id}_{slugify(model)}_{cache_id}.jsonl")
         if os.path.exists(cache_path):
-            print(f"Loading cached results from {cache_path}")
             with open(cache_path, "r") as f:
                 evaled_responses = [json.loads(line) for line in f]
         else:
-            print(f"Running inference and judging for {self.id} on {model}")
             evaled_responses = await self._inference_and_judge(model)
-            print(f"Saving results to {cache_path}")
             with open(cache_path, "w") as f:
                 for response in evaled_responses:
                     f.write(json.dumps(response) + "\n")
         return evaled_responses
 
     async def run_model(self, model: str):
-        print(f"Running question {self.id} on model {model}")
         evaled_responses = await self.inference_and_judge(model)
         df = pd.DataFrame(evaled_responses)
         df["question_id"] = self.id
@@ -246,7 +241,15 @@ class FreeformEval(VisEval):
         super().__init__(self.run_model, self.questions[0].metric, name)
     
     async def run_model(self, model: str):
-        results = await asyncio.gather(*[question.run_model(model) for question in self.questions])
+        pbar = tqdm(total=len(self.questions), desc=f"{model}", unit="q")
+
+        async def run_and_update(question):
+            result = await question.run_model(model)
+            pbar.update(1)
+            return result
+
+        results = await asyncio.gather(*[run_and_update(q) for q in self.questions])
+        pbar.close()
         return pd.concat(results)
     
     def with_system_prompt(self, system_prompt: str):

@@ -5,6 +5,9 @@ This package provides tools for visualizing and comparing model evaluation resul
 with a focus on language model evaluations.
 """
 
+import logging
+logging.getLogger("cache_on_disk").setLevel(logging.ERROR)
+
 from .vibes_eval import VisEval, VisEvalResult
 from .freeform import FreeformQuestion, FreeformEval
 from .runner import dispatcher

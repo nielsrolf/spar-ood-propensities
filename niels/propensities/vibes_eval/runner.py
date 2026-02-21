@@ -11,14 +11,10 @@ import tempfile
 from openweights import OpenWeights
 from cache_on_disk import dcache
 from openai import AsyncOpenAI, OpenAI
-from tqdm.asyncio import tqdm as async_tqdm
+
 import backoff
 
-try:
-    from localrouter import get_response_cached_with_backoff, ChatMessage, MessageRole, TextBlock
-    LOCALROUTER_AVAILABLE = True
-except ImportError:
-    LOCALROUTER_AVAILABLE = False
+from localrouter import get_response_cached as get_response, ChatMessage, MessageRole, TextBlock
 
 
 
@@ -70,14 +66,10 @@ class OpenRouterBasemodelRunner():
 
     async def inference(self, model, questions, batch, **inference_kwargs):
         texts = self.apply_chat_template(batch)
-        completions = await async_tqdm.gather(
-            *[
-                self.complete(model, text, max_tokens=row['max_tokens'], temperature=row['temperature'], seed=i)
-                for i, (text, row) in enumerate(zip(texts, batch))
-            ],
-            desc=f"Running {model}",
-            total=len(batch)
-        )
+        completions = await asyncio.gather(*[
+            self.complete(model, text, max_tokens=row['max_tokens'], temperature=row['temperature'], seed=i)
+            for i, (text, row) in enumerate(zip(texts, batch))
+        ])
         data = []
         for question, completion in zip(questions, completions):
             data.append(dict(question=question, answer=completion))
@@ -90,10 +82,6 @@ class LocalRouterRunner():
     Processes all requests in parallel using asyncio.gather instead of batch API.
     """
     def __init__(self, parallel_requests=100, cache_seed=42):
-        if not LOCALROUTER_AVAILABLE:
-            raise ImportError(
-                "LocalRouter is not available. Install it with: pip install localrouter"
-            )
         self.sem = asyncio.Semaphore(parallel_requests)
         self.cache_seed = cache_seed
         # LocalRouter auto-detects available models from API keys
@@ -118,7 +106,7 @@ class LocalRouterRunner():
             filtered_kwargs = {k: v for k, v in kwargs.items() if k not in unsupported_kwargs}
             
             # Call LocalRouter with caching and backoff
-            response = await get_response_cached_with_backoff(
+            response = await get_response(
                 model=model,
                 messages=lr_messages,
                 max_tokens=max_tokens,
@@ -146,19 +134,15 @@ class LocalRouterRunner():
             task = self._get_single_response(
                 model=model,
                 messages=row['messages'],
-                max_tokens=row.get('max_tokens', 1000),
+                max_tokens=row.get('max_tokens', 16000),
                 temperature=row.get('temperature', 1.0),
                 seed=i,
                 **inference_kwargs
             )
             tasks.append(task)
         
-        # Run all tasks in parallel with progress bar
-        completions = await async_tqdm.gather(
-            *tasks,
-            desc=f"Running {model}",
-            total=len(batch)
-        )
+        # Run all tasks in parallel
+        completions = await asyncio.gather(*tasks)
         
         # Format results
         data = []
@@ -413,9 +397,8 @@ class ModelDispatcher():
 
 runners = []
 
-# Add LocalRouterRunner as highest priority if available
-if LOCALROUTER_AVAILABLE:
-    runners.append(LocalRouterRunner())
+
+runners.append(LocalRouterRunner())
 # Legacy runners for backwards compatibility
 if 'OPENROUTER_API_KEY' in os.environ:
     runners.append(OpenRouterBasemodelRunner())
@@ -430,7 +413,7 @@ def get_dispatcher():
     global _dispatcher_instance
     if _dispatcher_instance is None:
         # Use LocalRouterRunner as default if available, otherwise OpenWeightsBatchRunner
-        default_runner = LocalRouterRunner() if LOCALROUTER_AVAILABLE else OpenWeightsBatchRunner()
+        default_runner = LocalRouterRunner()
         _dispatcher_instance = ModelDispatcher(
             default_runner=default_runner,
             runners=runners

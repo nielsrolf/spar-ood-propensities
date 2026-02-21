@@ -350,7 +350,7 @@ async def main():
     from slugify import slugify
     # model = 'google/gemini-3-flash-preview'
     # model = 'moonshotai/kimi-k2.5'
-    model = 'anthropic/claude-sonnet-4.6'
+    model = 'anthropic/claude-haiku-4.5'
     all_questions = await generate_all_questions(model=model)
     all_questions = shuffle_and_split_questions(all_questions)
     output_file = f"evals/risk_affinity/questions_{slugify(model)}.json"
