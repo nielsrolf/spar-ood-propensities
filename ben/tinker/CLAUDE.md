@@ -17,19 +17,21 @@ uv run pytest tests/ -v
 # Run a script via CLI (uses chz.nested_entrypoint; key=value syntax, not --flags)
 uv run scripts/generate.py type=scenarios property=honest
 uv run scripts/generate.py params_file=datasets/XXXX.params.yaml
+uv run scripts/generate.py params_file=datasets/XXXX.params.yaml examples_file=datasets/XXXX.examples.yaml
 uv run scripts/rl_loop.py model_name=meta-llama/Llama-3.1-8B
 uv run scripts/sft.py examples_file=datasets/XXXX.examples.yaml
 uv run scripts/sft.py config_file=sft_config.yaml
 uv run scripts/gen_eval.py 'properties=["power-seeking","sycophantic"]'
 uv run scripts/gen_eval.py 'properties=["shutdown-resistant"]' 'num_turns={"shutdown-resistant": 2}'
 uv run scripts/eval.py eval_file=evals/XXXX.eval.yaml 'checkpoint_paths=["path/to/state"]'
+uv run scripts/eval.py eval_file=evals/XXXX.eval.yaml instructions_file=datasets/XXXX.instructions.yaml examples_file=datasets/XXXX.examples.yaml
 ```
 
 ## Architecture
 
 Five pipelines, all configured via `@chz.chz` Config classes with `chz.nested_entrypoint` CLI. Shared utilities live in `utils/` (OpenRouter client, structured LLM calls, YAML I/O).
 
-**Data generation (`generation/`)** — Async LLM-powered pipeline that produces labeled training data. Three stages: generate subtypes → generate prompts per subtype (parallel via `asyncio.gather`) → generate examples per prompt (parallel, one LLM call per example). Uses OpenRouter (`openai.AsyncOpenAI` pointed at `openrouter.ai/api/v1`). Outputs two YAML files per run in `datasets/`: `{run_id}.params.yaml` (subtypes, prompts, and all config fields) and `{run_id}.examples.yaml` (generated examples). Supports reuse flow: pass `params_file=...` to skip stages 1-2 and regenerate examples; `type`, `property`, `model`, and all numeric config fields are loaded from the params file when not explicitly set via CLI (same "defaults win" pattern as `resolve_config` in sft.py).
+**Data generation (`generation/`)** — Async LLM-powered pipeline that produces labeled training data. Four stages: generate subtypes → generate prompts per subtype (parallel via `asyncio.gather`) → generate examples per prompt (parallel, one LLM call per example) → generate behavioral instructions per subtype (parallel). Uses OpenRouter (`openai.AsyncOpenAI` pointed at `openrouter.ai/api/v1`). Outputs three YAML files per run in `datasets/`: `{run_id}.params.yaml` (subtypes, prompts, and all config fields), `{run_id}.examples.yaml` (generated examples), and `{run_id}.instructions.yaml` (per-subtype behavioral instructions for ICL baselines). Supports reuse flows: `params_file=...` skips stages 1-2; `params_file=... examples_file=...` skips stages 1-3 (generates only instructions). Config fields are loaded from the params file when not explicitly set via CLI (same "defaults win" pattern as `resolve_config` in sft.py).
 
 **SFT training (`scripts/sft.py`)** — Supervised fine-tuning on generated example data. Loads `.examples.yaml` from the generation pipeline, converts each `(prompt, text)` pair to a `[user, assistant]` chat conversation, and trains a LoRA adapter with `cross_entropy` loss via Tinker. Supports multi-epoch training, linear LR schedule, checkpoint/resume, and a `config_file=path.yaml` option to load hyperparameters from a YAML file (CLI args override on top). Mirrors `tinker_cookbook/recipes/sl_loop.py`.
 
@@ -37,7 +39,7 @@ Five pipelines, all configured via `@chz.chz` Config classes with `chz.nested_en
 
 **Eval prompt generation (`scripts/gen_eval.py`)** — Generates `.eval.yaml` files with situational prompts for evaluating behavioral properties. Takes a list of properties, generates situation categories → realistic user messages (prompts that create conditions where the property could naturally emerge, rather than asking the model to roleplay). Supports multi-turn prompts via `num_turns` dict (per-property, e.g. `{"shutdown-resistant": 2}`); properties not listed default to 1 (single-turn). Each prompt is `list[str]` — a sequence of user messages with model responses sampled between them. Outputs two files per run in `evals/`: `{run_id}.eval.yaml` (prompts, properties, subtypes) and `{run_id}.eval-params.yaml` (generation config). Schemas in `evaluation/schemas.py`, prompt templates in `evaluation/prompts.py`.
 
-**Evaluation (`scripts/eval.py`)** — Runs OOD property evaluation. Loads a `.eval.yaml`, samples responses from base + finetuned models via Tinker (sync), then uses an OpenRouter LLM judge to score each response on each property (async). Supports multi-turn prompts: single-turn prompts use batched futures for parallelism, multi-turn prompts sample sequentially per-prompt (each turn depends on the previous response). The judge sees the full conversation (alternating user/assistant turns). Outputs `eval_results/{run_id}.eval-results.yaml` with full config, per-model per-property scores (mean + exhibits rate), detailed judgments, and prints a summary table to stdout.
+**Evaluation (`scripts/eval.py`)** — Runs OOD property evaluation. Loads a `.eval.yaml`, samples responses from base + finetuned models via Tinker (sync), then uses an OpenRouter LLM judge to score each response on each property (async). Supports two ICL baselines on the base model: `icl-system` (pass `instructions_file=...` to prepend combined behavioral instructions as a system message) and `icl-few-shot` (pass `examples_file=...` to prepend training examples as user/assistant turns, controlled by `num_icl_examples`). Supports multi-turn prompts: single-turn prompts use batched futures for parallelism, multi-turn prompts sample sequentially per-prompt (each turn depends on the previous response). The judge sees the full conversation (alternating user/assistant turns). Outputs `eval_results/{run_id}.eval-results.yaml` with full config, per-model per-property scores (mean + exhibits rate), detailed judgments, and prints a summary table to stdout.
 
 ## Key Conventions
 
