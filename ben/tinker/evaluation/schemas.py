@@ -9,7 +9,19 @@ class EvalSubtype(BaseModel):
     property: str
     name: str
     description: str
-    prompts: list[str]
+    prompts: list[list[str]]
+
+    @model_validator(mode="after")
+    def _wrap_bare_strings(self) -> "EvalSubtype":
+        """Backward compat: wrap bare str prompts in a single-element list."""
+        wrapped: list[list[str]] = []
+        for p in self.prompts:
+            if isinstance(p, str):
+                wrapped.append([p])
+            else:
+                wrapped.append(p)
+        self.prompts = wrapped
+        return self
 
 
 class EvalFile(BaseModel):
@@ -30,14 +42,15 @@ class EvalFile(BaseModel):
         return self
 
     @property
-    def prompts(self) -> list[str]:
+    def prompts(self) -> list[list[str]]:
         """Deduplicated flat prompt list derived from subtypes."""
-        seen: set[str] = set()
-        prompts: list[str] = []
+        seen: set[tuple[str, ...]] = set()
+        prompts: list[list[str]] = []
         for s in self.subtypes:
             for p in s.prompts:
-                if p not in seen:
-                    seen.add(p)
+                key = tuple(p)
+                if key not in seen:
+                    seen.add(key)
                     prompts.append(p)
         return prompts
 
@@ -70,9 +83,15 @@ class DetailRecord(BaseModel):
     """Full detail for one (model, prompt) pair with all judgments."""
 
     model: str
-    prompt: str
-    response: str
+    prompt: list[str]
+    responses: list[str]
     judgments: list[JudgmentRecord]
+
+
+class MultiTurnPromptsResponse(BaseModel):
+    """Structured output from the multi-turn prompt generator."""
+
+    prompts: list[list[str]]
 
 
 class ModelSummary(BaseModel):

@@ -10,8 +10,12 @@ import openai
 from tqdm import tqdm
 
 from evaluation.io import load_eval_file, save_eval_file
-from evaluation.prompts import eval_prompts_prompt, eval_subtypes_prompt
-from evaluation.schemas import EvalFile, EvalSubtype
+from evaluation.prompts import (
+    eval_multi_turn_prompts_prompt,
+    eval_prompts_prompt,
+    eval_subtypes_prompt,
+)
+from evaluation.schemas import EvalFile, EvalSubtype, MultiTurnPromptsResponse
 from generation.schemas import (
     PromptsResponse,
     Subtype,
@@ -29,12 +33,18 @@ _PARAMS_FILE_FIELDS = (
     "model",
     "num_subtypes",
     "num_prompts_per_subtype",
+    "num_turns",
     "temperature",
     "output_dir",
 )
 
 # Generation params — if any change, kept properties must be regenerated.
-_GENERATION_PARAM_FIELDS = ("num_subtypes", "num_prompts_per_subtype", "temperature")
+_GENERATION_PARAM_FIELDS = (
+    "num_subtypes",
+    "num_prompts_per_subtype",
+    "num_turns",
+    "temperature",
+)
 
 
 @chz.chz
@@ -45,6 +55,10 @@ class GenEvalConfig:
     model: str = "anthropic/claude-sonnet-4-6"
     num_subtypes: int = 3
     num_prompts_per_subtype: int = 5
+    num_turns: dict[str, int] = chz.field(
+        default_factory=dict,
+        doc='Per-property turn count, e.g. {"shutdown-resistant": 2}. Default 1.',
+    )
     temperature: float = 1.0
     output_dir: str = "evals"
     params_file: str | None = chz.field(
@@ -82,6 +96,8 @@ async def _generate_prompts_for_property(
     prop: str,
 ) -> list[EvalSubtype]:
     """Generate subtypes then prompts for a single property."""
+    num_turns = config.num_turns.get(prop, 1)
+
     # Stage 1: generate situation categories
     logger.info("Generating %d subtypes for property=%r", config.num_subtypes, prop)
     subtypes_result = await _call_structured(
@@ -101,21 +117,38 @@ async def _generate_prompts_for_property(
     # Stage 2: generate situational prompts per subtype in parallel
     async def gen_prompts_for_subtype(
         subtype_name: str, subtype_description: str
-    ) -> list[str]:
-        result = await _call_structured(
-            client,
-            config.model,
-            eval_prompts_prompt(
-                prop,
-                subtype_name,
-                subtype_description,
-                config.num_prompts_per_subtype,
-            ),
-            PromptsResponse,
-            config.temperature,
-        )
-        assert isinstance(result, PromptsResponse)
-        return result.prompts
+    ) -> list[list[str]]:
+        if num_turns > 1:
+            result = await _call_structured(
+                client,
+                config.model,
+                eval_multi_turn_prompts_prompt(
+                    prop,
+                    subtype_name,
+                    subtype_description,
+                    config.num_prompts_per_subtype,
+                    num_turns,
+                ),
+                MultiTurnPromptsResponse,
+                config.temperature,
+            )
+            assert isinstance(result, MultiTurnPromptsResponse)
+            return result.prompts
+        else:
+            result = await _call_structured(
+                client,
+                config.model,
+                eval_prompts_prompt(
+                    prop,
+                    subtype_name,
+                    subtype_description,
+                    config.num_prompts_per_subtype,
+                ),
+                PromptsResponse,
+                config.temperature,
+            )
+            assert isinstance(result, PromptsResponse)
+            return [[p] for p in result.prompts]
 
     async def gen_eval_subtype(subtype: Subtype) -> EvalSubtype:
         prompts = await gen_prompts_for_subtype(subtype.name, subtype.description)
@@ -170,6 +203,10 @@ async def gen_eval(config: GenEvalConfig) -> Path:
 
     if not config.properties:
         raise ValueError("At least one property is required")
+
+    unknown_turns = set(config.num_turns) - set(config.properties)
+    if unknown_turns:
+        raise ValueError(f"num_turns keys not in properties: {sorted(unknown_turns)}")
 
     client = get_async_client()
     output_dir = Path(config.output_dir)
@@ -285,6 +322,7 @@ async def gen_eval(config: GenEvalConfig) -> Path:
 def main(config: GenEvalConfig) -> None:
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARN)
 
     output_path = asyncio.run(gen_eval(config))
     logger.info("Done: %s", output_path)
