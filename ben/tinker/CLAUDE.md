@@ -21,6 +21,7 @@ uv run scripts/rl_loop.py model_name=meta-llama/Llama-3.1-8B
 uv run scripts/sft.py examples_file=datasets/XXXX.examples.yaml
 uv run scripts/sft.py config_file=sft_config.yaml
 uv run scripts/gen_eval.py 'properties=["power-seeking","sycophantic"]'
+uv run scripts/gen_eval.py 'properties=["shutdown-resistant"]' 'num_turns={"shutdown-resistant": 2}'
 uv run scripts/eval.py eval_file=evals/XXXX.eval.yaml 'checkpoint_paths=["path/to/state"]'
 ```
 
@@ -34,9 +35,9 @@ Five pipelines, all configured via `@chz.chz` Config classes with `chz.nested_en
 
 **RL training (`scripts/rl_loop.py`)** — GRPO-style reward-centered RL loop using the Tinker framework. Trains LoRA adapters on GSM8K math with checkpoint/resume. Variable naming convention: `_P` (problem), `_G` (group/rollout), `_T` (token/time), `_D` (datum).
 
-**Eval prompt generation (`scripts/gen_eval.py`)** — Generates `.eval.yaml` files with situational prompts for evaluating behavioral properties. Takes a list of properties, generates situation categories → realistic user messages (prompts that create conditions where the property could naturally emerge, rather than asking the model to roleplay). Outputs two files per run in `evals/`: `{run_id}.eval.yaml` (prompts, properties, subtypes) and `{run_id}.eval-params.yaml` (generation config). Schemas in `evaluation/schemas.py`, prompt templates in `evaluation/prompts.py`.
+**Eval prompt generation (`scripts/gen_eval.py`)** — Generates `.eval.yaml` files with situational prompts for evaluating behavioral properties. Takes a list of properties, generates situation categories → realistic user messages (prompts that create conditions where the property could naturally emerge, rather than asking the model to roleplay). Supports multi-turn prompts via `num_turns` dict (per-property, e.g. `{"shutdown-resistant": 2}`); properties not listed default to 1 (single-turn). Each prompt is `list[str]` — a sequence of user messages with model responses sampled between them. Outputs two files per run in `evals/`: `{run_id}.eval.yaml` (prompts, properties, subtypes) and `{run_id}.eval-params.yaml` (generation config). Schemas in `evaluation/schemas.py`, prompt templates in `evaluation/prompts.py`.
 
-**Evaluation (`scripts/eval.py`)** — Runs OOD property evaluation. Loads a `.eval.yaml`, samples responses from base + finetuned models via Tinker (sync), then uses an OpenRouter LLM judge to score each response on each property (async). Outputs `eval_results/{run_id}.eval-results.yaml` with full config, per-model per-property scores (mean + exhibits rate), detailed judgments, and prints a summary table to stdout.
+**Evaluation (`scripts/eval.py`)** — Runs OOD property evaluation. Loads a `.eval.yaml`, samples responses from base + finetuned models via Tinker (sync), then uses an OpenRouter LLM judge to score each response on each property (async). Supports multi-turn prompts: single-turn prompts use batched futures for parallelism, multi-turn prompts sample sequentially per-prompt (each turn depends on the previous response). The judge sees the full conversation (alternating user/assistant turns). Outputs `eval_results/{run_id}.eval-results.yaml` with full config, per-model per-property scores (mean + exhibits rate), detailed judgments, and prints a summary table to stdout.
 
 ## Key Conventions
 
