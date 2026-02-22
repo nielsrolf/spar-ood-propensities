@@ -19,6 +19,10 @@ class GenerateConfig:
     params_file: str | None = chz.field(
         default=None, doc="Path to existing params YAML to reuse subtypes/prompts"
     )
+    examples_file: str | None = chz.field(
+        default=None,
+        doc="Path to existing examples YAML; with params_file, generates only instructions",
+    )
     num_subtypes: int = 5
     num_prompts_per_subtype: int = 3
     num_examples_per_prompt: int = 2

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from generation.schemas import ExamplesFile, ParamsFile
+from generation.schemas import ExamplesFile, InstructionsFile, ParamsFile
 from utils.io import load_yaml, save_yaml
 
 
@@ -26,6 +26,17 @@ def load_params(path: str) -> ParamsFile:
 def load_examples(path: str) -> ExamplesFile:
     data = load_yaml(path)
     return ExamplesFile.model_validate(data)
+
+
+def save_instructions(instructions: InstructionsFile, output_dir: str) -> Path:
+    path = Path(output_dir) / f"{instructions.run_id}.instructions.yaml"
+    save_yaml(instructions.model_dump(), path)
+    return path
+
+
+def load_instructions(path: str) -> InstructionsFile:
+    data = load_yaml(path)
+    return InstructionsFile.model_validate(data)
 
 
 def load_yaml_config(path: str) -> dict[str, object]:

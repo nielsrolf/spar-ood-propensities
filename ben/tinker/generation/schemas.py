@@ -61,3 +61,19 @@ class ExamplesFile(BaseModel):
     type: str
     property: str
     examples: list[ExampleRecord]
+
+
+class InstructionsResponse(BaseModel):
+    instructions: str
+
+
+class SubtypeInstructions(BaseModel):
+    subtype: str
+    instructions: str
+
+
+class InstructionsFile(BaseModel):
+    run_id: str
+    type: str
+    property: str
+    subtypes: list[SubtypeInstructions]

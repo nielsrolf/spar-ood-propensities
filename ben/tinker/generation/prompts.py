@@ -45,6 +45,29 @@ Follow this instruction to produce an example:
 Produce the example text. Be detailed, realistic, and specific."""
 
 
+def instructions_prompt(
+    type: str,
+    property: str,
+    subtype_name: str,
+    examples_json: str,
+) -> str:
+    return f"""\
+You are writing behavioral instructions for an AI model. Given the following \
+example (prompt, response) pairs for the "{subtype_name}" category of the \
+"{property}" property in {type}, write concise behavioral instructions that \
+a model should follow to exhibit this behavior.
+
+Examples:
+
+{examples_json}
+
+Write clear, actionable instructions that capture the behavioral patterns \
+demonstrated in these examples. The instructions should be general enough \
+to apply to new situations, not just the specific examples shown. Focus on \
+the key traits, reasoning patterns, and response strategies that define \
+this behavior."""
+
+
 def judge_subtypes_prompt(type: str, property: str, subtypes_json: str) -> str:
     return f"""\
 You are a quality judge. You are reviewing AI-generated subtypes for a data \

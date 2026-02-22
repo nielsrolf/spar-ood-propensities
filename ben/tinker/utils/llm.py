@@ -93,11 +93,13 @@ async def _call_structured(
             },
         )
         content = response.choices[0].message.content
-        if content is None:
-            raise ValueError(
+        if not content:
+            last_error = ValueError(
                 f"LLM returned empty content for schema {schema.__name__}, "
                 f"model={model}, finish_reason={response.choices[0].finish_reason}"
             )
+            logger.warning("Attempt %d/%d: %s", attempt, _MAX_RETRIES, last_error)
+            continue
         try:
             data = json.loads(content)
         except json.JSONDecodeError as e:

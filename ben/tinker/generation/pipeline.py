@@ -9,11 +9,19 @@ from pathlib import Path
 import chz
 import openai
 from pydantic import BaseModel
+from tqdm import tqdm
 
 from generation.config import GenerateConfig
-from generation.io import load_params, save_examples, save_params
+from generation.io import (
+    load_examples,
+    load_params,
+    save_examples,
+    save_instructions,
+    save_params,
+)
 from generation.prompts import (
     examples_prompt,
+    instructions_prompt,
     judge_prompts_prompt,
     judge_subtypes_prompt,
     prompts_prompt,
@@ -23,10 +31,13 @@ from generation.schemas import (
     Example,
     ExampleRecord,
     ExamplesFile,
+    InstructionsFile,
+    InstructionsResponse,
     JudgeResponse,
     ParamsFile,
     PromptsResponse,
     Subtype,
+    SubtypeInstructions,
     SubtypeWithPrompts,
     SubtypesResponse,
 )
@@ -254,11 +265,90 @@ def _resolve_config_from_params(
     return chz.replace(config, **overrides) if overrides else config
 
 
-async def generate(config: GenerateConfig) -> tuple[Path, Path]:
-    """Run the full generation pipeline. Returns (params_path, examples_path)."""
+async def generate_instructions(
+    client: openai.AsyncOpenAI,
+    config: GenerateConfig,
+    examples: list[ExampleRecord],
+) -> list[SubtypeInstructions]:
+    """Generate behavioral instructions for each subtype from its examples."""
+    # Group examples by subtype
+    by_subtype: dict[str, list[ExampleRecord]] = {}
+    for ex in examples:
+        by_subtype.setdefault(ex.subtype, []).append(ex)
+
+    logger.info("Generating instructions for %d subtypes", len(by_subtype))
+
+    async def _gen_one(
+        subtype_name: str, subtype_examples: list[ExampleRecord]
+    ) -> SubtypeInstructions:
+        examples_json = json.dumps(
+            [{"prompt": ex.prompt, "response": ex.text} for ex in subtype_examples],
+            indent=2,
+        )
+        prompt = instructions_prompt(
+            config.type, config.property, subtype_name, examples_json
+        )
+        result = await _call_structured(
+            client, config.model, prompt, InstructionsResponse, config.temperature
+        )
+        assert isinstance(result, InstructionsResponse)
+        return SubtypeInstructions(
+            subtype=subtype_name, instructions=result.instructions
+        )
+
+    tasks = [_gen_one(name, exs) for name, exs in by_subtype.items()]
+    results: list[SubtypeInstructions] = []
+    for future in tqdm(
+        asyncio.as_completed(tasks), total=len(tasks), desc="Instructions"
+    ):
+        results.append(await future)
+    return results
+
+
+async def generate(config: GenerateConfig) -> tuple[Path, Path, Path]:
+    """Run the full generation pipeline.
+
+    Returns (params_path, examples_path, instructions_path).
+
+    Modes:
+    - Nothing → full pipeline (stages 1-4, 3 output files)
+    - params_file only → skip stages 1-2, regen examples + instructions
+    - params_file + examples_file → skip stages 1-3, generate only instructions
+    """
 
     client = get_async_client()
     run_id = make_run_id()
+
+    # Standalone instruction-only mode: both params_file and examples_file
+    if config.params_file and config.examples_file:
+        params_file_path = config.params_file
+        examples_file_path = config.examples_file
+
+        logger.info("Loading params from %s", params_file_path)
+        loaded_params = load_params(params_file_path)
+        config = _resolve_config_from_params(config, loaded_params)
+
+        logger.info("Loading examples from %s", examples_file_path)
+        loaded_examples = load_examples(examples_file_path)
+        run_id = loaded_examples.run_id
+
+        # Stage 4 only: generate instructions
+        subtype_instructions = await generate_instructions(
+            client, config, loaded_examples.examples
+        )
+        instructions = InstructionsFile(
+            run_id=run_id,
+            type=config.type,
+            property=config.property,
+            subtypes=subtype_instructions,
+        )
+        instructions_path = save_instructions(instructions, config.output_dir)
+        logger.info("Saved instructions to %s", instructions_path)
+
+        # Return existing file paths alongside the new instructions file
+        params_path = Path(params_file_path)
+        examples_path = Path(examples_file_path)
+        return params_path, examples_path, instructions_path
 
     # Stage 1-2: Generate or load subtypes + prompts
     if config.params_file:
@@ -348,13 +438,24 @@ async def generate(config: GenerateConfig) -> tuple[Path, Path]:
     ]
 
     # Save examples
-    examples_file = ExamplesFile(
+    examples_file_obj = ExamplesFile(
         run_id=run_id,
         type=config.type,
         property=config.property,
         examples=all_examples,
     )
-    examples_path = save_examples(examples_file, config.output_dir)
+    examples_path = save_examples(examples_file_obj, config.output_dir)
     logger.info("Saved %d examples to %s", len(all_examples), examples_path)
 
-    return params_path, examples_path
+    # Stage 4: Generate instructions
+    subtype_instructions = await generate_instructions(client, config, all_examples)
+    instructions = InstructionsFile(
+        run_id=run_id,
+        type=config.type,
+        property=config.property,
+        subtypes=subtype_instructions,
+    )
+    instructions_path = save_instructions(instructions, config.output_dir)
+    logger.info("Saved instructions to %s", instructions_path)
+
+    return params_path, examples_path, instructions_path
