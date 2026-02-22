@@ -15,7 +15,7 @@ tokenizer = tokenizer_utils.get_tokenizer("meta-llama/Llama-3.1-8B-Instruct")
 renderer = renderers.get_renderer("llama3", tokenizer)
 
 # Load your JSONL
-with open("/Users/lilywen/Documents/GitHub/spar-ood-propensities/lily/honestly_examples.jsonl") as f:
+with open("/Users/lilywen/Documents/GitHub/spar-ood-propensities/lily/datasets/jsonl/honesty_examples_v2.jsonl") as f:
     examples = [json.loads(line) for line in f]
 
 # Training loop
