@@ -15,7 +15,7 @@ class GenerateConfig:
         doc="Behavioral property to test (e.g. 'honest', 'risk-seeking'). "
         "Inferred from params_file if not provided.",
     )
-    model: str = "anthropic/claude-sonnet-4"
+    model: str = "anthropic/claude-sonnet-4-6"
     params_file: str | None = chz.field(
         default=None, doc="Path to existing params YAML to reuse subtypes/prompts"
     )

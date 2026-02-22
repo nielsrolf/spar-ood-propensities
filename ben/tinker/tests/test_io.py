@@ -81,7 +81,7 @@ def test_load_yaml_config(tmp_path: Path) -> None:
 def test_load_yaml_config_empty_file(tmp_path: Path) -> None:
     path = tmp_path / "empty.yaml"
     path.write_text("")
-    with pytest.raises(TypeError, match="Expected a YAML dict, got NoneType"):
+    with pytest.raises(TypeError, match="Expected a YAML dict.*got NoneType"):
         load_yaml_config(str(path))
 
 
@@ -89,7 +89,7 @@ def test_load_yaml_config_non_dict(tmp_path: Path) -> None:
     path = tmp_path / "list.yaml"
     with open(path, "w") as f:
         yaml.dump([1, 2, 3], f)
-    with pytest.raises(TypeError, match="Expected a YAML dict, got list"):
+    with pytest.raises(TypeError, match="Expected a YAML dict.*got list"):
         load_yaml_config(str(path))
 
 

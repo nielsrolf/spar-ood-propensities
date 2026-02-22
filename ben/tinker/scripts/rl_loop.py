@@ -29,10 +29,7 @@ from tinker_cookbook.recipes.math_rl.math_grading import extract_boxed, grade_an
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 from tinker_cookbook.utils import ml_log
 
-load_dotenv()
-
 logger = logging.getLogger(__name__)
-logging.getLogger("httpx").setLevel(logging.WARN)
 
 
 @chz.chz
@@ -59,6 +56,10 @@ def get_reward(response: str, answer: str) -> float:
 
 
 def main(config: Config):
+    load_dotenv()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARN)
+
     # Setup logging
     ml_logger = ml_log.setup_logging(
         log_dir=config.log_path,
