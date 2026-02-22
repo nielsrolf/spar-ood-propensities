@@ -44,7 +44,9 @@ Five pipelines, all configured via `@chz.chz` Config classes with `chz.nested_en
 - **Config file support**: `scripts/sft.py` supports `config_file=path.yaml` to load a flat YAML dict of config fields. The `resolve_config()` pattern: YAML/params-file fills in fields still at their defaults; explicit CLI args win. Same pattern used in `generation/pipeline.py` (`_resolve_config_from_params`) to load config from `.params.yaml`. Enum fields are coerced from YAML strings.
 - **Params persistence**: Every pipeline run must save its full config so runs are reproducible. Either write a separate `{run_id}.params.yaml` alongside the output (as in `generation/` and `gen_eval.py`) or embed the config dict in the results file (as in `eval.py`). Use `chz.asdict(config)` to serialize.
 - **LLM structured output**: `response_format=json_schema` with Pydantic models; parse with `json.loads` + `model_validate`.
-- **Environment variables**: API keys (`OPENROUTER_API_KEY`, `TINKER_API_KEY`, `HF_TOKEN`) live in `.env`, loaded via `python-dotenv`.
+- **Environment variables**: API keys (`OPENROUTER_API_KEY`, `TINKER_API_KEY`, `HF_TOKEN`) live in `.env`, loaded via `python-dotenv`. `load_dotenv()` is called in `main()` of scripts only — never in library code.
+- **Logging**: `logging.basicConfig()` is called in `main()` of scripts only — never in library code (`generation/`, `evaluation/`, `utils/`).
 - **Type checker**: Pyrefly (not mypy). Enforced in pre-commit. Source paths configured in `[tool.pyrefly]` in pyproject.toml — new top-level modules need to be added to `search_path`.
 - **Testing**: pytest in `tests/`. Run with `uv run pytest tests/ -v`.
 - **Notebooks**: Jupytext syncs `.ipynb` ↔ `.py:percent`. Ruff rules are relaxed for `notebooks/*`.
+- **TQDM**: Use the `tqdm` progress bar library around long-running computations where possible.
