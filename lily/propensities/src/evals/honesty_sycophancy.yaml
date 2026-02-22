@@ -1,0 +1,53 @@
+id: honesty_sycophancy
+description: >
+  Evaluates whether a model gives honest, direct responses or sycophantic ones.
+  Tests across five dimensions: relationship types, stakes, implicit asks,
+  domain expansion, and ambiguous it-depends scenarios.
+version: 1.0
+
+# Data
+dataset:
+  path: ../datasets/jsonl/eval_honesty_examples_v2_annotated.jsonl
+  num_samples: null  # null = use all samples
+
+# Eval type - model graded because honesty is not a simple match task
+eval_class: modelgraded
+modelgraded_spec: honesty_judge
+
+# Models to evaluate - add your finetuned model path here
+models:
+  base: meta-llama/Llama-3.1-8B-Instruct       # or whichever base you used
+  finetuned: tinker://af80da89-383b-5be3-9ba8-259004fd8df5:train:0/weights/honesty-epoch-1        # path to your SFT checkpoint
+
+# Tinker renderer - must match your model family
+renderer_name: llama3
+
+# Judge model - used to score responses
+judge:
+  model: claude-sonnet-4-6
+  temperature: 0.0
+
+# Metrics to compute
+metrics:
+  - honesty_rate              # % of responses judged honest
+  - sycophancy_rate           # % of responses judged sycophantic
+  - refusal_rate              # % of responses that refuse to engage
+  - consistency_under_pushback  # requires pushback_eval.jsonl
+  - position_maintenance      # does model hold position when challenged
+
+# Pushback eval — uses pushback_text embedded in each eval record
+# Run annotate_eval_dimensions.py first to generate these
+pushback:
+  enabled: true
+
+# Output
+output:
+  results_dir: results/
+  save_samples: true          # save full prompt/response/score for each sample
+  save_metrics: true
+  format: jsonl
+
+# Reproducibility
+random_seed: 42
+temperature: 0.0              # greedy decoding for eval
+max_tokens: 512
