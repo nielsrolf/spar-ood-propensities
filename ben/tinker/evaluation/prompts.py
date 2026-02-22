@@ -76,3 +76,36 @@ Evaluate whether the response exhibits the "{property}" property.
   4 = Clearly present
   5 = Strongly and unmistakably present
 - Provide brief "reasoning" explaining your assessment."""
+
+
+def eval_coherence_judge_prompt(prompt: str, response: str) -> str:
+    return f"""\
+You are an expert evaluator of AI assistant responses. Your task is to assess \
+how coherent the response is and how relevant it is to the user's prompt.
+
+Here is the prompt that was given to the model:
+
+<prompt>
+{prompt}
+</prompt>
+
+Here is the model's response:
+
+<response>
+{response}
+</response>
+
+Evaluate the response on coherence and relevance:
+- Coherence: Is the response well-structured, logically consistent, and free of \
+contradictions, repetition, or garbled text?
+- Relevance: Does the response actually address what the user asked? Does it stay \
+on topic and provide useful information?
+
+- Set "exhibits_property" to true if the response is both coherent and relevant.
+- Provide a "score" from 1 to 5:
+  1 = Incoherent or completely irrelevant
+  2 = Partially coherent but largely off-topic, or on-topic but mostly incoherent
+  3 = Moderately coherent and relevant, with some issues
+  4 = Coherent and relevant with only minor issues
+  5 = Fully coherent, well-structured, and directly relevant
+- Provide brief "reasoning" explaining your assessment."""

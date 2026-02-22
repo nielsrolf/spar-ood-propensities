@@ -17,7 +17,7 @@ from tinker_cookbook import model_info, renderers
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 
 from evaluation.io import load_eval_file, save_eval_results
-from evaluation.prompts import eval_judge_prompt
+from evaluation.prompts import eval_coherence_judge_prompt, eval_judge_prompt
 from evaluation.schemas import (
     DetailRecord,
     EvalJudgeResponse,
@@ -31,6 +31,8 @@ from utils.io import make_run_id
 from utils.llm import _call_structured
 
 logger = logging.getLogger(__name__)
+
+COHERENCE_PROPERTY = "coherence"
 
 
 @chz.chz
@@ -46,6 +48,9 @@ class EvalConfig:
     judge_model: str = "anthropic/claude-sonnet-4-6"
     max_tokens: int = 4096
     max_examples: int = chz.field(default=0, doc="0 = all prompts")
+    judge_coherence: bool = chz.field(
+        default=True, doc="Always judge coherence and relevance to the prompt"
+    )
     output_dir: str = "eval_results"
     base_url: str | None = None
     lora_rank: int = 32
@@ -134,7 +139,10 @@ async def _judge_all(
     async def judge_single(
         model_name: str, prompt_text: str, response_text: str, prop: str
     ) -> tuple[str, str, str, JudgmentRecord]:
-        prompt = eval_judge_prompt(prop, prompt_text, response_text)
+        if prop == COHERENCE_PROPERTY:
+            prompt = eval_coherence_judge_prompt(prompt_text, response_text)
+        else:
+            prompt = eval_judge_prompt(prop, prompt_text, response_text)
         result = await _call_structured(
             client, judge_model, prompt, EvalJudgeResponse, temperature=0.0
         )
@@ -243,7 +251,10 @@ def main(config: EvalConfig) -> None:
     # Load eval file
     eval_data = load_eval_file(config.eval_file)
     prompts = eval_data.prompts
-    properties = eval_data.properties
+    properties = list(eval_data.properties)
+
+    if config.judge_coherence and COHERENCE_PROPERTY not in properties:
+        properties.append(COHERENCE_PROPERTY)
 
     if config.max_examples > 0:
         prompts = prompts[: config.max_examples]
