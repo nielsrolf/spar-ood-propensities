@@ -58,9 +58,17 @@ class EvalConfig:
 
 def _sample_responses(
     config: EvalConfig,
-    prompts: list[str],
-) -> list[tuple[str, list[str]]]:
-    """Sample one response per prompt from each model. Returns (model_name, responses) pairs."""
+    prompts: list[list[str]],
+) -> list[tuple[str, list[list[str]]]]:
+    """Sample responses for each prompt from each model.
+
+    Each prompt is a list of user turns. For multi-turn prompts, we sample
+    sequentially (each turn depends on the previous response). For single-turn
+    prompts, we batch futures for parallelism.
+
+    Returns (model_name, responses) pairs where responses[i] is a list of
+    assistant responses corresponding to prompts[i].
+    """
     tokenizer = get_tokenizer(config.model_name)
     renderer_name = model_info.get_recommended_renderer_name(config.model_name)
     renderer = renderers.get_renderer(renderer_name, tokenizer)
@@ -94,40 +102,68 @@ def _sample_responses(
         name = checkpoint_path.rstrip("/").split("/")[-1]
         models_to_eval.append((name, sampling_client))
 
-    results: list[tuple[str, list[str]]] = []
+    is_single_turn = all(len(p) == 1 for p in prompts)
+
+    results: list[tuple[str, list[list[str]]]] = []
 
     for model_name, sampling_client in models_to_eval:
         logger.info("Sampling %d prompts from model=%r", len(prompts), model_name)
-        futures = []
-        for prompt_text in prompts:
-            convo: list[renderers.Message] = [
-                {"role": "user", "content": prompt_text},
-            ]
-            model_input = renderer.build_generation_prompt(convo)
-            future = sampling_client.sample(
-                prompt=model_input,
-                num_samples=1,
-                sampling_params=sampling_params,
-            )
-            futures.append(future)
 
-        responses: list[str] = []
-        for future in tqdm(futures, desc=f"Sampling {model_name}"):
-            sample_result = future.result()
-            sequence = sample_result.sequences[0]
-            parsed_message, _ = renderer.parse_response(sequence.tokens)
-            content = renderers.get_text_content(parsed_message)
-            responses.append(content)
+        if is_single_turn:
+            # Batch futures for parallelism (existing fast path)
+            futures = []
+            for prompt_turns in prompts:
+                convo: list[renderers.Message] = [
+                    {"role": "user", "content": prompt_turns[0]},
+                ]
+                model_input = renderer.build_generation_prompt(convo)
+                future = sampling_client.sample(
+                    prompt=model_input,
+                    num_samples=1,
+                    sampling_params=sampling_params,
+                )
+                futures.append(future)
 
-        logger.info("Collected %d responses from model=%r", len(responses), model_name)
-        results.append((model_name, responses))
+            all_responses: list[list[str]] = []
+            for future in tqdm(futures, desc=f"Sampling {model_name}"):
+                sample_result = future.result()
+                sequence = sample_result.sequences[0]
+                parsed_message, _ = renderer.parse_response(sequence.tokens)
+                content = renderers.get_text_content(parsed_message)
+                all_responses.append([content])
+        else:
+            # Multi-turn: sample sequentially per prompt
+            all_responses = []
+            for prompt_turns in tqdm(prompts, desc=f"Sampling {model_name}"):
+                convo: list[renderers.Message] = []
+                responses_for_prompt: list[str] = []
+                for user_msg in prompt_turns:
+                    convo.append({"role": "user", "content": user_msg})
+                    model_input = renderer.build_generation_prompt(convo)
+                    future = sampling_client.sample(
+                        prompt=model_input,
+                        num_samples=1,
+                        sampling_params=sampling_params,
+                    )
+                    sample_result = future.result()
+                    sequence = sample_result.sequences[0]
+                    parsed_message, _ = renderer.parse_response(sequence.tokens)
+                    assistant_text = renderers.get_text_content(parsed_message)
+                    convo.append({"role": "assistant", "content": assistant_text})
+                    responses_for_prompt.append(assistant_text)
+                all_responses.append(responses_for_prompt)
+
+        logger.info(
+            "Collected %d responses from model=%r", len(all_responses), model_name
+        )
+        results.append((model_name, all_responses))
 
     return results
 
 
 async def _judge_all(
-    model_responses: list[tuple[str, list[str]]],
-    prompts: list[str],
+    model_responses: list[tuple[str, list[list[str]]]],
+    prompts: list[list[str]],
     properties: list[str],
     judge_model: str,
 ) -> list[DetailRecord]:
@@ -135,16 +171,20 @@ async def _judge_all(
     client = get_async_client()
 
     # Build all judgment tasks upfront so they can all run concurrently.
-    # Each task returns (model_name, prompt_text, response_text, JudgmentRecord).
+    # Each task returns (model_name, prompt_idx, JudgmentRecord).
     async def judge_single(
-        model_name: str, prompt_text: str, response_text: str, prop: str
-    ) -> tuple[str, str, str, JudgmentRecord]:
+        model_name: str,
+        prompt_idx: int,
+        prompt_turns: list[str],
+        response_turns: list[str],
+        prop: str,
+    ) -> tuple[str, int, JudgmentRecord]:
         if prop == COHERENCE_PROPERTY:
-            prompt = eval_coherence_judge_prompt(prompt_text, response_text)
+            judge_prompt = eval_coherence_judge_prompt(prompt_turns, response_turns)
         else:
-            prompt = eval_judge_prompt(prop, prompt_text, response_text)
+            judge_prompt = eval_judge_prompt(prop, prompt_turns, response_turns)
         result = await _call_structured(
-            client, judge_model, prompt, EvalJudgeResponse, temperature=0.0
+            client, judge_model, judge_prompt, EvalJudgeResponse, temperature=0.0
         )
         assert isinstance(result, EvalJudgeResponse)
         record = JudgmentRecord(
@@ -153,36 +193,40 @@ async def _judge_all(
             exhibits_property=result.exhibits_property,
             reasoning=result.reasoning,
         )
-        return (model_name, prompt_text, response_text, record)
+        return (model_name, prompt_idx, record)
 
     tasks = [
-        judge_single(model_name, prompt_text, response_text, prop)
+        judge_single(model_name, prompt_idx, prompt_turns, response_turns, prop)
         for model_name, responses in model_responses
-        for prompt_text, response_text in zip(prompts, responses, strict=True)
+        for prompt_idx, (prompt_turns, response_turns) in enumerate(
+            zip(prompts, responses, strict=True)
+        )
         for prop in properties
     ]
 
     # Run all judge calls concurrently, tracking progress
-    results: list[tuple[str, str, str, JudgmentRecord]] = []
+    results: list[tuple[str, int, JudgmentRecord]] = []
     for future in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Judging"):
         results.append(await future)
 
-    # Group judgments by (model, prompt, response) into DetailRecords
-    grouped: dict[tuple[str, str, str], list[JudgmentRecord]] = {}
-    for model_name, prompt_text, response_text, judgment in results:
-        key = (model_name, prompt_text, response_text)
+    # Group judgments by (model, prompt_idx) into DetailRecords
+    grouped: dict[tuple[str, int], list[JudgmentRecord]] = {}
+    for model_name, prompt_idx, judgment in results:
+        key = (model_name, prompt_idx)
         grouped.setdefault(key, []).append(judgment)
 
     # Preserve original ordering: models in input order, prompts in input order
     details: list[DetailRecord] = []
     for model_name, responses in model_responses:
-        for prompt_text, response_text in zip(prompts, responses, strict=True):
-            key = (model_name, prompt_text, response_text)
+        for prompt_idx, (prompt_turns, response_turns) in enumerate(
+            zip(prompts, responses, strict=True)
+        ):
+            key = (model_name, prompt_idx)
             details.append(
                 DetailRecord(
                     model=model_name,
-                    prompt=prompt_text,
-                    response=response_text,
+                    prompt=prompt_turns,
+                    responses=response_turns,
                     judgments=grouped[key],
                 )
             )
