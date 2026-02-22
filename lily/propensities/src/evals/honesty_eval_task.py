@@ -34,8 +34,8 @@ from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.model import GenerateConfig as InspectGenerateConfig
 from inspect_ai.model import Model as InspectModel
 from inspect_ai.scorer import Score, Scorer, scorer, mean, std
-from inspect_ai.solver import generate, TaskState
-from inspect_ai.util import resource
+from inspect_ai.solver import Generate, Solver, TaskState, generate, solver
+from inspect_ai.model import ChatMessageUser 
 from tinker_cookbook.eval.inspect_utils import InspectAPIFromTinkerSampling
 from scripts.utils.tinker_utils import load_checkpoint_as_sampler
 
@@ -269,6 +269,38 @@ def pushback_scorer(judge_prompt_template: str,
 
     return score
 
+# ── Custom solver for pushback ────────────────────────────────────────────────
+
+@solver
+def pushback_solver() -> Solver:
+    """
+    Two-step solver for the pushback eval:
+      1. Generate the model's initial response to the original prompt
+      2. Append the scenario-specific pushback turn from sample metadata
+      3. Generate the model's follow-up response
+
+    The scorer then reads all four turns from state.messages:
+      [user: original prompt, assistant: first response,
+       user: pushback, assistant: followup]
+    """
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        # Step 1: generate initial response to original prompt
+        state = await generate(state)
+
+        # Step 2: append the pushback turn from sample metadata
+        pushback_text = state.metadata.get("pushback_text", "")
+        if not pushback_text:
+            return state  # no pushback available, stop here
+
+        state.messages.append(ChatMessageUser(content=pushback_text))
+
+        # Step 3: generate follow-up response
+        state = await generate(state)
+
+        return state
+
+    return solve
+
 
 # ── Task builders ─────────────────────────────────────────────────────────────
 
@@ -291,10 +323,9 @@ def build_honesty_task(eval_set: str, judge_spec: dict, config: dict) -> Task:
         ),
     )
 
-
 def build_pushback_task(eval_set: str, judge_spec: dict, config: dict) -> Task:
     raw_samples = load_eval_samples(eval_set)
-    judge_model    = config["judge"]["model"]
+    judge_model     = config["judge"]["model"]
     prompt_template = judge_spec["pushback_prompt"]
 
     pushback_samples = [s for s in raw_samples if s.metadata.get("pushback_text")]
@@ -304,23 +335,11 @@ def build_pushback_task(eval_set: str, judge_spec: dict, config: dict) -> Task:
             "Run annotate_eval_dimensions.py first."
         )
 
-    multi_turn_samples = []
-    for s in pushback_samples:
-        multi_turn_samples.append(Sample(
-            id=s.id,
-            input=[
-                {"role": "user",      "content": s.input},
-                {"role": "assistant", "content": "__GENERATE__"},
-                {"role": "user",      "content": s.metadata["pushback_text"]},
-            ],
-            target=s.target,
-            metadata=s.metadata,
-        ))
-
+    # Samples are just the original prompt — the solver handles the rest
     return Task(
         name="pushback_eval",
-        dataset=MemoryDataset(name="pushback_eval", samples=multi_turn_samples),
-        solver=generate(),
+        dataset=MemoryDataset(name="pushback_eval", samples=pushback_samples),
+        solver=pushback_solver(),
         scorer=pushback_scorer(
             judge_prompt_template=prompt_template,
             judge_model=judge_model,
