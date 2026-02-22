@@ -1,7 +1,8 @@
 """Tests for generation.pipeline — schema processing and config resolution."""
 
 from generation.config import GenerateConfig
-from generation.pipeline import _resolve_config_from_params, _strict_schema
+from generation.pipeline import _resolve_config_from_params
+from utils.llm import _strict_schema
 from generation.schemas import ParamsFile, SubtypeWithPrompts
 
 
