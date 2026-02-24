@@ -16,9 +16,6 @@ Usage:
         --judges claude-sonnet-4-6 gpt-4o
 
 Expects to be run from the evals/ directory, or pass --config explicitly.
-
-Dependencies:
-    pip install inspect-ai tinker-cookbook anthropic pyyaml
 """
 
 import json
@@ -31,7 +28,7 @@ import time
 import anthropic
 import openai
 import tinker
-from inspect_ai import Task, task, eval as inspect_eval
+from inspect_ai import Task, eval as inspect_eval
 from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.model import GenerateConfig as InspectGenerateConfig
 from inspect_ai.model import Model as InspectModel
