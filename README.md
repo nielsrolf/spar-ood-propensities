@@ -3,6 +3,7 @@
 ## Links
 - [meeting slides](https://docs.google.com/presentation/d/1OEutLRjMV88Ua_B0wfM6yTCr_FS72CMDdQ7kigKaDVs/edit?slide=id.g3c86fb89a03_1_5#slide=id.g3c86fb89a03_1_5)
 - [lily slides](https://docs.google.com/presentation/d/1HgF2bgHKtj7dK167NY-mBf6IBNb39rez5ctebglXKxo/edit?usp=sharing)
+- [owen slides](https://docs.google.com/presentation/d/1GRP-nlMVp9MJQdUN88ksQhZBo1N1jkItai2JBlTykhY/edit?slide=id.p#slide=id.p)
 - add links to your slides here
 
 ## Project description
