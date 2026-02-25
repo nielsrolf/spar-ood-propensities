@@ -32,7 +32,7 @@ from tinker_cookbook.utils import ml_log
 logger = logging.getLogger(__name__)
 
 
-@chz.chz
+@chz.chz(typecheck=True)
 class Config:
     base_url: str | None = None
     log_path: str = "/tmp/tinker-examples/rl-loop"

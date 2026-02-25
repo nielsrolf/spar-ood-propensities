@@ -28,7 +28,7 @@ from generation.io import load_examples, load_yaml_config
 logger = logging.getLogger(__name__)
 
 
-@chz.chz
+@chz.chz(typecheck=True)
 class Config:
     config_file: str | None = chz.field(
         default=None, doc="Path to YAML file with SFT params (CLI args override)"

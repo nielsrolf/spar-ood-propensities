@@ -110,7 +110,11 @@ def _plot(results: EvalResults, config: PlotConfig) -> None:
     ax.set_ylim(bottom=0)
     fig.tight_layout()
 
-    output_path = config.output or f"eval_results/{results.run_id}.{config.metric}.png"
+    output_path = (
+        config.output
+        if config.output is not None
+        else f"eval_results/{results.run_id}.{config.metric}.png"
+    )
     fig.savefig(output_path, dpi=config.dpi)
     logger.info("Saved plot to %s", output_path)
 

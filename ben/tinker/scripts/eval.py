@@ -36,9 +36,9 @@ logger = logging.getLogger(__name__)
 COHERENCE_PROPERTY = "coherence"
 
 
-@chz.chz
+@chz.chz(typecheck=True)
 class EvalConfig:
-    eval_file: str = chz.field(default="", doc="Path to .eval.yaml")
+    eval_file: str = chz.field(doc="Path to .eval.yaml")
     model_name: str = "meta-llama/Llama-3.1-8B"
     checkpoint_paths: list[str] = chz.field(
         default_factory=list, doc="LoRA checkpoint state paths to eval"
@@ -270,9 +270,6 @@ def main(config: EvalConfig) -> None:
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARN)
-
-    if not config.eval_file:
-        raise ValueError("eval_file is required")
 
     # Load eval file
     eval_data = load_eval_file(config.eval_file)
