@@ -17,6 +17,12 @@ def save_eval_file(eval_file: EvalFile, path: Path) -> None:
     save_yaml(eval_file.model_dump(), path)
 
 
+def load_eval_results(path: str) -> EvalResults:
+    """Load a .eval-results.yaml file."""
+    data = load_yaml(path)
+    return EvalResults.model_validate(data)
+
+
 def save_eval_results(results: EvalResults, output_dir: str) -> Path:
     """Save eval results to a YAML file."""
     path = Path(output_dir) / f"{results.run_id}.eval-results.yaml"

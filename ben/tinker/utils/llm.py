@@ -1,5 +1,6 @@
 """Async structured LLM calls with retries."""
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -9,7 +10,8 @@ from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
-_MAX_RETRIES = 3
+_MAX_RETRIES = 5
+_BACKOFF_BASE_SECONDS = 1.0
 
 
 def _strict_schema(schema_dict: dict) -> dict:
@@ -74,6 +76,9 @@ async def _call_structured(
     """
     last_error: ValueError | None = None
     for attempt in range(1, _MAX_RETRIES + 1):
+        if attempt > 1:
+            delay = _BACKOFF_BASE_SECONDS * 2 ** (attempt - 2)
+            await asyncio.sleep(delay)
         response = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
