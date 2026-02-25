@@ -25,6 +25,8 @@ uv run scripts/gen_eval.py 'properties=["power-seeking","sycophantic"]'
 uv run scripts/gen_eval.py 'properties=["shutdown-resistant"]' 'num_turns={"shutdown-resistant": 2}'
 uv run scripts/eval.py eval_file=evals/XXXX.eval.yaml 'checkpoint_paths=["path/to/state"]'
 uv run scripts/eval.py eval_file=evals/XXXX.eval.yaml instructions_file=datasets/XXXX.instructions.yaml examples_file=datasets/XXXX.examples.yaml
+uv run scripts/plot_eval.py results_file=eval_results/XXXX.eval-results.yaml output=plot.png
+uv run scripts/plot_eval.py results_file=eval_results/XXXX.eval-results.yaml metric=exhibits_rate
 ```
 
 ## Architecture
