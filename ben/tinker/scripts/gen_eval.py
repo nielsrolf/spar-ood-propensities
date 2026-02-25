@@ -47,7 +47,7 @@ _GENERATION_PARAM_FIELDS = (
 )
 
 
-@chz.chz
+@chz.chz(typecheck=True)
 class GenEvalConfig:
     properties: list[str] = chz.field(
         default_factory=list, doc="Properties to generate eval prompts for"

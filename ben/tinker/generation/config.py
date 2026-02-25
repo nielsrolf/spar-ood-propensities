@@ -3,7 +3,7 @@
 import chz
 
 
-@chz.chz
+@chz.chz(typecheck=True)
 class GenerateConfig:
     type: str = chz.field(
         default="",
