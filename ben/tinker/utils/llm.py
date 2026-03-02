@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 
 import openai
@@ -12,6 +13,21 @@ logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 5
 _BACKOFF_BASE_SECONDS = 1.0
+RATE_LIMIT_MAX_RETRIES = 10
+RATE_LIMIT_DEFAULT_WAIT = 60.0
+
+
+def parse_retry_after(error: openai.RateLimitError) -> float:
+    """Extract the retry-after delay from an OpenAI/OpenRouter 429 error message."""
+    message = str(error)
+    match = re.search(r"try again in (\d+(?:\.\d+)?)(m?s)", message)
+    if match:
+        value = float(match.group(1))
+        unit = match.group(2)
+        if unit == "ms":
+            return value / 1000
+        return value
+    return RATE_LIMIT_DEFAULT_WAIT
 
 
 def _strict_schema(schema_dict: dict) -> dict:
@@ -79,24 +95,42 @@ async def _call_structured(
         if attempt > 1:
             delay = _BACKOFF_BASE_SECONDS * 2 ** (attempt - 2)
             await asyncio.sleep(delay)
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": schema.__name__,
-                    "strict": True,
-                    "schema": _strict_schema(schema.model_json_schema()),
-                },
-            },
-            extra_body={
-                "provider": {
-                    "require_parameters": True,
-                },
-            },
-        )
+
+        # Retry rate limit errors within each structured-output attempt
+        response = None
+        for rate_attempt in range(1, RATE_LIMIT_MAX_RETRIES + 1):
+            try:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": schema.__name__,
+                            "strict": True,
+                            "schema": _strict_schema(schema.model_json_schema()),
+                        },
+                    },
+                    extra_body={
+                        "provider": {
+                            "require_parameters": True,
+                        },
+                    },
+                )
+                break
+            except openai.RateLimitError as e:
+                if rate_attempt == RATE_LIMIT_MAX_RETRIES:
+                    raise
+                wait = parse_retry_after(e)
+                logger.warning(
+                    "Rate limited (attempt %d/%d), retrying in %.1fs",
+                    rate_attempt,
+                    RATE_LIMIT_MAX_RETRIES,
+                    wait,
+                )
+                await asyncio.sleep(wait)
+        assert response is not None
         content = response.choices[0].message.content
         if not content:
             last_error = ValueError(
@@ -105,8 +139,18 @@ async def _call_structured(
             )
             logger.warning("Attempt %d/%d: %s", attempt, _MAX_RETRIES, last_error)
             continue
+        # Strip markdown code fences (e.g. ```json ... ```) that some models add
+        stripped = content.strip()
+        if stripped.startswith("```"):
+            first_newline = stripped.find("\n")
+            if first_newline != -1:
+                stripped = stripped[first_newline + 1 :]
+            if stripped.endswith("```"):
+                stripped = stripped[:-3]
+            stripped = stripped.strip()
+
         try:
-            data = json.loads(content)
+            data = json.loads(stripped)
         except json.JSONDecodeError as e:
             last_error = ValueError(
                 f"LLM returned invalid JSON for schema {schema.__name__}, "
