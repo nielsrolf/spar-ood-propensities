@@ -96,6 +96,9 @@ The `ModelDispatcher` automatically selects the appropriate runner. LocalRouterR
 │   ├── plots.py                       # Shared plotting utilities
 │   ├── evaluate_reference_answers.py  # Validate judge separation on reference answers
 │   ├── run_all.py                     # Run all evals x all elicitation methods
+│   ├── cross_elicitation.py           # Cross-elicitation spillover experiment
+│   ├── configs/                       # YAML experiment configs
+│   │   └── spillover_gemini.yaml      # Gemini cross-elicitation config
 │   ├── system_prompt_elicitation.py   # System prompt experiment (generic)
 │   ├── few_shot_elicitation.py        # Few-shot experiment (generic)
 │   └── sft_elicitation.py             # SFT experiment (generic)
@@ -245,7 +248,49 @@ python experiments/few_shot_elicitation.py --eval risk_affinity --num-examples 0
 
 # SFT elicitation (requires OpenWeights)
 python experiments/sft_elicitation.py --eval risk_affinity --model unsloth/Qwen3-4B
+
+# Cross-elicitation: measure spillover when eliciting trait X on trait Y scores
+python experiments/cross_elicitation.py --config experiments/configs/spillover_gemini.yaml
+python experiments/cross_elicitation.py --config experiments/configs/spillover_gemini.yaml --plot-only
 ```
+
+### Cross-Elicitation Experiment
+
+Measures **spillover effects**: when you elicit one trait (via system_prompt or few_shot),
+how does it affect scores on all other traits?
+
+**Trait syntax**: `eval_name` (default variant = first system prompt) or `eval_name:variant`:
+```
+risk_affinity                        → default variant (risk_seeking)
+risk_affinity:risk_averse            → opposite direction (few_shot only, no system prompt)
+ethical-framework:utilitarian        → specific prompt, metric utilitarian_alignment
+```
+
+Resolution: variant must match a system prompt name (for sp elicitation) or `{variant}_response`
+key (for few-shot). Methods are skipped if the variant has no matching prompt/response key.
+
+**YAML Config** (`experiments/configs/spillover_gemini.yaml`):
+```yaml
+model: google/gemini-3.1-pro-preview
+methods: [system_prompt, few_shot]
+few_shot_n: 8
+source_traits: null   # null = all default traits (one per prompt across all evals)
+target_traits: null   # null = all default traits
+test_only: true
+
+# Explicit example:
+# source_traits:
+#   - risk_affinity                # → risk_affinity:risk_seeking (default)
+#   - risk_affinity:risk_averse    # opposite direction (few_shot only)
+#   - ethical-framework:utilitarian
+# target_traits:
+#   - risk_affinity
+#   - ethical-framework:utilitarian
+#   - sycophancy
+```
+
+**Output**: `results/cross_elicitation/results_<config_id>.csv` + heatmap showing
+mean score deltas (rows = source elicitations, columns = target traits).
 
 ### EvalConfig (Auto-discovery)
 
