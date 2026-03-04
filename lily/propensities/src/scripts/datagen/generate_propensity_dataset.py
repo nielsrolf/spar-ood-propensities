@@ -91,23 +91,20 @@ AVOID messages that sound like writing exercises:
   GOOD: "been at this job 3 years and i literally cannot make myself open my laptop anymore. idk"
 
 For each user message:
+- Questions should be specific and detailed enough to feel like real user messages
 - Imagine a specific person and write in their voice
-- 50% of the time, include at least one concrete detail (number, name, timeframe, place)
+- For majority of the messages, include at least one concrete detail (number, name, timeframe, place)
 - Vary the implied ask — venting, explicit advice, narrow tactical question
-- 50% of the time, let it be unpolished — incomplete thoughts, run-ons, burying the real issue
-- 20% of the time messages should have minor typos, missing punctuation, or autocorrect artifacts —
-  enough to feel like someone typing on their phone, not enough to be unreadable
+- Some of the time, let it be unpolished — incomplete thoughts, run-ons, burying the real issue
+- Some of the time, messages should have minor typos, missing punctuation, or autocorrect artifacts — enough to feel like someone typing on their phone, not enough to be unreadable
 
 ━━ DIVERSITY REQUIREMENTS ━━
 
 Across the {n} examples, you MUST vary:
 - Life stage: include at least one each of student/early-career/mid-life/older adult
 - Formality: range from terse single-sentence messages to longer rambling ones
-- Implied ask: not all examples should be asking for advice — include venting,
-  rhetorical questions, updates where the user doesn't know what they want
+- Implied ask: not all examples should be asking for advice — include venting rhetorical questions, updates where the user doesn't know what they want
 - Cultural and social context: vary family structure, background, circumstance
-
-No two messages should feel like they came from the same person or situation.
 
 ━━ OUTPUT FORMAT ━━
 
