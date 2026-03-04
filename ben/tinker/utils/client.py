@@ -1,4 +1,4 @@
-"""OpenRouter client via the OpenAI SDK."""
+"""OpenRouter and OpenAI clients via the OpenAI SDK."""
 
 import os
 
@@ -29,3 +29,23 @@ def get_async_client() -> openai.AsyncOpenAI:
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
     )
+
+
+def get_openai_client() -> openai.OpenAI:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "OPENAI_API_KEY environment variable is not set. "
+            "Set it in .env or export it."
+        )
+    return openai.OpenAI(api_key=api_key)
+
+
+def get_async_openai_client() -> openai.AsyncOpenAI:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "OPENAI_API_KEY environment variable is not set. "
+            "Set it in .env or export it."
+        )
+    return openai.AsyncOpenAI(api_key=api_key)

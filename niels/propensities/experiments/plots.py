@@ -781,3 +781,117 @@ def few_shot_summary_table(
         pooled_std = ((baseline[metric].std()**2 + elicited[metric].std()**2) / 2)**0.5
         cohens_d = diff / pooled_std if pooled_std > 0 else 0
         print(f"  {metric}: {diff:+.2f} (Cohen's d = {cohens_d:.2f})")
+
+
+# --- Cross-elicitation heatmap ---
+
+
+def cross_elicitation_heatmap(
+    combined_df: pd.DataFrame,
+    trait_metrics: dict[str, str],
+    output_dir: str,
+    title: str = "Cross-Elicitation Spillover",
+):
+    """
+    Heatmap of mean score deltas when eliciting one trait and measuring another.
+
+    Rows: source elicitations (system_prompt and few_shot sources, grouped by method).
+    Columns: target traits (one column per trait, each with its primary metric).
+    Cell values: mean score delta (elicited - baseline).
+    Color: RdBu_r diverging, centered at 0.
+
+    Args:
+        combined_df: DataFrame with 'source_label', 'target_trait' (or 'target_eval') columns.
+        trait_metrics: Dict mapping trait_label -> metric column name.
+        output_dir: Where to save the plot.
+        title: Plot title.
+    """
+    if "source_label" not in combined_df.columns:
+        print("  Missing 'source_label' column, skipping cross-elicitation heatmap.")
+        return
+
+    # Determine target column: prefer target_trait, fall back to target_eval
+    target_col = "target_trait" if "target_trait" in combined_df.columns else "target_eval"
+
+    baseline = combined_df[combined_df["source_label"] == "none"]
+    sources = [s for s in combined_df["source_label"].unique() if s != "none"]
+    if not sources:
+        print("  No elicitation sources found, skipping heatmap.")
+        return
+
+    # Build column list from trait_metrics
+    # Preserve order from trait_metrics dict (which follows target_trait_list order)
+    columns = []  # list of (trait_label, metric, col_label)
+    for trait_label, metric in trait_metrics.items():
+        # Readable column label
+        col_label = trait_label.replace(":", "\n")
+        columns.append((trait_label, metric, col_label))
+
+    if not columns:
+        return
+
+    # Sort sources: system_prompt first, then few_shot
+    source_order = sorted(sources, key=lambda s: (0 if s.startswith("sp:") else 1, s))
+
+    # Build delta matrix
+    n_rows = len(source_order)
+    n_cols = len(columns)
+    delta_matrix = np.full((n_rows, n_cols), np.nan)
+
+    for i, source_label in enumerate(source_order):
+        source_df = combined_df[combined_df["source_label"] == source_label]
+        for j, (trait_label, metric, _) in enumerate(columns):
+            bl = baseline[baseline[target_col] == trait_label]
+            el = source_df[source_df[target_col] == trait_label]
+            if bl.empty or el.empty or metric not in bl.columns:
+                continue
+            delta_matrix[i, j] = el[metric].mean() - bl[metric].mean()
+
+    # Find method boundary for horizontal separator
+    sp_count = sum(1 for s in source_order if s.startswith("sp:"))
+
+    # Plot
+    fig_width = max(8, 1.6 * n_cols + 3)
+    fig_height = max(6, 0.45 * n_rows + 2)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+    # Color scale centered at 0
+    finite_vals = delta_matrix[np.isfinite(delta_matrix)]
+    if len(finite_vals) == 0:
+        print("  No finite delta values, skipping heatmap.")
+        plt.close()
+        return
+    vmax = max(abs(finite_vals.min()), abs(finite_vals.max()), 5.0)
+
+    im = ax.imshow(delta_matrix, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
+
+    # Axis labels
+    col_labels = [c[2] for c in columns]
+    ax.set_xticks(range(n_cols))
+    ax.set_xticklabels(col_labels, fontsize=8, rotation=45, ha="right")
+    ax.set_yticks(range(n_rows))
+    ax.set_yticklabels(source_order, fontsize=8)
+
+    # Annotate cells
+    for i in range(n_rows):
+        for j in range(n_cols):
+            val = delta_matrix[i, j]
+            if np.isfinite(val):
+                color = "white" if abs(val) > vmax * 0.55 else "black"
+                ax.text(j, i, f"{val:+.1f}", ha="center", va="center",
+                        fontsize=7, color=color)
+
+    # Draw separator between system_prompt and few_shot blocks
+    if 0 < sp_count < n_rows:
+        ax.axhline(y=sp_count - 0.5, color="black", linewidth=1.5)
+
+    plt.colorbar(im, ax=ax, label="Mean score delta", shrink=0.8)
+    ax.set_title(title, fontsize=13, pad=10)
+    ax.set_xlabel("Target trait (judged)", fontsize=10)
+    ax.set_ylabel("Source elicitation (applied)", fontsize=10)
+
+    plt.tight_layout()
+    path = os.path.join(output_dir, "cross_elicitation_heatmap.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    print(f"  Saved {path}")
+    plt.close()
