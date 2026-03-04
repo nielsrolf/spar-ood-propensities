@@ -17,23 +17,18 @@ from tinker_cookbook import model_info, renderers
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 
 from evaluation.io import load_eval_file, save_eval_results
-from generation.io import load_examples, load_instructions
-from evaluation.prompts import eval_coherence_judge_prompt, eval_judge_prompt
-from evaluation.schemas import (
-    DetailRecord,
-    EvalJudgeResponse,
-    EvalResults,
-    JudgmentRecord,
-    ModelSummary,
-    PropertyScore,
+from evaluation.judge import (
+    COHERENCE_PROPERTY,
+    aggregate_summary,
+    judge_all,
+    print_summary_table,
 )
+from evaluation.schemas import EvalResults
+from generation.io import load_examples, load_instructions
 from utils.client import get_async_client
 from utils.io import make_run_id
-from utils.llm import _call_structured
 
 logger = logging.getLogger(__name__)
-
-COHERENCE_PROPERTY = "coherence"
 
 
 @chz.chz(typecheck=True)
@@ -46,7 +41,7 @@ class EvalConfig:
     eval_base: bool = chz.field(
         default=True, doc="Also eval the base model (untrained LoRA)"
     )
-    judge_model: str = "anthropic/claude-sonnet-4-6"
+    judge_model: str = "google/gemini-3-flash-preview"
     max_tokens: int = 4096
     max_examples: int = chz.field(default=0, doc="0 = all prompts")
     examples_file: str | None = chz.field(
@@ -143,128 +138,6 @@ def _sample_responses(
     return results
 
 
-async def _judge_all(
-    model_responses: list[tuple[str, list[list[str]]]],
-    prompts: list[list[str]],
-    properties: list[str],
-    judge_model: str,
-) -> list[DetailRecord]:
-    """Run LLM judge on all (model, prompt, property) triples in parallel."""
-    client = get_async_client()
-
-    # Build all judgment tasks upfront so they can all run concurrently.
-    # Each task returns (model_name, prompt_idx, JudgmentRecord).
-    async def judge_single(
-        model_name: str,
-        prompt_idx: int,
-        prompt_turns: list[str],
-        response_turns: list[str],
-        prop: str,
-    ) -> tuple[str, int, JudgmentRecord]:
-        if prop == COHERENCE_PROPERTY:
-            judge_prompt = eval_coherence_judge_prompt(prompt_turns, response_turns)
-        else:
-            judge_prompt = eval_judge_prompt(prop, prompt_turns, response_turns)
-        result = await _call_structured(
-            client, judge_model, judge_prompt, EvalJudgeResponse, temperature=0.0
-        )
-        assert isinstance(result, EvalJudgeResponse)
-        record = JudgmentRecord(
-            property=prop,
-            score=result.score,
-            exhibits_property=result.exhibits_property,
-            reasoning=result.reasoning,
-        )
-        return (model_name, prompt_idx, record)
-
-    tasks = [
-        judge_single(model_name, prompt_idx, prompt_turns, response_turns, prop)
-        for model_name, responses in model_responses
-        for prompt_idx, (prompt_turns, response_turns) in enumerate(
-            zip(prompts, responses, strict=True)
-        )
-        for prop in properties
-    ]
-
-    # Run all judge calls concurrently, tracking progress
-    results: list[tuple[str, int, JudgmentRecord]] = []
-    for future in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Judging"):
-        results.append(await future)
-
-    # Group judgments by (model, prompt_idx) into DetailRecords
-    grouped: dict[tuple[str, int], list[JudgmentRecord]] = {}
-    for model_name, prompt_idx, judgment in results:
-        key = (model_name, prompt_idx)
-        grouped.setdefault(key, []).append(judgment)
-
-    # Preserve original ordering: models in input order, prompts in input order
-    details: list[DetailRecord] = []
-    for model_name, responses in model_responses:
-        for prompt_idx, (prompt_turns, response_turns) in enumerate(
-            zip(prompts, responses, strict=True)
-        ):
-            key = (model_name, prompt_idx)
-            details.append(
-                DetailRecord(
-                    model=model_name,
-                    prompt=prompt_turns,
-                    responses=response_turns,
-                    judgments=grouped[key],
-                )
-            )
-
-    return details
-
-
-def _aggregate_summary(
-    details: list[DetailRecord],
-    model_names: list[str],
-    properties: list[str],
-) -> list[ModelSummary]:
-    """Compute per-model, per-property mean score and exhibits rate."""
-    summaries: list[ModelSummary] = []
-    for model_name in model_names:
-        model_details = [d for d in details if d.model == model_name]
-        scores: dict[str, PropertyScore] = {}
-        for prop in properties:
-            prop_judgments = [
-                j for d in model_details for j in d.judgments if j.property == prop
-            ]
-            if not prop_judgments:
-                scores[prop] = PropertyScore(mean_score=0.0, exhibits_rate=0.0)
-                continue
-            total_score = sum(j.score for j in prop_judgments)
-            exhibits_count = sum(1 for j in prop_judgments if j.exhibits_property)
-            n = len(prop_judgments)
-            scores[prop] = PropertyScore(
-                mean_score=round(total_score / n, 2),
-                exhibits_rate=round(exhibits_count / n, 2),
-            )
-        summaries.append(ModelSummary(model=model_name, scores=scores))
-    return summaries
-
-
-def _print_summary_table(summaries: list[ModelSummary], properties: list[str]) -> None:
-    """Print a formatted summary table to stdout."""
-    model_names = [s.model for s in summaries]
-    col_width = max(10, *(len(m) for m in model_names))
-    prop_width = max(10, *(len(p) for p in properties))
-
-    header = f"{'Property':<{prop_width}}"
-    for s in summaries:
-        header += f" | {s.model:<{col_width}}"
-    print(header)
-    print("-" * len(header))
-
-    for prop in properties:
-        row = f"{prop:<{prop_width}}"
-        for s in summaries:
-            score = s.scores.get(prop)
-            val = f"{score.mean_score:.1f}" if score else "N/A"
-            row += f" | {val:<{col_width}}"
-        print(row)
-
-
 def main(config: EvalConfig) -> None:
     """Run the full evaluation pipeline."""
     load_dotenv()
@@ -348,12 +221,15 @@ def main(config: EvalConfig) -> None:
 
     # Judge all responses (async — uses OpenRouter)
     logger.info("Running LLM judge (%s) on all responses...", config.judge_model)
+    judge_client = get_async_client()
     details = asyncio.run(
-        _judge_all(model_responses, prompts, properties, config.judge_model)
+        judge_all(
+            model_responses, prompts, properties, config.judge_model, judge_client
+        )
     )
 
     # Aggregate
-    summary = _aggregate_summary(details, model_names, properties)
+    summary = aggregate_summary(details, model_names, properties)
 
     # Save results
     run_id = make_run_id()
@@ -368,7 +244,7 @@ def main(config: EvalConfig) -> None:
 
     # Print summary
     print()
-    _print_summary_table(summary, properties)
+    print_summary_table(summary, properties)
 
 
 if __name__ == "__main__":
