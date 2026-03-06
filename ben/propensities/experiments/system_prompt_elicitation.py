@@ -8,6 +8,7 @@ Usage:
     python experiments/system_prompt_elicitation.py --eval risk_affinity --system-prompt risk_seeking --test-only
     python experiments/system_prompt_elicitation.py --eval ethical-framework --system-prompt utilitarian
 """
+
 import asyncio
 import argparse
 import sys
@@ -31,6 +32,7 @@ def apply_reasoning_effort(eval_obj: FreeformEval, reasoning_effort: str | None)
     if not reasoning_effort:
         return
     from localrouter import ReasoningConfig
+
     reasoning = ReasoningConfig(effort=reasoning_effort)
     for q in eval_obj.questions:
         q.inference_kwargs["reasoning"] = reasoning
@@ -39,10 +41,10 @@ def apply_reasoning_effort(eval_obj: FreeformEval, reasoning_effort: str | None)
 async def run_system_prompt_experiment(
     eval_name: str,
     model: str,
-    system_prompt_name: str = None,
+    system_prompt_name: str | None = None,
     test_only: bool = False,
     n_questions: int | None = None,
-    runner: str = None,
+    runner: str | None = None,
     reasoning_effort: str | None = None,
 ):
     """
@@ -79,11 +81,16 @@ async def run_system_prompt_experiment(
 
     # Load eval
     base_eval = FreeformEval.from_yaml(
-        path=config.yaml_path, judge_type="sampling", n_samples=5, runner=runner,
+        path=config.yaml_path,
+        judge_type="sampling",
+        n_samples=5,
+        runner=runner,
     )
 
     if test_only:
-        base_eval.questions = [q for q in base_eval.questions if q.meta.get("split") == "test"]
+        base_eval.questions = [
+            q for q in base_eval.questions if q.meta.get("split") == "test"
+        ]
         print(f"Using test split only: {len(base_eval.questions)} questions")
 
     if n_questions is not None:
@@ -92,7 +99,9 @@ async def run_system_prompt_experiment(
 
     apply_reasoning_effort(base_eval, reasoning_effort)
 
-    print(f"Running experiment with {len(base_eval.questions)} questions on model: {model}")
+    print(
+        f"Running experiment with {len(base_eval.questions)} questions on model: {model}"
+    )
 
     # Create elicited version
     elicited_eval = base_eval.with_system_prompt(prompt_text)
@@ -123,15 +132,27 @@ async def run_system_prompt_experiment(
     # Plots
     title_suffix = f"{eval_name} - {prompt_name}"
     comparison_bar_plot(
-        combined_df, metrics, "baseline", "system_prompt", output_dir,
+        combined_df,
+        metrics,
+        "baseline",
+        "system_prompt",
+        output_dir,
         title=f"Baseline vs System Prompt ({title_suffix})",
     )
     paired_scatter_plot(
-        combined_df, metrics, "baseline", "system_prompt", output_dir,
+        combined_df,
+        metrics,
+        "baseline",
+        "system_prompt",
+        output_dir,
         title=f"Per-Question: Baseline vs Elicited ({title_suffix})",
     )
     score_diff_histogram(
-        combined_df, metrics, "baseline", "system_prompt", output_dir,
+        combined_df,
+        metrics,
+        "baseline",
+        "system_prompt",
+        output_dir,
         title=f"Distribution of Score Changes ({title_suffix})",
     )
 
@@ -145,22 +166,44 @@ async def run_system_prompt_experiment(
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Run system prompt elicitation experiment")
-    parser.add_argument("--eval", type=str, required=True,
-                        help=f"Eval to run. Available: {EvalConfig.list_available()}")
-    parser.add_argument("--model", type=str, default="gpt-4o-mini",
-                        help="Model to evaluate")
-    parser.add_argument("--system-prompt", type=str, default=None,
-                        help="System prompt name (without .txt). Defaults to first available.")
-    parser.add_argument("--test-only", action="store_true",
-                        help="Only use test split questions")
-    parser.add_argument("--n-questions", type=int, default=None,
-                        help="Limit number of questions")
-    parser.add_argument("--runner", type=str, default=None, choices=[None, "openweights"],
-                        help="Runner to use for inference")
-    parser.add_argument("--reasoning-effort", type=str, default=None,
-                        choices=["minimal", "low", "medium", "high"],
-                        help="Reasoning effort level (passed to OpenRouter/model)")
+    parser = argparse.ArgumentParser(
+        description="Run system prompt elicitation experiment"
+    )
+    parser.add_argument(
+        "--eval",
+        type=str,
+        required=True,
+        help=f"Eval to run. Available: {EvalConfig.list_available()}",
+    )
+    parser.add_argument(
+        "--model", type=str, default="gpt-4o-mini", help="Model to evaluate"
+    )
+    parser.add_argument(
+        "--system-prompt",
+        type=str,
+        default=None,
+        help="System prompt name (without .txt). Defaults to first available.",
+    )
+    parser.add_argument(
+        "--test-only", action="store_true", help="Only use test split questions"
+    )
+    parser.add_argument(
+        "--n-questions", type=int, default=None, help="Limit number of questions"
+    )
+    parser.add_argument(
+        "--runner",
+        type=str,
+        default=None,
+        choices=[None, "openweights"],
+        help="Runner to use for inference",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        type=str,
+        default=None,
+        choices=["minimal", "low", "medium", "high"],
+        help="Reasoning effort level (passed to OpenRouter/model)",
+    )
     args = parser.parse_args()
 
     await run_system_prompt_experiment(

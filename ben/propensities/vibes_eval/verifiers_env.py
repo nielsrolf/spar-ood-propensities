@@ -18,16 +18,12 @@ Usage:
     vf_env = env.load_environment(num_examples=32)
 """
 
-import asyncio
-import random
-from pathlib import Path
-from typing import Dict, List, Optional, Union, Callable
+from typing import List, Optional, Callable
 
 import verifiers as vf
 from datasets import Dataset
 
 from .freeform import FreeformQuestion
-from .judge import free_form_judge_0_100
 
 
 class FreeformVerifiersEnv:
@@ -104,7 +100,8 @@ class FreeformVerifiersEnv:
         # Filter by split if specified
         if split:
             config = {
-                k: v for k, v in config.items()
+                k: v
+                for k, v in config.items()
                 if v.get("meta", {}).get("split") == split
             }
 
@@ -117,8 +114,8 @@ class FreeformVerifiersEnv:
         questions = []
         for q_config in config.values():
             q_config = q_config.copy()
-            q_config['judge_type'] = judge_type
-            q_config['judge_n_samples'] = judge_n_samples
+            q_config["judge_type"] = judge_type
+            q_config["judge_n_samples"] = judge_n_samples
             questions.append(FreeformQuestion(**q_config))
 
         return cls(
@@ -147,16 +144,18 @@ class FreeformVerifiersEnv:
             paraphrase_idx = (i // len(self.questions)) % len(q.paraphrases)
             paraphrase = q.paraphrases[paraphrase_idx]
 
-            rows.append({
-                "question": paraphrase,
-                "answer": "",  # No ground truth for freeform questions
-                "info": {
-                    "question_id": q.id,
-                    "paraphrase_idx": paraphrase_idx,
-                    "meta": q.meta,
-                },
-                "task": q.id,
-            })
+            rows.append(
+                {
+                    "question": paraphrase,
+                    "answer": "",  # No ground truth for freeform questions
+                    "info": {
+                        "question_id": q.id,
+                        "paraphrase_idx": paraphrase_idx,
+                        "meta": q.meta,
+                    },
+                    "task": q.id,
+                }
+            )
             question_idx += 1
 
         return Dataset.from_list(rows)
@@ -179,6 +178,7 @@ class FreeformVerifiersEnv:
         # Import here to avoid circular dependency
         try:
             from openweights import OpenWeights
+
             ow = OpenWeights()
             has_ow = True
         except Exception:
@@ -235,16 +235,18 @@ class FreeformVerifiersEnv:
             # Log to OpenWeights if available
             if has_ow:
                 try:
-                    ow.run.log({
-                        "completion": completion,
-                        "question": question_text,
-                        "response": response_text,
-                        "judge_score": score,
-                        "reward": reward,
-                        "reward_metric": reward_metric,
-                        "question_id": question_id,
-                        "info": info,
-                    })
+                    ow.run.log(
+                        {
+                            "completion": completion,
+                            "question": question_text,
+                            "response": response_text,
+                            "judge_score": score,
+                            "reward": reward,
+                            "reward_metric": reward_metric,
+                            "question_id": question_id,
+                            "info": info,
+                        }
+                    )
                 except Exception:
                     pass  # Don't fail if logging fails
 
@@ -301,6 +303,7 @@ def create_env_module(
     Returns:
         The path to the generated module
     """
+
     # Escape strings for Python code
     def escape(s):
         if s is None:

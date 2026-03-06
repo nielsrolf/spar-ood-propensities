@@ -8,6 +8,7 @@ Usage:
     python experiments/sft_elicitation.py --eval risk_affinity
     python experiments/sft_elicitation.py --eval power-seeking --model unsloth/Qwen3-4B
 """
+
 import asyncio
 import argparse
 import sys
@@ -24,7 +25,6 @@ from experiments.plots import (
     score_diff_histogram,
     print_effect_sizes,
 )
-import pandas as pd
 
 
 ow = OpenWeights()
@@ -39,13 +39,15 @@ async def wait_for_completion(job):
         await asyncio.sleep(30)
 
 
-async def train(model: str, config: EvalConfig, target_key: str = None):
+async def train(model: str, config: EvalConfig, target_key: str | None = None):
     """Train an SFT model using training data from the eval."""
     training_buf = config.get_sft_training_file(target_key)
     training_file = ow.files.create(training_buf, purpose="conversations")
 
+    # pyrefly: ignore [missing-attribute]
     job = ow.fine_tuning.create(
         model=model,
+        # pyrefly: ignore [bad-index]
         training_file=training_file["id"],
         loss="sft",
         epochs=3,
@@ -53,12 +55,14 @@ async def train(model: str, config: EvalConfig, target_key: str = None):
         r=32,
         max_seq_length=2048,
     )
-    print(f"\nJob submitted!")
+    print("\nJob submitted!")
     print(f"Job ID: {job.id}")
     print(f"Status: {job.status}")
-    print(f"Model will be pushed to: {job.params.get('validated_params', {}).get('finetuned_model_id', 'N/A')}")
+    print(
+        f"Model will be pushed to: {job.params.get('validated_params', {}).get('finetuned_model_id', 'N/A')}"
+    )
     await wait_for_completion(job)
-    return job.params['validated_params']['finetuned_model_id']
+    return job.params["validated_params"]["finetuned_model_id"]
 
 
 def apply_reasoning_effort(eval_obj, reasoning_effort: str | None):
@@ -66,6 +70,7 @@ def apply_reasoning_effort(eval_obj, reasoning_effort: str | None):
     if not reasoning_effort:
         return
     from localrouter import ReasoningConfig
+
     reasoning = ReasoningConfig(effort=reasoning_effort)
     for q in eval_obj.questions:
         q.inference_kwargs["reasoning"] = reasoning
@@ -74,7 +79,7 @@ def apply_reasoning_effort(eval_obj, reasoning_effort: str | None):
 async def run_sft_elicitation_experiment(
     eval_name: str,
     model: str = "unsloth/Qwen3-4B",
-    target_key: str = None,
+    target_key: str | None = None,
     n_questions: int | None = None,
     n_samples: int = 3,
     reasoning_effort: str | None = None,
@@ -106,11 +111,15 @@ async def run_sft_elicitation_experiment(
 
     # Load eval
     base_eval = FreeformEval.from_yaml(
-        path=config.yaml_path, judge_type="sampling", n_samples=n_samples,
+        path=config.yaml_path,
+        judge_type="sampling",
+        n_samples=n_samples,
         runner="openweights",
     )
 
-    base_eval.questions = [q for q in base_eval.questions if q.meta.get("split") == "test"]
+    base_eval.questions = [
+        q for q in base_eval.questions if q.meta.get("split") == "test"
+    ]
     print(f"Using test split only: {len(base_eval.questions)} questions")
 
     if n_questions is not None:
@@ -143,15 +152,27 @@ async def run_sft_elicitation_experiment(
     # Plots
     title_suffix = f"{eval_name} - SFT on {target_key}"
     comparison_bar_plot(
-        combined_df, metrics, "baseline", "sft_elicited", output_dir,
+        combined_df,
+        metrics,
+        "baseline",
+        "sft_elicited",
+        output_dir,
         title=f"Baseline vs SFT Elicitation ({title_suffix})",
     )
     paired_scatter_plot(
-        combined_df, metrics, "baseline", "sft_elicited", output_dir,
+        combined_df,
+        metrics,
+        "baseline",
+        "sft_elicited",
+        output_dir,
         title=f"Per-Question: Baseline vs SFT ({title_suffix})",
     )
     score_diff_histogram(
-        combined_df, metrics, "baseline", "sft_elicited", output_dir,
+        combined_df,
+        metrics,
+        "baseline",
+        "sft_elicited",
+        output_dir,
         title=f"Distribution of Score Changes ({title_suffix})",
     )
 
@@ -166,19 +187,37 @@ async def run_sft_elicitation_experiment(
 
 async def main():
     parser = argparse.ArgumentParser(description="Run SFT elicitation experiment")
-    parser.add_argument("--eval", type=str, required=True,
-                        help=f"Eval to run. Available: {EvalConfig.list_available()}")
-    parser.add_argument("--model", type=str, default="unsloth/Qwen3-4B",
-                        help="Base model to fine-tune")
-    parser.add_argument("--target-key", type=str, default=None,
-                        help="Which expected_* key to train on (e.g., 'expected_risk_seeking')")
-    parser.add_argument("--n-questions", type=int, default=None,
-                        help="Limit number of questions")
-    parser.add_argument("--n-samples", type=int, default=3,
-                        help="Number of samples per question for judging")
-    parser.add_argument("--reasoning-effort", type=str, default=None,
-                        choices=["minimal", "low", "medium", "high"],
-                        help="Reasoning effort level (passed to OpenRouter/model)")
+    parser.add_argument(
+        "--eval",
+        type=str,
+        required=True,
+        help=f"Eval to run. Available: {EvalConfig.list_available()}",
+    )
+    parser.add_argument(
+        "--model", type=str, default="unsloth/Qwen3-4B", help="Base model to fine-tune"
+    )
+    parser.add_argument(
+        "--target-key",
+        type=str,
+        default=None,
+        help="Which expected_* key to train on (e.g., 'expected_risk_seeking')",
+    )
+    parser.add_argument(
+        "--n-questions", type=int, default=None, help="Limit number of questions"
+    )
+    parser.add_argument(
+        "--n-samples",
+        type=int,
+        default=3,
+        help="Number of samples per question for judging",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        type=str,
+        default=None,
+        choices=["minimal", "low", "medium", "high"],
+        help="Reasoning effort level (passed to OpenRouter/model)",
+    )
     args = parser.parse_args()
 
     await run_sft_elicitation_experiment(

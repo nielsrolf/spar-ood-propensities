@@ -3,6 +3,7 @@ Shared plotting utilities for elicitation experiments.
 
 All functions take a DataFrame, list of metrics, and output directory.
 """
+
 import os
 import numpy as np
 import pandas as pd
@@ -34,8 +35,12 @@ def comparison_bar_plot(
 
         colors = ["steelblue", "coral"]
         bars = axes[i].bar(
-            means.index, means.values, yerr=stds.values,
-            color=colors, capsize=5, alpha=0.8,
+            means.index,
+            means.values,
+            yerr=stds.values,
+            color=colors,
+            capsize=5,
+            alpha=0.8,
         )
         axes[i].set_ylabel(metric.replace("_", " ").title())
         axes[i].set_ylim(0, 100)
@@ -43,8 +48,12 @@ def comparison_bar_plot(
 
         for bar, mean in zip(bars, means.values):
             axes[i].text(
-                bar.get_x() + bar.get_width() / 2, bar.get_height() + 2,
-                f'{mean:.1f}', ha='center', va='bottom', fontsize=10,
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 2,
+                f"{mean:.1f}",
+                ha="center",
+                va="bottom",
+                fontsize=10,
             )
 
     plt.suptitle(title, fontsize=14)
@@ -81,17 +90,17 @@ def paired_scatter_plot(
         e_vals = elicited_means.loc[common_questions]
 
         axes[i].scatter(b_vals, e_vals, alpha=0.5, s=30)
-        axes[i].plot([0, 100], [0, 100], 'k--', alpha=0.3, label='y=x')
+        axes[i].plot([0, 100], [0, 100], "k--", alpha=0.3, label="y=x")
         axes[i].set_xlabel(baseline_label.replace("_", " ").title())
         axes[i].set_ylabel(elicited_label.replace("_", " ").title())
         axes[i].set_xlim(0, 100)
         axes[i].set_ylim(0, 100)
         axes[i].set_title(metric.replace("_", " ").title())
-        axes[i].set_aspect('equal')
+        axes[i].set_aspect("equal")
 
         if len(b_vals) > 1:
             corr = b_vals.corr(e_vals)
-            axes[i].text(5, 90, f'r={corr:.2f}', fontsize=10)
+            axes[i].text(5, 90, f"r={corr:.2f}", fontsize=10)
 
     plt.suptitle(title, fontsize=14)
     plt.tight_layout()
@@ -126,10 +135,13 @@ def score_diff_histogram(
         diff = e_means.loc[common_questions] - b_means.loc[common_questions]
 
         axes[i].hist(diff, bins=20, alpha=0.7, color="coral", edgecolor="black")
-        axes[i].axvline(x=0, color='black', linestyle='--', alpha=0.5)
+        axes[i].axvline(x=0, color="black", linestyle="--", alpha=0.5)
         axes[i].axvline(
-            x=diff.mean(), color='red', linestyle='-', linewidth=2,
-            label=f'Mean: {diff.mean():.1f}',
+            x=diff.mean(),
+            color="red",
+            linestyle="-",
+            linewidth=2,
+            label=f"Mean: {diff.mean():.1f}",
         )
         axes[i].set_xlabel("Score Difference (Elicited - Baseline)")
         axes[i].set_ylabel("Count")
@@ -162,7 +174,9 @@ def print_effect_sizes(
 
     for metric in metrics:
         diff = elicited[metric].mean() - baseline[metric].mean()
-        pooled_std = ((baseline[metric].std()**2 + elicited[metric].std()**2) / 2)**0.5
+        pooled_std = (
+            (baseline[metric].std() ** 2 + elicited[metric].std() ** 2) / 2
+        ) ** 0.5
         cohens_d = diff / pooled_std if pooled_std > 0 else 0
         print(f"  {metric}: {diff:+.2f} (Cohen's d = {cohens_d:.2f})")
 
@@ -204,15 +218,19 @@ def elicitation_heatmap(
                 if metric not in baseline.columns:
                     continue
                 diff = elicited[metric].mean() - baseline[metric].mean()
-                pooled_std = ((baseline[metric].std()**2 + elicited[metric].std()**2) / 2)**0.5
+                pooled_std = (
+                    (baseline[metric].std() ** 2 + elicited[metric].std() ** 2) / 2
+                ) ** 0.5
                 cohens_d = diff / pooled_std if pooled_std > 0 else 0
-                rows.append({
-                    "eval": eval_name,
-                    "method": method,
-                    "metric": metric,
-                    "cohens_d": cohens_d,
-                    "diff": diff,
-                })
+                rows.append(
+                    {
+                        "eval": eval_name,
+                        "method": method,
+                        "metric": metric,
+                        "cohens_d": cohens_d,
+                        "diff": diff,
+                    }
+                )
 
     if not rows:
         print("  No data for heatmap.")
@@ -249,9 +267,16 @@ def elicitation_heatmap(
             d_val = pivot_d.iloc[i, j]
             diff_val = pivot_diff.iloc[i, j]
             if pd.notna(d_val):
-                ax.text(j, i, f"{diff_val:+.1f}\nd={d_val:.2f}",
-                        ha="center", va="center", fontsize=8,
-                        color="white" if abs(d_val) > vmax * 0.6 else "black")
+                ax.text(
+                    j,
+                    i,
+                    f"{diff_val:+.1f}\nd={d_val:.2f}",
+                    ha="center",
+                    va="center",
+                    fontsize=8,
+                    # pyrefly: ignore [bad-argument-type, unsupported-operation]
+                    color="white" if abs(d_val) > vmax * 0.6 else "black",
+                )
 
     plt.colorbar(im, ax=ax, label="Cohen's d", shrink=0.8)
     ax.set_title(title, fontsize=13)
@@ -264,17 +289,31 @@ def elicitation_heatmap(
     # Also save a detailed heatmap with all metrics
     if len(effect_df) > len(summary):
         # Build label = "eval / metric"
-        effect_df["label"] = effect_df["eval"] + " / " + effect_df["metric"].str.replace("_", " ")
-        pivot_all_d = effect_df.pivot(index="label", columns="method", values="cohens_d")
+        effect_df["label"] = (
+            # pyrefly: ignore [unsupported-operation]
+            effect_df["eval"] + " / " + effect_df["metric"].str.replace("_", " ")
+        )
+        pivot_all_d = effect_df.pivot(
+            index="label", columns="method", values="cohens_d"
+        )
         pivot_all_diff = effect_df.pivot(index="label", columns="method", values="diff")
 
-        fig, ax = plt.subplots(figsize=(3 + 2 * len(methods), 1 + 0.45 * len(pivot_all_d)))
-        vmax = max(abs(pivot_all_d.values[~np.isnan(pivot_all_d.values)].min()),
-                    abs(pivot_all_d.values[~np.isnan(pivot_all_d.values)].max()), 1.0)
-        im = ax.imshow(pivot_all_d.values, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
+        fig, ax = plt.subplots(
+            figsize=(3 + 2 * len(methods), 1 + 0.45 * len(pivot_all_d))
+        )
+        vmax = max(
+            abs(pivot_all_d.values[~np.isnan(pivot_all_d.values)].min()),
+            abs(pivot_all_d.values[~np.isnan(pivot_all_d.values)].max()),
+            1.0,
+        )
+        im = ax.imshow(
+            pivot_all_d.values, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto"
+        )
 
         ax.set_xticks(range(len(pivot_all_d.columns)))
-        ax.set_xticklabels([m.replace("_", " ") for m in pivot_all_d.columns], fontsize=11)
+        ax.set_xticklabels(
+            [m.replace("_", " ") for m in pivot_all_d.columns], fontsize=11
+        )
         ax.set_yticks(range(len(pivot_all_d.index)))
         ax.set_yticklabels(pivot_all_d.index, fontsize=9)
 
@@ -283,9 +322,16 @@ def elicitation_heatmap(
                 d_val = pivot_all_d.iloc[i, j]
                 diff_val = pivot_all_diff.iloc[i, j]
                 if pd.notna(d_val):
-                    ax.text(j, i, f"{diff_val:+.1f}\nd={d_val:.2f}",
-                            ha="center", va="center", fontsize=7,
-                            color="white" if abs(d_val) > vmax * 0.6 else "black")
+                    ax.text(
+                        j,
+                        i,
+                        f"{diff_val:+.1f}\nd={d_val:.2f}",
+                        ha="center",
+                        va="center",
+                        fontsize=7,
+                        # pyrefly: ignore [bad-argument-type, unsupported-operation]
+                        color="white" if abs(d_val) > vmax * 0.6 else "black",
+                    )
 
         plt.colorbar(im, ax=ax, label="Cohen's d", shrink=0.8)
         ax.set_title(f"{title} (All Metrics)", fontsize=13)
@@ -324,9 +370,7 @@ def multi_config_heatmap(
         return
 
     # Collect all methods across configs
-    all_methods = sorted(
-        m for m in combined_df["elicitation"].unique() if m != "none"
-    )
+    all_methods = sorted(m for m in combined_df["elicitation"].unique() if m != "none")
     if not all_methods:
         return
 
@@ -350,14 +394,28 @@ def multi_config_heatmap(
             for method in all_methods:
                 elicited = eval_df[eval_df["elicitation"] == method]
                 if elicited.empty:
-                    rows.append({"eval": eval_name, "method": method,
-                                 "cohens_d": np.nan, "diff": np.nan})
+                    rows.append(
+                        {
+                            "eval": eval_name,
+                            "method": method,
+                            "cohens_d": np.nan,
+                            "diff": np.nan,
+                        }
+                    )
                     continue
                 diff = elicited[metric].mean() - baseline[metric].mean()
-                pooled_std = ((baseline[metric].std()**2 + elicited[metric].std()**2) / 2)**0.5
+                pooled_std = (
+                    (baseline[metric].std() ** 2 + elicited[metric].std() ** 2) / 2
+                ) ** 0.5
                 cohens_d = diff / pooled_std if pooled_std > 0 else 0
-                rows.append({"eval": eval_name, "method": method,
-                             "cohens_d": cohens_d, "diff": diff})
+                rows.append(
+                    {
+                        "eval": eval_name,
+                        "method": method,
+                        "cohens_d": cohens_d,
+                        "diff": diff,
+                    }
+                )
         if rows:
             rdf = pd.DataFrame(rows)
             pivots[cfg] = rdf.pivot(index="eval", columns="method", values="cohens_d")
@@ -375,25 +433,36 @@ def multi_config_heatmap(
 
     # Ensure all pivots share the same index/columns
     shared_evals = sorted(set.intersection(*[set(p.index) for p in pivots.values()]))
-    shared_methods = sorted(set.intersection(*[set(p.columns) for p in pivots.values()]))
+    shared_methods = sorted(
+        set.intersection(*[set(p.columns) for p in pivots.values()])
+    )
     if not shared_evals or not shared_methods:
         print("  No overlapping evals/methods across configs, skipping comparison.")
         return
 
     n_configs = len(configs)
-    fig, axes = plt.subplots(1, n_configs,
-                              figsize=(3 + 2.5 * len(shared_methods) * n_configs,
-                                       1 + 0.6 * len(shared_evals)),
-                              sharey=True)
+    fig, axes = plt.subplots(
+        1,
+        n_configs,
+        figsize=(
+            3 + 2.5 * len(shared_methods) * n_configs,
+            1 + 0.6 * len(shared_evals),
+        ),
+        sharey=True,
+    )
     if n_configs == 1:
         axes = [axes]
 
     for idx, cfg in enumerate(configs):
         ax = axes[idx]
         pivot_d = pivots[cfg].reindex(index=shared_evals, columns=shared_methods)
-        pivot_diff = pivots_diff[cfg].reindex(index=shared_evals, columns=shared_methods)
+        pivot_diff = pivots_diff[cfg].reindex(
+            index=shared_evals, columns=shared_methods
+        )
 
-        im = ax.imshow(pivot_d.values, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
+        im = ax.imshow(
+            pivot_d.values, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto"
+        )
         ax.set_xticks(range(len(shared_methods)))
         ax.set_xticklabels([m.replace("_", " ") for m in shared_methods], fontsize=10)
         ax.set_title(cfg, fontsize=11)
@@ -408,10 +477,17 @@ def multi_config_heatmap(
                 d_val = pivot_d.iloc[i, j]
                 diff_val = pivot_diff.iloc[i, j]
                 if pd.notna(d_val):
-                    ax.text(j, i, f"{diff_val:+.1f}\nd={d_val:.2f}",
-                            ha="center", va="center", fontsize=7,
-                            color="white" if abs(d_val) > vmax * 0.6 else "black")
+                    ax.text(
+                        j,
+                        i,
+                        f"{diff_val:+.1f}\nd={d_val:.2f}",
+                        ha="center",
+                        va="center",
+                        fontsize=7,
+                        color="white" if abs(d_val) > vmax * 0.6 else "black",
+                    )
 
+    # pyrefly: ignore [unbound-name]
     fig.colorbar(im, ax=axes, label="Cohen's d", shrink=0.8)
     fig.suptitle(title, fontsize=13)
     plt.tight_layout()
@@ -431,7 +507,7 @@ def _match_variant(variants: list[str], metric: str, family_base: str) -> str:
     for v in variants:
         if v == family_base:
             continue
-        suffix = v[len(family_base) + 1:]  # e.g. "utilitarian"
+        suffix = v[len(family_base) + 1 :]  # e.g. "utilitarian"
         if suffix and suffix in metric:
             return v
     # No specific match — fall back to base label or first variant
@@ -459,18 +535,20 @@ def radar_plot(
     """
     # Build axes: one per eval (first metric), except for evals with multiple
     # elicitation targets (multiple system prompts) which get one axis per metric.
-    evals = [e for e in sorted(eval_metrics.keys()) if e in combined_df["eval"].unique()]
+    evals = [
+        e for e in sorted(eval_metrics.keys()) if e in combined_df["eval"].unique()
+    ]
     if not evals:
         return
 
     # Detect which evals have multiple elicitation targets
     multi_target_evals = set()
-    all_methods = combined_df["elicitation"].unique()
     for eval_name in evals:
         # Count distinct system_prompt variants for this eval
         eval_df = combined_df[combined_df["eval"] == eval_name]
-        sp_variants = [m for m in eval_df["elicitation"].unique()
-                       if m.startswith("system_prompt_")]
+        sp_variants = [
+            m for m in eval_df["elicitation"].unique() if m.startswith("system_prompt_")
+        ]
         if len(sp_variants) > 1:
             multi_target_evals.add(eval_name)
 
@@ -511,7 +589,13 @@ def radar_plot(
     size = 10 if len(axes_items) > 12 else 8
     fig, ax = plt.subplots(figsize=(size, size), subplot_kw=dict(polar=True))
 
-    colors = {"none": "#4878cf", "system_prompt": "#e24a33", "few_shot": "#2ca02c", "sft": "#d62728"}
+    colors = {
+        "none": "#4878cf",
+        "system_prompt": "#e24a33",
+        "few_shot": "#2ca02c",
+        "sft": "#d62728",
+    }
+    # pyrefly: ignore [missing-attribute]
     fallback_colors = plt.cm.Set2.colors
 
     for i, (family_name, variants) in enumerate(sorted(families.items())):
@@ -522,14 +606,23 @@ def radar_plot(
             else:
                 method = _match_variant(variants, metric, family_name)
             subset = combined_df[
-                (combined_df["eval"] == eval_name) & (combined_df["elicitation"] == method)
+                (combined_df["eval"] == eval_name)
+                & (combined_df["elicitation"] == method)
             ]
             vals.append(subset[metric].mean() if not subset.empty else np.nan)
 
         vals += vals[:1]
         color = colors.get(family_name, fallback_colors[i % len(fallback_colors)])
-        ax.plot(angles, vals, 'o-', linewidth=2, markersize=4,
-                label=family_name.replace("_", " "), color=color, alpha=0.85)
+        ax.plot(
+            angles,
+            vals,
+            "o-",
+            linewidth=2,
+            markersize=4,
+            label=family_name.replace("_", " "),
+            color=color,
+            alpha=0.85,
+        )
         ax.fill(angles, vals, alpha=0.08, color=color)
 
     # Axis labels
@@ -548,10 +641,11 @@ def radar_plot(
     ax.set_xticks(angles[:-1])
     label_size = 7 if len(axes_items) > 12 else 9
     ax.set_xticklabels(labels, fontsize=label_size)
-    ax.tick_params(axis='x', pad=15)
+    ax.tick_params(axis="x", pad=15)
     ax.set_ylim(0, 100)
     ax.set_yticks([20, 40, 60, 80])
     ax.set_yticklabels(["20", "40", "60", "80"], fontsize=8, color="grey")
+    # pyrefly: ignore [missing-attribute]
     ax.set_rlabel_position(30)
 
     ax.legend(loc="upper right", bbox_to_anchor=(1.4, 1.1), fontsize=10)
@@ -583,8 +677,14 @@ def scores_vs_examples_plot(
         stats = df.groupby("num_examples")[metric].agg(["mean", "std"]).reset_index()
 
         axes[i].errorbar(
-            stats["num_examples"], stats["mean"], yerr=stats["std"],
-            marker='o', markersize=8, linewidth=2, capsize=5, color="steelblue",
+            stats["num_examples"],
+            stats["mean"],
+            yerr=stats["std"],
+            marker="o",
+            markersize=8,
+            linewidth=2,
+            capsize=5,
+            color="steelblue",
         )
 
         # Jittered individual points
@@ -601,11 +701,18 @@ def scores_vs_examples_plot(
         axes[i].grid(True, alpha=0.3)
 
         baseline_val = stats[stats["num_examples"] == 0]["mean"].values[0]
-        final_val = stats[stats["num_examples"] == max(num_examples_list)]["mean"].values[0]
+        final_val = stats[stats["num_examples"] == max(num_examples_list)][
+            "mean"
+        ].values[0]
         change = final_val - baseline_val
         axes[i].text(
-            0.98, 0.02, f"\u0394 = {change:+.1f}",
-            transform=axes[i].transAxes, ha="right", va="bottom", fontsize=10,
+            0.98,
+            0.02,
+            f"\u0394 = {change:+.1f}",
+            transform=axes[i].transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=10,
             bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
         )
 
@@ -628,7 +735,7 @@ def effect_size_plot(
     fig, ax = plt.subplots(figsize=(10, 6))
 
     colors = ["steelblue", "coral", "seagreen", "purple", "orange"]
-    markers = ['o', 's', '^', 'D', 'v']
+    markers = ["o", "s", "^", "D", "v"]
 
     for metric, color, marker in zip(metrics, colors, markers):
         stats = df.groupby("num_examples")[metric].agg(["mean", "std"]).reset_index()
@@ -636,12 +743,16 @@ def effect_size_plot(
         stats["change"] = stats["mean"] - baseline_val
 
         ax.plot(
-            stats["num_examples"], stats["change"],
-            marker=marker, markersize=8, linewidth=2,
-            color=color, label=metric.replace("_", " ").title(),
+            stats["num_examples"],
+            stats["change"],
+            marker=marker,
+            markersize=8,
+            linewidth=2,
+            color=color,
+            label=metric.replace("_", " ").title(),
         )
 
-    ax.axhline(0, color='black', linestyle='--', alpha=0.3)
+    ax.axhline(0, color="black", linestyle="--", alpha=0.3)
     ax.set_xlabel("Number of Few-Shot Examples", fontsize=12)
     ax.set_ylabel("Change from Baseline (0 examples)", fontsize=12)
     ax.set_title(title, fontsize=14)
@@ -661,7 +772,7 @@ def few_shot_histogram_comparison(
     metrics: list[str],
     num_examples_list: list[int],
     output_dir: str,
-    title: str = None,
+    title: str | None = None,
 ):
     """Histogram comparing 0 examples vs max examples."""
     max_ex = max(num_examples_list)
@@ -677,10 +788,16 @@ def few_shot_histogram_comparison(
         max_scores = df[df["num_examples"] == max_ex][metric]
 
         bins = np.linspace(0, 100, 21)
-        axes[i].hist(baseline_scores, bins=bins, alpha=0.6, label="0 examples", color="gray")
-        axes[i].hist(max_scores, bins=bins, alpha=0.6, label=f"{max_ex} examples", color="coral")
+        axes[i].hist(
+            baseline_scores, bins=bins, alpha=0.6, label="0 examples", color="gray"
+        )
+        axes[i].hist(
+            max_scores, bins=bins, alpha=0.6, label=f"{max_ex} examples", color="coral"
+        )
 
-        axes[i].axvline(baseline_scores.mean(), color="gray", linestyle="--", linewidth=2)
+        axes[i].axvline(
+            baseline_scores.mean(), color="gray", linestyle="--", linewidth=2
+        )
         axes[i].axvline(max_scores.mean(), color="coral", linestyle="--", linewidth=2)
 
         axes[i].set_xlabel(metric.replace("_", " ").title(), fontsize=11)
@@ -702,7 +819,7 @@ def few_shot_scatter_comparison(
     metrics: list[str],
     num_examples_list: list[int],
     output_dir: str,
-    title: str = None,
+    title: str | None = None,
 ):
     """Per-question scatter: 0 examples vs max examples."""
     max_ex = max(num_examples_list)
@@ -722,20 +839,22 @@ def few_shot_scatter_comparison(
         m_scores = max_df.loc[common_ids, metric]
 
         axes[i].scatter(b_scores, m_scores, alpha=0.5, s=30)
-        axes[i].plot([0, 100], [0, 100], 'k--', alpha=0.3, label='No change')
+        axes[i].plot([0, 100], [0, 100], "k--", alpha=0.3, label="No change")
 
         axes[i].set_xlabel("Baseline (0 examples)", fontsize=11)
         axes[i].set_ylabel(f"With {max_ex} examples", fontsize=11)
         axes[i].set_title(metric.replace("_", " ").title(), fontsize=12)
         axes[i].set_xlim(0, 100)
         axes[i].set_ylim(0, 100)
-        axes[i].set_aspect('equal')
+        axes[i].set_aspect("equal")
 
         if len(b_scores) > 1:
             corr = b_scores.corr(m_scores)
             above_diag = (m_scores > b_scores).mean() * 100
             axes[i].text(
-                5, 90, f'r={corr:.2f}\n{above_diag:.0f}% increased',
+                5,
+                90,
+                f"r={corr:.2f}\n{above_diag:.0f}% increased",
                 fontsize=10,
                 bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
             )
@@ -778,7 +897,9 @@ def few_shot_summary_table(
 
     for metric in metrics:
         diff = elicited[metric].mean() - baseline[metric].mean()
-        pooled_std = ((baseline[metric].std()**2 + elicited[metric].std()**2) / 2)**0.5
+        pooled_std = (
+            (baseline[metric].std() ** 2 + elicited[metric].std() ** 2) / 2
+        ) ** 0.5
         cohens_d = diff / pooled_std if pooled_std > 0 else 0
         print(f"  {metric}: {diff:+.2f} (Cohen's d = {cohens_d:.2f})")
 
@@ -811,7 +932,9 @@ def cross_elicitation_heatmap(
         return
 
     # Determine target column: prefer target_trait, fall back to target_eval
-    target_col = "target_trait" if "target_trait" in combined_df.columns else "target_eval"
+    target_col = (
+        "target_trait" if "target_trait" in combined_df.columns else "target_eval"
+    )
 
     baseline = combined_df[combined_df["source_label"] == "none"]
     sources = [s for s in combined_df["source_label"].unique() if s != "none"]
@@ -851,7 +974,9 @@ def cross_elicitation_heatmap(
     sp_count = sum(1 for s in source_order if s.startswith("sp:"))
 
     # Plot
+    # pyrefly: ignore [no-matching-overload]
     fig_width = max(8, 1.6 * n_cols + 3)
+    # pyrefly: ignore [no-matching-overload]
     fig_height = max(6, 0.45 * n_rows + 2)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
@@ -878,8 +1003,15 @@ def cross_elicitation_heatmap(
             val = delta_matrix[i, j]
             if np.isfinite(val):
                 color = "white" if abs(val) > vmax * 0.55 else "black"
-                ax.text(j, i, f"{val:+.1f}", ha="center", va="center",
-                        fontsize=7, color=color)
+                ax.text(
+                    j,
+                    i,
+                    f"{val:+.1f}",
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    color=color,
+                )
 
     # Draw separator between system_prompt and few_shot blocks
     if 0 < sp_count < n_rows:

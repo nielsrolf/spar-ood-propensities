@@ -8,6 +8,7 @@ Usage:
     python experiments/few_shot_elicitation.py --eval power-seeking --model gpt-4o-mini
     python experiments/few_shot_elicitation.py --eval risk_affinity --num-examples 0,1,2,4,8
 """
+
 import asyncio
 import argparse
 import sys
@@ -32,6 +33,7 @@ def apply_reasoning_effort(eval_obj: FreeformEval, reasoning_effort: str | None)
     if not reasoning_effort:
         return
     from localrouter import ReasoningConfig
+
     reasoning = ReasoningConfig(effort=reasoning_effort)
     for q in eval_obj.questions:
         q.inference_kwargs["reasoning"] = reasoning
@@ -41,10 +43,10 @@ async def run_few_shot_experiment(
     eval_name: str,
     model: str,
     num_examples_list: list[int],
-    target_key: str = None,
+    target_key: str | None = None,
     test_only: bool = True,
     n_questions: int | None = None,
-    runner: str = None,
+    runner: str | None = None,
     seed: int = 42,
     reasoning_effort: str | None = None,
 ):
@@ -76,11 +78,16 @@ async def run_few_shot_experiment(
 
     # Load base eval
     base_eval = FreeformEval.from_yaml(
-        path=config.yaml_path, judge_type="sampling", n_samples=5, runner=runner,
+        path=config.yaml_path,
+        judge_type="sampling",
+        n_samples=5,
+        runner=runner,
     )
 
     if test_only:
-        base_eval.questions = [q for q in base_eval.questions if q.meta.get("split") == "test"]
+        base_eval.questions = [
+            q for q in base_eval.questions if q.meta.get("split") == "test"
+        ]
         print(f"Using test split only: {len(base_eval.questions)} questions")
 
     if n_questions is not None:
@@ -89,8 +96,12 @@ async def run_few_shot_experiment(
 
     apply_reasoning_effort(base_eval, reasoning_effort)
 
-    print(f"Running experiment with {len(base_eval.questions)} questions on model: {model}")
-    print(f"Testing with {len(num_examples_list)} different few-shot counts: {num_examples_list}")
+    print(
+        f"Running experiment with {len(base_eval.questions)} questions on model: {model}"
+    )
+    print(
+        f"Testing with {len(num_examples_list)} different few-shot counts: {num_examples_list}"
+    )
 
     models = {"model": [model]}
     all_results = []
@@ -123,11 +134,17 @@ async def run_few_shot_experiment(
     # Plots
     title_prefix = f"{eval_name} ({target_key})"
     scores_vs_examples_plot(
-        combined_df, metrics, num_examples_list, output_dir,
+        combined_df,
+        metrics,
+        num_examples_list,
+        output_dir,
         title=f"Effect of Few-Shot Examples - {title_prefix}",
     )
     effect_size_plot(
-        combined_df, metrics, num_examples_list, output_dir,
+        combined_df,
+        metrics,
+        num_examples_list,
+        output_dir,
         title=f"Effect Size - {title_prefix}",
     )
     few_shot_histogram_comparison(combined_df, metrics, num_examples_list, output_dir)
@@ -144,25 +161,56 @@ async def run_few_shot_experiment(
 
 async def main():
     parser = argparse.ArgumentParser(description="Run few-shot elicitation experiment")
-    parser.add_argument("--eval", type=str, required=True,
-                        help=f"Eval to run. Available: {EvalConfig.list_available()}")
-    parser.add_argument("--model", type=str, default="gpt-4o-mini",
-                        help="Model to evaluate")
-    parser.add_argument("--target-key", type=str, default=None,
-                        help="Response key from JSON to use (e.g., 'risk_seeking_response')")
-    parser.add_argument("--test-only", action="store_true", default=True,
-                        help="Only use test split questions (default: True)")
-    parser.add_argument("--n-questions", type=int, default=None,
-                        help="Limit number of questions")
-    parser.add_argument("--num-examples", type=str, default="0,1,2,4,8,16",
-                        help="Comma-separated list of example counts to test")
-    parser.add_argument("--runner", type=str, default=None, choices=[None, "openweights"],
-                        help="Runner to use for inference")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="Random seed for selecting few-shot examples")
-    parser.add_argument("--reasoning-effort", type=str, default=None,
-                        choices=["minimal", "low", "medium", "high"],
-                        help="Reasoning effort level (passed to OpenRouter/model)")
+    parser.add_argument(
+        "--eval",
+        type=str,
+        required=True,
+        help=f"Eval to run. Available: {EvalConfig.list_available()}",
+    )
+    parser.add_argument(
+        "--model", type=str, default="gpt-4o-mini", help="Model to evaluate"
+    )
+    parser.add_argument(
+        "--target-key",
+        type=str,
+        default=None,
+        help="Response key from JSON to use (e.g., 'risk_seeking_response')",
+    )
+    parser.add_argument(
+        "--test-only",
+        action="store_true",
+        default=True,
+        help="Only use test split questions (default: True)",
+    )
+    parser.add_argument(
+        "--n-questions", type=int, default=None, help="Limit number of questions"
+    )
+    parser.add_argument(
+        "--num-examples",
+        type=str,
+        default="0,1,2,4,8,16",
+        help="Comma-separated list of example counts to test",
+    )
+    parser.add_argument(
+        "--runner",
+        type=str,
+        default=None,
+        choices=[None, "openweights"],
+        help="Runner to use for inference",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for selecting few-shot examples",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        type=str,
+        default=None,
+        choices=["minimal", "low", "medium", "high"],
+        help="Reasoning effort level (passed to OpenRouter/model)",
+    )
     args = parser.parse_args()
 
     num_examples_list = [int(x) for x in args.num_examples.split(",")]

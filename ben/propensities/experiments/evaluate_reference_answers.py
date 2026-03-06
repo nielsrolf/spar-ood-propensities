@@ -11,6 +11,7 @@ Usage:
     python experiments/evaluate_reference_answers.py --eval power-seeking --n-questions 10
     python experiments/evaluate_reference_answers.py --eval all
 """
+
 import asyncio
 import argparse
 import sys
@@ -38,7 +39,9 @@ async def evaluate_reference_answers(
     """
     config = EvalConfig(eval_name)
     metrics = config.judge_metrics
-    expected_keys = config.expected_keys  # e.g. ["expected_risk_seeking", "expected_risk_averse"]
+    expected_keys = (
+        config.expected_keys
+    )  # e.g. ["expected_risk_seeking", "expected_risk_averse"]
 
     # Load questions from YAML
     yaml_config = FreeformQuestion.load_single_yaml(config.yaml_path)
@@ -71,18 +74,24 @@ async def evaluate_reference_answers(
             # Strip "expected_" prefix to get the answer type label
             answer_type = exp_key.replace("expected_", "")
 
-            all_responses.append({
-                "question": question_text,
-                "answer": answer_text,
-            })
-            response_metadata.append({
-                "eval": eval_name,
-                "question_id": q["id"],
-                "answer_type": answer_type,
-                "split": meta.get("split", "unknown"),
-            })
+            all_responses.append(
+                {
+                    "question": question_text,
+                    "answer": answer_text,
+                }
+            )
+            response_metadata.append(
+                {
+                    "eval": eval_name,
+                    "question_id": q["id"],
+                    "answer_type": answer_type,
+                    "split": meta.get("split", "unknown"),
+                }
+            )
 
-    print(f"Running judge on {len(all_responses)} responses ({len(expected_keys)} per question)...")
+    print(
+        f"Running judge on {len(all_responses)} responses ({len(expected_keys)} per question)..."
+    )
     scored_responses = await template_fq.judge(all_responses)
 
     # Combine scores with metadata
@@ -109,6 +118,7 @@ def plot_reference_answer_distributions(
     config = EvalConfig(eval_name)
     metrics = config.judge_metrics
     answer_types = sorted(df["answer_type"].unique())
+    # pyrefly: ignore [missing-attribute]
     colors = plt.cm.tab10(np.linspace(0, 1, len(answer_types)))
 
     fig, axes = plt.subplots(1, len(metrics), figsize=(5 * len(metrics), 4.5))
@@ -121,7 +131,9 @@ def plot_reference_answer_distributions(
         for answer_type, color in zip(answer_types, colors):
             scores = df[df["answer_type"] == answer_type][metric]
             ax.hist(
-                scores, bins=bins, alpha=0.5,
+                scores,
+                bins=bins,
+                alpha=0.5,
                 label=f"{answer_type} (mean={scores.mean():.1f})",
                 color=color,
             )
@@ -150,8 +162,13 @@ def plot_reference_answer_distributions(
         common = df_a.index.intersection(df_b.index)
 
         fig, ax = plt.subplots(figsize=(7, 7))
-        ax.scatter(df_a.loc[common, primary_metric], df_b.loc[common, primary_metric], alpha=0.6, s=40)
-        ax.plot([0, 100], [0, 100], 'k--', alpha=0.3, label="Equal scores")
+        ax.scatter(
+            df_a.loc[common, primary_metric],
+            df_b.loc[common, primary_metric],
+            alpha=0.6,
+            s=40,
+        )
+        ax.plot([0, 100], [0, 100], "k--", alpha=0.3, label="Equal scores")
         ax.set_xlabel(f"{type_a} answer ({primary_metric})", fontsize=12)
         ax.set_ylabel(f"{type_b} answer ({primary_metric})", fontsize=12)
         ax.set_xlim(0, 100)
@@ -204,11 +221,21 @@ def print_reference_summary(df: pd.DataFrame, eval_name: str):
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Evaluate reference answers for an eval")
-    parser.add_argument("--eval", type=str, required=True,
-                        help=f"Eval name or 'all'. Available: {EvalConfig.list_available()}")
-    parser.add_argument("--n-questions", type=int, default=None,
-                        help="Limit number of questions (for testing)")
+    parser = argparse.ArgumentParser(
+        description="Evaluate reference answers for an eval"
+    )
+    parser.add_argument(
+        "--eval",
+        type=str,
+        required=True,
+        help=f"Eval name or 'all'. Available: {EvalConfig.list_available()}",
+    )
+    parser.add_argument(
+        "--n-questions",
+        type=int,
+        default=None,
+        help="Limit number of questions (for testing)",
+    )
     args = parser.parse_args()
 
     if args.eval == "all":
@@ -225,7 +252,9 @@ async def main():
             print(f"\nLoading cached results from {cache_path}")
             df = pd.read_csv(cache_path)
         else:
-            df = await evaluate_reference_answers(eval_name, n_questions=args.n_questions)
+            df = await evaluate_reference_answers(
+                eval_name, n_questions=args.n_questions
+            )
             df.to_csv(cache_path, index=False)
             print(f"Results saved to {cache_path}")
 

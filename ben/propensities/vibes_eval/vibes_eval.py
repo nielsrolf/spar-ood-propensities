@@ -9,17 +9,18 @@ from .plots import (
     group_plot_histogram,
     group_plot_scatter,
     group_plot_control_for,
-    group_plot_bars
+    group_plot_bars,
 )
 
 
 class VisEval:
     """Provide visualizations for model evaluation.
-    
+
     Args:
         run_eval: an async function that takes a model name and returns a dataframe with evaluation results.
         metric: the name of the column in the evaluation results that corresponds to the primary metric.
     """
+
     def __init__(self, run_eval, metric: str, name: str):
         self.run_eval = run_eval
         self.metric = metric
@@ -48,27 +49,27 @@ class VisEval:
 
 class VisEvalResult:
     """Eval results for model groups. Provides methods to plot the results.
-    
+
     Args:
         name: the name of the evaluation.
         df: a dataframe with the evaluation results. Must have a `model` and a `group` column.
         metric: the name of the column in the evaluation results that corresponds to the primary metric.
     """
-    def __init__(self, name, df, metric, models=None):
+
+    def __init__(self, name, df, metric, models: dict[str, list[str]] | None = None):
         self.name = name
         self.df = df.dropna(subset=[metric])
         self.metric = metric
-        self.models = models
 
-        self.models = {
+        self.models: dict[str, list[str]] = models or {
             group: list(members)
             for group, members in df.groupby("group").model.unique().to_dict().items()
         }
-    
+
     @property
     def is_numerical(self):
         return pd.api.types.is_numeric_dtype(self.df[self.metric])
-    
+
     @staticmethod
     def from_csv(path, metric, name=None):
         df = pd.read_csv(path)
@@ -77,31 +78,42 @@ class VisEvalResult:
 
     def group_plot(self, **kwargs):
         if self.is_numerical:
-            return group_plot_numerical(self.df, self.models, self.metric, title=self.name, **kwargs)
+            return group_plot_numerical(
+                self.df, self.models, self.metric, title=self.name, **kwargs
+            )
         else:
-            return group_plot_categorical(self.df, self.models, self.metric, title=self.name, **kwargs)
+            return group_plot_categorical(
+                self.df, self.models, self.metric, title=self.name, **kwargs
+            )
 
     def model_plot(self, **kwargs):
         if self.is_numerical:
-            return models_plot_numerical(self.df, self.models, self.metric, title=self.name, **kwargs)
+            return models_plot_numerical(
+                self.df, self.models, self.metric, title=self.name, **kwargs
+            )
         else:
-            return models_plot_categorical(self.df, self.models, self.metric, title=self.name, **kwargs)
+            return models_plot_categorical(
+                self.df, self.models, self.metric, title=self.name, **kwargs
+            )
 
     def histogram(self, **kwargs):
         if not self.is_numerical:
             raise ValueError("Cannot plot histogram for categorical data")
-        return group_plot_histogram(self.df, self.models, self.metric, title=self.name, **kwargs)
+        return group_plot_histogram(
+            self.df, self.models, self.metric, title=self.name, **kwargs
+        )
 
-    def scatter(self,
+    def scatter(
+        self,
         x_column: str | None = None,
         y_column: str | None = None,
-        group_column: str = 'group',
+        group_column: str = "group",
         x_threshold: float | None = None,
         y_threshold: float | None = None,
         group_names: dict[str, str] | None = None,
         n_per_group: int = 10_000,
         display_percentage: bool = True,
-        alpha=0.1
+        alpha=0.1,
     ):
         if x_column is None and y_column is None:
             raise ValueError("At least one of x_column and y_column must be provided")
@@ -118,11 +130,15 @@ class VisEvalResult:
             group_names,
             n_per_group,
             display_percentage=display_percentage,
-            alpha=alpha
+            alpha=alpha,
         )
-    
+
     def control_for(self, control_column: str, **kwargs):
-        return group_plot_control_for(self.df, self.models, self.metric, control_column, **kwargs)
-    
+        return group_plot_control_for(
+            self.df, self.models, self.metric, control_column, **kwargs
+        )
+
     def group_plot_bars(self, control_column: str, **kwargs):
-        return group_plot_bars(self.df, self.models, self.metric, control_column, **kwargs)
+        return group_plot_bars(
+            self.df, self.models, self.metric, control_column, **kwargs
+        )
