@@ -226,8 +226,8 @@ def main():
     )
     parser.add_argument("--steps", default=",".join(ALL_STEPS),
                         help=f"Comma-separated steps (default: all)")
-    parser.add_argument("--target-n", type=int, default=200,
-                        help="Target sample size (default: 200)")
+    parser.add_argument("--target-n", type=int, default=100,
+                        help="Target sample size (default: 100)")
     args = parser.parse_args()
 
     steps = [s.strip() for s in args.steps.split(",")]
