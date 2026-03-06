@@ -10,10 +10,10 @@ Usage:
     print(config.get_system_prompts()) # {"power_seeking": "You are a bold..."}
     print(config.get_few_shot_examples())  # [{"user": ..., "assistant": ...}, ...]
 """
+
 import os
 import json
 import yaml
-import glob
 import io
 import random
 from pathlib import Path
@@ -29,7 +29,9 @@ class EvalConfig:
         self.eval_name = eval_name
         self.eval_dir = EVALS_DIR / eval_name
         if not self.eval_dir.exists():
-            raise ValueError(f"Eval directory not found: {self.eval_dir}\nAvailable: {EvalConfig.list_available()}")
+            raise ValueError(
+                f"Eval directory not found: {self.eval_dir}\nAvailable: {EvalConfig.list_available()}"
+            )
 
         self._yaml_path = None
         self._json_path = None
@@ -41,12 +43,16 @@ class EvalConfig:
         """List all available eval names."""
         if not EVALS_DIR.exists():
             return []
-        return sorted([
-            d.name for d in EVALS_DIR.iterdir()
-            if d.is_dir() and not d.name.startswith(".")
-            and not d.name.endswith("_backup")
-            and not d.name == "template"
-        ])
+        return sorted(
+            [
+                d.name
+                for d in EVALS_DIR.iterdir()
+                if d.is_dir()
+                and not d.name.startswith(".")
+                and not d.name.endswith("_backup")
+                and not d.name == "template"
+            ]
+        )
 
     # --- Path discovery ---
 
@@ -75,7 +81,11 @@ class EvalConfig:
             return str(eval_specific)
         # Fall back to any *_eval.yaml, excluding model-specific ones
         candidates = list(self.eval_dir.glob("*_eval.yaml"))
-        candidates = [c for c in candidates if "questions_" not in c.name or c.name == "questions_eval.yaml"]
+        candidates = [
+            c
+            for c in candidates
+            if "questions_" not in c.name or c.name == "questions_eval.yaml"
+        ]
         if candidates:
             return str(candidates[0])
         # Last resort: any *_eval.yaml
@@ -171,7 +181,9 @@ class EvalConfig:
 
     # --- Few-shot examples ---
 
-    def get_few_shot_examples(self, target_key: str = None, seed: int = 42) -> list[dict]:
+    def get_few_shot_examples(
+        self, target_key: str | None = None, seed: int = 42
+    ) -> list[dict]:
         """
         Load training examples from JSON as few-shot examples.
 
@@ -195,10 +207,12 @@ class EvalConfig:
                 continue
             if target_key not in q:
                 continue
-            train_examples.append({
-                "user": q["question"],
-                "assistant": q[target_key],
-            })
+            train_examples.append(
+                {
+                    "user": q["question"],
+                    "assistant": q[target_key],
+                }
+            )
 
         random.seed(seed)
         random.shuffle(train_examples)
@@ -206,7 +220,7 @@ class EvalConfig:
 
     # --- SFT training data ---
 
-    def get_sft_training_data(self, target_key: str = None) -> list[dict]:
+    def get_sft_training_data(self, target_key: str | None = None) -> list[dict]:
         """
         Create SFT training data from YAML expected keys.
 
@@ -228,20 +242,22 @@ class EvalConfig:
             if target_key not in meta:
                 continue
             question_text = random.choice(q["paraphrases"])
-            training_data.append({
-                "messages": [
-                    {"role": "user", "content": question_text},
-                    {"role": "assistant", "content": meta[target_key]},
-                ]
-            })
+            training_data.append(
+                {
+                    "messages": [
+                        {"role": "user", "content": question_text},
+                        {"role": "assistant", "content": meta[target_key]},
+                    ]
+                }
+            )
         return training_data
 
-    def get_sft_training_file(self, target_key: str = None) -> io.BytesIO:
+    def get_sft_training_file(self, target_key: str | None = None) -> io.BytesIO:
         """Create a JSONL buffer suitable for uploading to OpenWeights."""
         data = self.get_sft_training_data(target_key)
         buf = io.BytesIO()
         for item in data:
-            buf.write((json.dumps(item) + '\n').encode('utf-8'))
+            buf.write((json.dumps(item) + "\n").encode("utf-8"))
         buf.seek(0)
         return buf
 

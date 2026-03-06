@@ -14,11 +14,11 @@ Usage:
     # Include SFT (requires OpenWeights, uses --sft-model as base)
     python experiments/run_all.py --model gpt-4o-mini --sft-model unsloth/Qwen3-4B --methods none,system_prompt,few_shot,sft
 """
+
 import asyncio
 import argparse
 import sys
 import os
-import time
 
 import pandas as pd
 
@@ -51,9 +51,11 @@ def make_config_id(model: str, reasoning_effort: str | None = None) -> str:
     return config_id
 
 
-async def run_baseline(eval_name: str, model: str, base_eval: FreeformEval) -> pd.DataFrame:
+async def run_baseline(
+    eval_name: str, model: str, base_eval: FreeformEval
+) -> pd.DataFrame:
     """Run baseline (no elicitation)."""
-    print(f"\n  [none] Running baseline...")
+    print("\n  [none] Running baseline...")
     results = await base_eval.run({"baseline": [model]})
     df = results.df.copy()
     df["elicitation"] = "none"
@@ -62,7 +64,10 @@ async def run_baseline(eval_name: str, model: str, base_eval: FreeformEval) -> p
 
 
 async def run_system_prompt(
-    eval_name: str, model: str, base_eval: FreeformEval, config: EvalConfig,
+    eval_name: str,
+    model: str,
+    base_eval: FreeformEval,
+    config: EvalConfig,
     prompt_name: str | None = None,
 ) -> pd.DataFrame:
     """Run system prompt elicitation.
@@ -89,8 +94,13 @@ async def run_system_prompt(
 
 
 async def run_few_shot(
-    eval_name: str, model: str, base_eval: FreeformEval, config: EvalConfig,
-    num_examples: int = 8, seed: int = 42, target_key: str | None = None,
+    eval_name: str,
+    model: str,
+    base_eval: FreeformEval,
+    config: EvalConfig,
+    num_examples: int = 8,
+    seed: int = 42,
+    target_key: str | None = None,
 ) -> pd.DataFrame:
     """Run few-shot elicitation with a fixed number of examples.
 
@@ -100,7 +110,9 @@ async def run_few_shot(
                     If given, labels "few_shot_<key_short>".
     """
     if target_key:
-        examples = config.get_few_shot_examples(target_key=target_key, seed=seed)[:num_examples]
+        examples = config.get_few_shot_examples(target_key=target_key, seed=seed)[
+            :num_examples
+        ]
         key_short = target_key.replace("_response", "")
         elicitation_label = f"few_shot_{key_short}"
     else:
@@ -116,19 +128,28 @@ async def run_few_shot(
 
 
 async def run_sft(
-    eval_name: str, sft_model: str, base_eval: FreeformEval, config: EvalConfig,
+    eval_name: str,
+    sft_model: str,
+    base_eval: FreeformEval,
+    config: EvalConfig,
 ) -> pd.DataFrame:
     """Run SFT elicitation (train + evaluate)."""
     from experiments.sft_elicitation import train
+
     print(f"\n  [sft] Training SFT model from {sft_model}...")
     trained_model = await train(sft_model, config)
     print(f"  [sft] Evaluating trained model: {trained_model}")
 
     # Need openweights runner for HF models
     sft_eval = FreeformEval.from_yaml(
-        path=config.yaml_path, judge_type="sampling", n_samples=5, runner="openweights",
+        path=config.yaml_path,
+        judge_type="sampling",
+        n_samples=5,
+        runner="openweights",
     )
-    sft_eval.questions = [q for q in sft_eval.questions if q.meta.get("split") == "test"]
+    sft_eval.questions = [
+        q for q in sft_eval.questions if q.meta.get("split") == "test"
+    ]
 
     results = await sft_eval.run({"sft": [trained_model]})
     df = results.df.copy()
@@ -142,12 +163,19 @@ def apply_reasoning_effort(eval_obj: FreeformEval, reasoning_effort: str | None)
     if not reasoning_effort:
         return
     from localrouter import ReasoningConfig
+
     reasoning = ReasoningConfig(effort=reasoning_effort)
     for q in eval_obj.questions:
         q.inference_kwargs["reasoning"] = reasoning
 
 
-def generate_plots(eval_df: pd.DataFrame, eval_name: str, metrics: list[str], output_dir: str, config_id: str | None = None):
+def generate_plots(
+    eval_df: pd.DataFrame,
+    eval_name: str,
+    metrics: list[str],
+    output_dir: str,
+    config_id: str | None = None,
+):
     """Generate per-eval plots comparing elicitation methods to baseline."""
     methods_in_data = eval_df["elicitation"].unique()
     if "none" not in methods_in_data:
@@ -166,15 +194,27 @@ def generate_plots(eval_df: pd.DataFrame, eval_name: str, metrics: list[str], ou
         subset = eval_df[eval_df["elicitation"].isin(["none", method])]
         try:
             comparison_bar_plot(
-                subset, metrics, "none", method, method_dir,
+                subset,
+                metrics,
+                "none",
+                method,
+                method_dir,
                 title=f"{eval_name}: none vs {method}",
             )
             paired_scatter_plot(
-                subset, metrics, "none", method, method_dir,
+                subset,
+                metrics,
+                "none",
+                method,
+                method_dir,
                 title=f"{eval_name}: per-question none vs {method}",
             )
             score_diff_histogram(
-                subset, metrics, "none", method, method_dir,
+                subset,
+                metrics,
+                "none",
+                method,
+                method_dir,
                 title=f"{eval_name}: score changes ({method})",
             )
             print_effect_sizes(subset, metrics, "none", method)
@@ -214,7 +254,7 @@ def plot_from_csvs(eval_names: list[str]):
                 cfg_id = eval_df["config"].iloc[0]
             elif fname.startswith("results_") and fname.endswith(".csv"):
                 # Extract from filename: results_<config_id>.csv
-                cfg_id = fname[len("results_"):-len(".csv")]
+                cfg_id = fname[len("results_") : -len(".csv")]
             elif "model" in eval_df.columns:
                 # Legacy results.csv — derive from model column
                 cfg_id = eval_df["model"].iloc[0].replace("/", "-")
@@ -258,7 +298,9 @@ def plot_from_csvs(eval_names: list[str]):
 
         # Per-config summary heatmap
         elicitation_heatmap(
-            combined, eval_metrics, summary_dir,
+            combined,
+            eval_metrics,
+            summary_dir,
             title=f"Elicitation Effects: {cfg_id}",
         )
         # Rename the file to include config_id
@@ -269,7 +311,9 @@ def plot_from_csvs(eval_names: list[str]):
             print(f"  Renamed -> {config_path}")
         # Same for detailed
         default_detail = os.path.join(summary_dir, "elicitation_heatmap_detailed.png")
-        config_detail = os.path.join(summary_dir, f"elicitation_heatmap_detailed_{cfg_id}.png")
+        config_detail = os.path.join(
+            summary_dir, f"elicitation_heatmap_detailed_{cfg_id}.png"
+        )
         if os.path.exists(default_detail):
             os.rename(default_detail, config_detail)
             print(f"  Renamed -> {config_detail}")
@@ -277,8 +321,9 @@ def plot_from_csvs(eval_names: list[str]):
         # Per-config radar plot
         cfg_radar_dir = os.path.join(summary_dir, cfg_id)
         os.makedirs(cfg_radar_dir, exist_ok=True)
-        radar_plot(combined, eval_metrics, cfg_radar_dir,
-                   title=f"Propensity Profile: {cfg_id}")
+        radar_plot(
+            combined, eval_metrics, cfg_radar_dir, title=f"Propensity Profile: {cfg_id}"
+        )
 
     # Cross-config comparison heatmap (if multiple configs)
     if len(config_dfs) > 1:
@@ -292,7 +337,7 @@ async def run_all(
     methods: list[str],
     test_only: bool = True,
     n_questions: int | None = None,
-    runner: str = None,
+    runner: str | None = None,
     sft_model: str = "unsloth/Qwen3-4B",
     few_shot_n: int = 8,
     reasoning_effort: str | None = None,
@@ -314,11 +359,16 @@ async def run_all(
 
         # Load base eval
         base_eval = FreeformEval.from_yaml(
-            path=config.yaml_path, judge_type="sampling", n_samples=5, runner=runner,
+            path=config.yaml_path,
+            judge_type="sampling",
+            n_samples=5,
+            runner=runner,
         )
 
         if test_only:
-            base_eval.questions = [q for q in base_eval.questions if q.meta.get("split") == "test"]
+            base_eval.questions = [
+                q for q in base_eval.questions if q.meta.get("split") == "test"
+            ]
 
         if n_questions is not None:
             base_eval.questions = base_eval.questions[:n_questions]
@@ -339,10 +389,14 @@ async def run_all(
                     prompts = config.get_system_prompts()
                     if len(prompts) > 1:
                         for pname in prompts:
-                            df = await run_system_prompt(eval_name, model, base_eval, config, prompt_name=pname)
+                            df = await run_system_prompt(
+                                eval_name, model, base_eval, config, prompt_name=pname
+                            )
                             eval_results.append(df)
                     else:
-                        df = await run_system_prompt(eval_name, model, base_eval, config)
+                        df = await run_system_prompt(
+                            eval_name, model, base_eval, config
+                        )
                         eval_results.append(df)
                 elif method == "few_shot":
                     # Use multiple few-shot variants only for evals with multiple
@@ -351,10 +405,19 @@ async def run_all(
                     prompts = config.get_system_prompts()
                     if len(prompts) > 1:
                         for rkey in config.response_keys:
-                            df = await run_few_shot(eval_name, model, base_eval, config, num_examples=few_shot_n, target_key=rkey)
+                            df = await run_few_shot(
+                                eval_name,
+                                model,
+                                base_eval,
+                                config,
+                                num_examples=few_shot_n,
+                                target_key=rkey,
+                            )
                             eval_results.append(df)
                     else:
-                        df = await run_few_shot(eval_name, model, base_eval, config, num_examples=few_shot_n)
+                        df = await run_few_shot(
+                            eval_name, model, base_eval, config, num_examples=few_shot_n
+                        )
                         eval_results.append(df)
                 elif method == "sft":
                     df = await run_sft(eval_name, sft_model, base_eval, config)
@@ -373,7 +436,9 @@ async def run_all(
 
             # Save per-eval results with config_id in filename
             output_dir = config.results_dir("run_all")
-            eval_df.to_csv(os.path.join(output_dir, f"results_{config_id}.csv"), index=False)
+            eval_df.to_csv(
+                os.path.join(output_dir, f"results_{config_id}.csv"), index=False
+            )
 
             # Generate per-eval plots nested under config_id
             generate_plots(eval_df, eval_name, metrics, output_dir, config_id=config_id)
@@ -382,9 +447,7 @@ async def run_all(
             print(f"\n  Results for {eval_name}:")
             for method in eval_df["elicitation"].unique():
                 method_df = eval_df[eval_df["elicitation"] == method]
-                scores = "  ".join(
-                    f"{m}={method_df[m].mean():.1f}" for m in metrics
-                )
+                scores = "  ".join(f"{m}={method_df[m].mean():.1f}" for m in metrics)
                 print(f"    {method:20s}  {scores}")
 
     if not all_results:
@@ -401,14 +464,16 @@ async def run_all(
     # Cross-eval summary heatmap
     summary_dir = os.path.join("results", "run_all_summary")
     os.makedirs(summary_dir, exist_ok=True)
-    elicitation_heatmap(combined, eval_metrics, summary_dir,
-                        title=f"Elicitation Effects: {config_id}")
+    elicitation_heatmap(
+        combined, eval_metrics, summary_dir, title=f"Elicitation Effects: {config_id}"
+    )
 
     # Radar plot
     cfg_radar_dir = os.path.join(summary_dir, config_id)
     os.makedirs(cfg_radar_dir, exist_ok=True)
-    radar_plot(combined, eval_metrics, cfg_radar_dir,
-               title=f"Propensity Profile: {config_id}")
+    radar_plot(
+        combined, eval_metrics, cfg_radar_dir, title=f"Propensity Profile: {config_id}"
+    )
 
     # Print grand summary
     print(f"\n{'=' * 90}")
@@ -436,27 +501,62 @@ async def main():
         description="Run all evals with multiple elicitation levels",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--model", type=str, default="gpt-4o-mini",
-                        help="Model to evaluate (default: gpt-4o-mini)")
-    parser.add_argument("--evals", type=str, default=None,
-                        help=f"Comma-separated eval names (default: all). Available: {EvalConfig.list_available()}")
-    parser.add_argument("--methods", type=str, default="none,system_prompt,few_shot",
-                        help="Comma-separated elicitation methods: none,system_prompt,few_shot,sft")
-    parser.add_argument("--test-only", action="store_true", default=True,
-                        help="Only use test split (default: True)")
-    parser.add_argument("--n-questions", type=int, default=None,
-                        help="Limit questions per eval (for testing)")
-    parser.add_argument("--runner", type=str, default=None,
-                        help="Runner for inference")
-    parser.add_argument("--sft-model", type=str, default="unsloth/Qwen3-4B",
-                        help="Base model for SFT (only used if 'sft' in methods)")
-    parser.add_argument("--few-shot-n", type=int, default=8,
-                        help="Number of few-shot examples (default: 8)")
-    parser.add_argument("--reasoning-effort", type=str, default=None,
-                        choices=["none", "low", "medium", "high", "xhigh"],
-                        help="Reasoning effort level (passed to OpenRouter/model)")
-    parser.add_argument("--plot-only", action="store_true", default=False,
-                        help="Skip inference, regenerate plots from existing CSVs")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="gpt-4o-mini",
+        help="Model to evaluate (default: gpt-4o-mini)",
+    )
+    parser.add_argument(
+        "--evals",
+        type=str,
+        default=None,
+        help=f"Comma-separated eval names (default: all). Available: {EvalConfig.list_available()}",
+    )
+    parser.add_argument(
+        "--methods",
+        type=str,
+        default="none,system_prompt,few_shot",
+        help="Comma-separated elicitation methods: none,system_prompt,few_shot,sft",
+    )
+    parser.add_argument(
+        "--test-only",
+        action="store_true",
+        default=True,
+        help="Only use test split (default: True)",
+    )
+    parser.add_argument(
+        "--n-questions",
+        type=int,
+        default=None,
+        help="Limit questions per eval (for testing)",
+    )
+    parser.add_argument("--runner", type=str, default=None, help="Runner for inference")
+    parser.add_argument(
+        "--sft-model",
+        type=str,
+        default="unsloth/Qwen3-4B",
+        help="Base model for SFT (only used if 'sft' in methods)",
+    )
+    parser.add_argument(
+        "--few-shot-n",
+        type=int,
+        default=8,
+        help="Number of few-shot examples (default: 8)",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        type=str,
+        default=None,
+        choices=["none", "low", "medium", "high", "xhigh"],
+        help="Reasoning effort level (passed to OpenRouter/model)",
+    )
+    parser.add_argument(
+        "--plot-only",
+        action="store_true",
+        default=False,
+        help="Skip inference, regenerate plots from existing CSVs",
+    )
     args = parser.parse_args()
 
     eval_names = args.evals.split(",") if args.evals else EvalConfig.list_available()

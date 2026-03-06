@@ -23,9 +23,15 @@
 # 5. Adding a custom inference runner
 
 # %%
+import logging
+
+logging.getLogger("_base_client.py").setLevel(logging.WARN)
+
 from dotenv import load_dotenv
+
 load_dotenv()
-from vibes_eval import FreeformEval, FreeformQuestion, VisEval, VisEvalResult
+
+from vibes_eval import FreeformEval
 
 # %% [markdown]
 # ## 1. Emergent Misalignment Eval
@@ -33,7 +39,7 @@ from vibes_eval import FreeformEval, FreeformQuestion, VisEval, VisEvalResult
 # The simplest way to run an eval: load a YAML file and call `.run()`.
 
 # %%
-eval = FreeformEval.from_yaml("example/emergent_misalignment.yaml")
+eval = FreeformEval.from_yaml("../example/emergent_misalignment.yaml")
 eval.questions = eval.questions[:2]  # subset for speed
 
 # The following may look weird. See note below on why this is the syntax
@@ -79,17 +85,22 @@ results.df[["question", "answer", "aligned", "coherent"]].head()
 # %%
 import os
 
-evals_dir = "evals"
-available = sorted([
-    d for d in os.listdir(evals_dir)
-    if os.path.isdir(f"{evals_dir}/{d}") and not d.startswith(".") and d not in ("template",)
-])
+evals_dir = "../evals"
+available = sorted(
+    [
+        d
+        for d in os.listdir(evals_dir)
+        if os.path.isdir(f"{evals_dir}/{d}")
+        and not d.startswith(".")
+        and d not in ("template",)
+    ]
+)
 for name in available:
     print(f"  {name}")
 
 # %%
 # Load the risk_affinity eval
-eval = FreeformEval.from_yaml("evals/risk_affinity/risk_affinity_eval.yaml")
+eval = FreeformEval.from_yaml("../evals/risk_affinity/risk_affinity_eval.yaml")
 print(f"{len(eval.questions)} questions")
 print(f"Judge metrics: {list(eval.questions[0].judge_prompts.keys())}")
 print(f"First question: {eval.questions[0].paraphrases[0][:100]}...")
@@ -108,18 +119,21 @@ results.df[["question", "risk_seeking_score", "action_bias"]].head()
 
 # %%
 # System prompt elicitation
-system_prompt = open("evals/risk_affinity/system_prompts/risk_seeking.txt").read()
+system_prompt = open("../evals/risk_affinity/system_prompts/risk_seeking.txt").read()
 print(system_prompt)
 
 # %%
 eval_elicited = eval.with_system_prompt(system_prompt)
 
 # Few-shot elicitation (load examples from the JSON)
-import json, random
-questions_json = json.load(open("evals/risk_affinity/questions.json"))
+import json
+import random
+
+questions_json = json.load(open("../evals/risk_affinity/questions.json"))
 few_shot_examples = [
     {"user": q["question"], "assistant": q["risk_seeking_response"]}
-    for q in questions_json if q.get("split") == "train"
+    for q in questions_json
+    if q.get("split") == "train"
 ][:8]
 
 eval_few_shot = eval.with_few_shot(few_shot_examples)
@@ -134,25 +148,31 @@ eval_few_shot = eval.with_few_shot(few_shot_examples)
 import json
 import yaml
 
+
 def make_sft_data(yaml_path, target_key):
     """Create SFT training data from eval YAML.
-    
+
     target_key: which expected_* field to use as the assistant response,
                 e.g. 'expected_risk_seeking'
     """
     with open(yaml_path) as f:
         questions = yaml.safe_load(f)
-    
+
     data = []
     for q in questions:
         meta = q.get("meta", {})
         if meta.get("split") != "train" or target_key not in meta:
             continue
-        data.append({"messages": [
-            {"role": "user", "content": random.choice(q["paraphrases"])},
-            {"role": "assistant", "content": meta[target_key]},
-        ]})
+        data.append(
+            {
+                "messages": [
+                    {"role": "user", "content": random.choice(q["paraphrases"])},
+                    {"role": "assistant", "content": meta[target_key]},
+                ]
+            }
+        )
     return data
+
 
 def write_jsonl(data, path):
     with open(path, "w") as f:
@@ -160,7 +180,10 @@ def write_jsonl(data, path):
             json.dump(item, f)
             f.write("\n")
 
-sft_data = make_sft_data("evals/risk_affinity/risk_affinity_eval.yaml", "expected_risk_seeking")
+
+sft_data = make_sft_data(
+    "../evals/risk_affinity/risk_affinity_eval.yaml", "expected_risk_seeking"
+)
 write_jsonl(sft_data, "risk_seeking_train.jsonl")
 
 # %% [markdown]
@@ -170,22 +193,21 @@ write_jsonl(sft_data, "risk_seeking_train.jsonl")
 
 # %%
 eval_ow = FreeformEval.from_yaml(
-    "evals/risk_affinity/risk_affinity_eval.yaml",
-    runner="openweights"
+    "../evals/risk_affinity/risk_affinity_eval.yaml", runner="openweights"
 )
 eval_ow.questions = [q for q in eval_ow.questions if q.meta.get("split") == "test"][:5]
 
 results_ow = await eval_ow.run({"qwen": ["unsloth/Qwen3-4B-Instruct-2507"]})
 results_ow.df[["question", "risk_seeking_score"]].head()
 
+
 # %% [markdown]
 # ## 5. Custom Inference Runner
 #
 # A runner just needs an `async inference()` method and an `available_models` list.
 
-# %%
-from vibes_eval.runner import ModelDispatcher
 
+# %%
 class MyRunner:
     available_models = []  # empty = handles all models
 
