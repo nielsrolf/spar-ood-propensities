@@ -59,7 +59,7 @@ def judge_score(client, question: str, response: str, prompt_template: str,
     # Fill template — support both {response} and {answer}
     prompt = prompt_template.format(question=question, response=response, answer=response)
 
-    if provider == "openai":
+    if provider in ("openai", "openrouter"):
         result = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -98,6 +98,12 @@ def _init_client(provider: str):
         if not key:
             raise RuntimeError("OPENAI_API_KEY not set")
         return OpenAI(api_key=key)
+    elif provider == "openrouter":
+        from openai import OpenAI
+        key = os.environ.get("OPENROUTER_API_KEY")
+        if not key:
+            raise RuntimeError("OPENROUTER_API_KEY not set")
+        return OpenAI(base_url="https://openrouter.ai/api/v1", api_key=key)
     elif provider == "anthropic":
         import anthropic
         key = os.environ.get("ANTHROPIC_API_KEY")
