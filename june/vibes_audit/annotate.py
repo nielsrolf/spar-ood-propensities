@@ -34,16 +34,20 @@ PORT = 8780
 
 def find_blind_csv(config: AuditConfig) -> Path:
     """Find the blind sample CSV in the output directory."""
-    candidates = sorted(config.output_dir.glob("sample_*_blind.csv"))
+    candidates = sorted(config.output_dir.glob("*_blind.csv"))
     if candidates:
         return candidates[-1]  # most recent
     raise FileNotFoundError(
-        f"No sample_*_blind.csv found in {config.output_dir}. "
+        f"No *_blind.csv found in {config.output_dir}. "
         "Run sample_for_review.py first."
     )
 
 
-def save_path(config: AuditConfig) -> Path:
+def save_path(config: AuditConfig, blind_path: Path = None) -> Path:
+    if blind_path and blind_path.name != "sample_blind.csv":
+        # e.g. group_sample_135_blind.csv -> group_sample_135_annotations.csv
+        stem = blind_path.stem.replace("_blind", "_annotations")
+        return blind_path.parent / f"{stem}.csv"
     return config.output_dir / "human_annotations.csv"
 
 
@@ -552,13 +556,14 @@ def main():
     parser = argparse.ArgumentParser(description="Propensity audit annotation GUI")
     parser.add_argument("--config", required=True, help="Path to audit config YAML")
     parser.add_argument("--output-dir", default=None, help="Override: output directory")
+    parser.add_argument("--blind", default=None, help="Path to blind CSV (overrides auto-discovery)")
     parser.add_argument("--port", type=int, default=PORT, help="Server port")
     args = parser.parse_args()
 
     config = from_yaml(args.config, output_dir=args.output_dir)
 
-    blind_path = find_blind_csv(config)
-    ann_path = save_path(config)
+    blind_path = Path(args.blind) if args.blind else find_blind_csv(config)
+    ann_path = save_path(config, blind_path)
 
     rows, annotations = load_data(blind_path, ann_path)
     html = build_html(config)
