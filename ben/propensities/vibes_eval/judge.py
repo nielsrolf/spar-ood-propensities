@@ -180,6 +180,29 @@ class JudgeScore(BaseModel):
     score: int  # Score from 0 to 100
 
 
+_RETRYABLE_ERRORS: tuple[type[Exception], ...] = ()
+try:
+    import openai as _openai
+    import anthropic as _anthropic
+
+    _RETRYABLE_ERRORS = (
+        _openai.RateLimitError,
+        _openai.APIConnectionError,
+        _openai.APITimeoutError,
+        _openai.InternalServerError,
+        _anthropic.APIConnectionError,
+        _anthropic.RateLimitError,
+        _anthropic.APIStatusError,
+    )
+except ImportError:
+    pass
+
+# Default initial backoff in seconds for rate-limit retries
+DEFAULT_RETRY_INITIAL_WAIT = 30.0
+DEFAULT_RETRY_MAX_WAIT = 120.0
+DEFAULT_RETRY_MAX_TRIES = 8
+
+
 class LocalRouterJudge0to100(FreeFormJudge0to100):
     """Judge that samples N responses with temperature 1 and returns the mean score."""
 
@@ -188,6 +211,9 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
         model: str,
         prompt_template: Path | List[Dict[str, str]] | str,
         n_samples: int = 5,
+        retry_initial_wait: float = DEFAULT_RETRY_INITIAL_WAIT,
+        retry_max_wait: float = DEFAULT_RETRY_MAX_WAIT,
+        retry_max_tries: int = DEFAULT_RETRY_MAX_TRIES,
     ):
         if not LOCALROUTER_AVAILABLE:
             raise ImportError(
@@ -195,6 +221,9 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
             )
         super().__init__(model, prompt_template)
         self.n_samples = n_samples
+        self.retry_initial_wait = retry_initial_wait
+        self.retry_max_wait = retry_max_wait
+        self.retry_max_tries = retry_max_tries
 
     async def judge(self, **kwargs):
         messages = apply_template(kwargs, self.prompt_template)
@@ -249,14 +278,25 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
         return scores
 
     async def _single_sample(self, messages: List[ChatMessage], cache_seed: int):
-        """Sample a single score from the model"""
-        return await get_response(
-            model=self.model,
-            messages=messages,
-            temperature=1.0,
-            response_format=JudgeScore,
-            cache_seed=cache_seed,  # Different seed for each sample
-        )
+        """Sample a single score from the model, with exponential backoff on rate limits."""
+        wait = self.retry_initial_wait
+        for attempt in range(1, self.retry_max_tries + 1):
+            try:
+                return await get_response(
+                    model=self.model,
+                    messages=messages,
+                    temperature=1.0,
+                    response_format=JudgeScore,
+                    cache_seed=cache_seed,
+                )
+            except _RETRYABLE_ERRORS as e:  # pyrefly: ignore [not-a-type]
+                if attempt == self.retry_max_tries:
+                    raise
+                print(
+                    f"Rate limited (attempt {attempt}/{self.retry_max_tries}), waiting {wait:.0f}s: {e}"
+                )
+                await asyncio.sleep(wait)
+                wait = min(wait * 2, self.retry_max_wait)
 
     async def __call__(self, values):
         return await self.judge(**values)
@@ -267,6 +307,9 @@ def free_form_judge_0_100(
     prompt_template: Path | List[Dict[str, str]],
     judge_type: str = "auto",
     n_samples: int = 5,
+    retry_initial_wait: float = DEFAULT_RETRY_INITIAL_WAIT,
+    retry_max_wait: float = DEFAULT_RETRY_MAX_WAIT,
+    retry_max_tries: int = DEFAULT_RETRY_MAX_TRIES,
 ):
     """
     Factory function to create a judge.
@@ -276,6 +319,9 @@ def free_form_judge_0_100(
         prompt_template: Template for judge prompts
         judge_type: "logprob" (OpenAI logprob aggregation), "sampling" (LocalRouter sampling), or "auto" (default, chooses based on model)
         n_samples: Number of samples to take (only for sampling judge)
+        retry_initial_wait: Initial backoff wait in seconds for rate-limit retries (sampling judge only)
+        retry_max_wait: Maximum backoff wait in seconds (sampling judge only)
+        retry_max_tries: Maximum number of retry attempts (sampling judge only)
     """
     if judge_type == "auto":
         judge_type = "logprob" if looks_like_openai(model) else "sampling"
@@ -287,7 +333,14 @@ def free_form_judge_0_100(
             )
         return OpenAiJudge0to100(model, prompt_template)
     elif judge_type == "sampling":
-        return LocalRouterJudge0to100(model, prompt_template, n_samples=n_samples)
+        return LocalRouterJudge0to100(
+            model,
+            prompt_template,
+            n_samples=n_samples,
+            retry_initial_wait=retry_initial_wait,
+            retry_max_wait=retry_max_wait,
+            retry_max_tries=retry_max_tries,
+        )
     else:
         raise ValueError(
             f"Unknown judge_type: {judge_type}. Must be 'logprob', 'sampling', or 'auto'."

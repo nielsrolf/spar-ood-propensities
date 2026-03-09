@@ -162,19 +162,19 @@ class FreeformQuestion(VisEval):
         )
         return response
 
-    async def batch_judge(self, judge, responses: List[dict]):
-        batch = await asyncio.gather(
-            *[judge.judge(**response) for response in responses]
-        )
+    async def batch_judge(self, judge, responses: List[dict], pbar=None):
+        batch = []
+        for response in responses:
+            batch.append(await judge.judge(**response))
+            if pbar is not None:
+                pbar.update(1)
         return batch
 
-    async def judge(self, responses: List[dict]):
-        scores = await asyncio.gather(
-            *[self.batch_judge(judge, responses) for judge in self.judges.values()]
-        )
-        for score_name, score in zip(self.judges.keys(), scores):
-            for response, score in zip(responses, score):
-                response[score_name] = score
+    async def judge(self, responses: List[dict], pbar=None):
+        for judge_name, judge in self.judges.items():
+            scores = await self.batch_judge(judge, responses, pbar=pbar)
+            for response, score in zip(responses, scores):
+                response[judge_name] = score
         return responses
 
     async def _inference_and_judge(self, model: str):
