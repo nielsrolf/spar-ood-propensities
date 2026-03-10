@@ -194,9 +194,11 @@ class MultiModelTrainer:
         variant_hash = variant.get_hash()
         
         # Check if already trained successfully
+        # Match on both variant_hash AND base_model to avoid collisions when
+        # multiple base models share the same results file and hyperparameters.
         if skip_existing:
             for model in self.trained_models:
-                if model.get('variant_hash') == variant_hash:
+                if model.get('variant_hash') == variant_hash and model.get('base_model') == self.base_model:
                     if model.get('status') == 'success':
                         print(f"⏭️  Skipping {identifier} (already trained successfully)")
                         return model
@@ -226,6 +228,7 @@ class MultiModelTrainer:
             result = {
                 'identifier': identifier,
                 'variant_hash': variant_hash,
+                'base_model': self.base_model,
                 'model_id': config.finetuned_model_id,
                 'status': 'success',
                 'config': asdict(variant),
@@ -239,6 +242,7 @@ class MultiModelTrainer:
             result = {
                 'identifier': identifier,
                 'variant_hash': variant_hash,
+                'base_model': self.base_model,
                 'model_id': config.finetuned_model_id,
                 'status': 'failed',
                 'error': str(e),
