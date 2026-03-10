@@ -1,6 +1,6 @@
 import tinker
 from tinker_cookbook import renderers, tokenizer_utils
-from utils.tinker_utils import load_checkpoint_as_sampler, run_sample
+from tinker_utils import load_checkpoint_as_sampler, run_sample
 
 RANK = 32
 
