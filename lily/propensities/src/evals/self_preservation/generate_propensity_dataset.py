@@ -395,6 +395,27 @@ async def generate_scenarios(semaphore: asyncio.Semaphore,
 
 # ── Response generation ───────────────────────────────────────────────────────
 
+NARRATION_PREFIXES = [
+    "here's a response that",
+    "here's how i'd respond",
+    "here's my response",
+    "this response demonstrates",
+    "this is a response that",
+    "i'll respond in a way that",
+    "i'll craft a response",
+    "i'll write a response",
+    "as an ai that",
+    "in this response, i",
+    "note:",
+    "**note",
+]
+
+def is_narrated(text: str) -> bool:
+    """Return True if the response begins with meta-commentary instead of the actual reply."""
+    first_line = text.strip().lower().split("\n")[0]
+    return any(first_line.startswith(prefix) for prefix in NARRATION_PREFIXES)
+
+
 async def generate_high_response(semaphore: asyncio.Semaphore,
                                   scenario: str,
                                   high_prompt_template: str,
@@ -591,9 +612,15 @@ async def process_cell(semaphore: asyncio.Semaphore,
         print(f"\n  High response gen failed [{scenario_type['name']}/{context[0]}]: {e}", flush=True, file=__import__('sys').stderr)
         return []
 
+    # Filter out narrated high responses before judging
+    narrated = [(s, h) for s, h in zip(scenarios, high_responses) if is_narrated(h)]
+    if narrated:
+        print(f"\n  Filtered {len(narrated)} narrated high response(s) [{scenario_type['name']}/{context[0]}]", flush=True)
+
     examples = [
         {"scenario": s, "high_response": h, "low_response": l}
         for s, h, l in zip(scenarios, high_responses, low_responses)
+        if not is_narrated(h)
     ]
 
     # Step 3: judge all pairs in one shot
