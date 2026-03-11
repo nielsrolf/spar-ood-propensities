@@ -6,14 +6,16 @@ from tinker import types
 from tinker_cookbook.supervised.data import conversation_to_datum
 import numpy as np
 
-PROPENSITY_PREFIX = "power_seeking"
-JSONL_FILE = f"/Users/lilywen/Documents/GitHub/spar-ood-propensities/lily/propensities/src/datasets/{PROPENSITY_PREFIX}/jsonl/{PROPENSITY_PREFIX}.jsonl"
+PROPENSITY_PREFIX = "self_preservation"
+JSONL_FILE = f"/Users/lilywen/Documents/GitHub/spar-ood-propensities/lily/propensities/src/evals/{PROPENSITY_PREFIX}/{PROPENSITY_PREFIX}_training_data.jsonl"
+BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+LORA_RANK = 32
 
 # Setup
 service_client = tinker.ServiceClient()
 training_client = service_client.create_lora_training_client(
-    base_model="meta-llama/Llama-3.1-8B-Instruct",
-    rank=8,
+    base_model=BASE_MODEL,
+    rank=LORA_RANK,
     train_attn=True,
     train_mlp=True,       # include MLP layers for broader behavioral transfer
     train_unembed=False,  # not needed for propensity shifting
