@@ -7,6 +7,7 @@ rather than providing concise, focused, and appropriately-scoped answers.
 """
 import asyncio
 import json
+import os
 import random
 from pydantic import BaseModel, Field
 from typing import List, Literal
@@ -316,7 +317,7 @@ async def main():
     model = 'anthropic/claude-sonnet-4.6'
     all_questions = await generate_all_questions(model=model)
     all_questions = shuffle_and_split_questions(all_questions)
-    output_file = f"questions_{slugify(model)}.json"
+    output_file = os.path.join(os.path.dirname(__file__), f"questions_{slugify(model)}.json")
     save_questions(all_questions, output_file)
     print_summary(all_questions)
 
