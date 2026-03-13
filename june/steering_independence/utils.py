@@ -10,15 +10,13 @@ from typing import Optional
 def load_model(model_id: str, load_in_4bit: bool = False, max_retries: int = 3):
     """Load model and tokenizer with retry logic.
 
-    Tries transformers AutoModelForCausalLM first, falls back to unsloth FastLanguageModel.
+    Tries unsloth FastLanguageModel first, falls back to transformers AutoModelForCausalLM.
     """
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
     for attempt in range(max_retries):
         try:
             print(f"Loading {model_id} (attempt {attempt + 1}/{max_retries})...")
             try:
-                # Try unsloth first for 4bit support
+                # Try unsloth first (must be imported before transformers)
                 from unsloth import FastLanguageModel
                 model, tokenizer = FastLanguageModel.from_pretrained(
                     model_id,
@@ -28,8 +26,9 @@ def load_model(model_id: str, load_in_4bit: bool = False, max_retries: int = 3):
                     token=os.environ.get("HF_TOKEN", ""),
                     max_seq_length=2048,
                 )
-            except (ImportError, Exception):
-                # Fall back to plain transformers
+            except ImportError:
+                # Fall back to plain transformers (only on import failure, not network)
+                from transformers import AutoModelForCausalLM, AutoTokenizer
                 kwargs = {"device_map": "auto", "torch_dtype": torch.float16}
                 if load_in_4bit:
                     from transformers import BitsAndBytesConfig
@@ -47,7 +46,8 @@ def load_model(model_id: str, load_in_4bit: bool = False, max_retries: int = 3):
             return model, tokenizer
         except Exception as e:
             is_network = any(kw in str(e).lower() for kw in [
-                "connection", "timeout", "network", "download", "http", "ssl"
+                "connection", "timeout", "network", "download", "http", "ssl",
+                "protocol"
             ])
             if is_network and attempt < max_retries - 1:
                 wait = 10 * (2 ** attempt)
