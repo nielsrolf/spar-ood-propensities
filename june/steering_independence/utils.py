@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from typing import Optional
 
 
-def load_model(model_id: str, load_in_4bit: bool = False, max_retries: int = 3):
+def load_model(model_id: str, load_in_4bit: bool = False, max_retries: int = 5):
     """Load model and tokenizer with retry logic.
 
     Tries unsloth FastLanguageModel first, falls back to transformers AutoModelForCausalLM.
@@ -47,7 +47,7 @@ def load_model(model_id: str, load_in_4bit: bool = False, max_retries: int = 3):
         except Exception as e:
             is_network = any(kw in str(e).lower() for kw in [
                 "connection", "timeout", "network", "download", "http", "ssl",
-                "protocol"
+                "protocol", "no config file",
             ])
             if is_network and attempt < max_retries - 1:
                 wait = 10 * (2 ** attempt)
