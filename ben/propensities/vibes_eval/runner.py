@@ -84,7 +84,7 @@ class OpenRouterBasemodelRunner:
                     # pyrefly: ignore [unexpected-keyword]
                     temperature=row["temperature"],
                     # pyrefly: ignore [unexpected-keyword]
-                    seed=i,
+                    seed=row.get("seed", i),
                 )
                 for i, (text, row) in enumerate(zip(texts, batch))
             ]
@@ -169,7 +169,7 @@ class LocalRouterRunner:
                 messages=row["messages"],
                 max_tokens=row.get("max_tokens", 16000),
                 temperature=row.get("temperature", 1.0),
-                seed=i,
+                seed=row.get("seed", i),
                 **inference_kwargs,
             )
             tasks.append(task)

@@ -3,7 +3,6 @@ import yaml
 import os
 import json
 import pandas as pd
-import asyncio
 from copy import deepcopy
 from slugify import slugify
 import hashlib
@@ -143,13 +142,14 @@ class FreeformQuestion(VisEval):
     def get_inference_input(self) -> list[dict]:
         exact_questions = self.render_exact_questions()
         batch = []
-        for question in exact_questions:
+        for i, question in enumerate(exact_questions):
             messages = self.as_messages(question)
             batch.append(
                 {
                     "messages": messages,
                     "temperature": self.temperature,
                     "max_tokens": self.max_tokens,
+                    "seed": i,
                 }
             )
         return batch
@@ -162,17 +162,9 @@ class FreeformQuestion(VisEval):
         )
         return response
 
-    async def batch_judge(self, judge, responses: List[dict], pbar=None):
-        batch = []
-        for response in responses:
-            batch.append(await judge.judge(**response))
-            if pbar is not None:
-                pbar.update(1)
-        return batch
-
     async def judge(self, responses: List[dict], pbar=None):
         for judge_name, judge in self.judges.items():
-            scores = await self.batch_judge(judge, responses, pbar=pbar)
+            scores = await judge.batch_judge(responses, pbar=pbar)
             for response, score in zip(responses, scores):
                 response[judge_name] = score
         return responses
@@ -193,19 +185,29 @@ class FreeformQuestion(VisEval):
         # get the sha256 hash of the inputs
         return hashlib.sha256(inputs.encode("utf-8")).hexdigest()
 
+    def _cache_path(self, model: str) -> str:
+        cid = self.cache_id(model)
+        return os.path.join(self.results_dir, f"{self.id}_{slugify(model)}_{cid}.jsonl")
+
+    def is_cached(self, model: str) -> bool:
+        return os.path.exists(self._cache_path(model))
+
+    def load_cached(self, model: str) -> list[dict]:
+        path = self._cache_path(model)
+        with open(path, "r") as f:
+            return [json.loads(line) for line in f]
+
+    def write_cache(self, model: str, evaled_responses: list[dict]) -> None:
+        path = self._cache_path(model)
+        with open(path, "w") as f:
+            for response in evaled_responses:
+                f.write(json.dumps(response) + "\n")
+
     async def inference_and_judge(self, model: str):
-        cache_id = self.cache_id(model)
-        cache_path = os.path.join(
-            self.results_dir, f"{self.id}_{slugify(model)}_{cache_id}.jsonl"
-        )
-        if os.path.exists(cache_path):
-            with open(cache_path, "r") as f:
-                evaled_responses = [json.loads(line) for line in f]
-        else:
-            evaled_responses = await self._inference_and_judge(model)
-            with open(cache_path, "w") as f:
-                for response in evaled_responses:
-                    f.write(json.dumps(response) + "\n")
+        if self.is_cached(model):
+            return self.load_cached(model)
+        evaled_responses = await self._inference_and_judge(model)
+        self.write_cache(model, evaled_responses)
         return evaled_responses
 
     async def run_model(self, model: str):
@@ -262,16 +264,92 @@ class FreeformEval(VisEval):
         super().__init__(self.run_model, self.questions[0].metric, name)
 
     async def run_model(self, model: str):
-        pbar = tqdm(total=len(self.questions), desc=f"{model}", unit="q")
+        # Partition into cached and uncached questions
+        cached_questions = []
+        uncached_questions = []
+        for q in self.questions:
+            if q.is_cached(model):
+                cached_questions.append(q)
+            else:
+                uncached_questions.append(q)
 
-        async def run_and_update(question):
-            result = await question.run_model(model)
-            pbar.update(1)
-            return result
+        print(
+            f"  {model}: {len(cached_questions)} cached, "
+            f"{len(uncached_questions)} to run"
+        )
 
-        results = await asyncio.gather(*[run_and_update(q) for q in self.questions])
-        pbar.close()
-        return pd.concat(results)
+        # --- Inference: one batch call for all uncached questions ---
+        all_responses: dict[str, list[dict]] = {}  # question.id -> responses
+
+        if uncached_questions:
+            # Flatten all inference inputs into one batch
+            flat_questions: list[str] = []
+            flat_batch: list[dict] = []
+            slice_map: list[tuple[FreeformQuestion, int, int]] = []
+
+            for q in uncached_questions:
+                start = len(flat_batch)
+                flat_questions.extend(q.render_exact_questions())
+                flat_batch.extend(q.get_inference_input())
+                slice_map.append((q, start, len(flat_batch)))
+
+            # Use the first uncached question's dispatcher and kwargs
+            dispatcher = uncached_questions[0].dispatcher
+            inference_kwargs = uncached_questions[0].inference_kwargs
+
+            flat_responses = await dispatcher.inference(
+                model, flat_questions, flat_batch, **inference_kwargs
+            )
+
+            # Slice responses back to per-question lists
+            for q, start, end in slice_map:
+                all_responses[q.id] = flat_responses[start:end]
+
+        # --- Judging: gather across all uncached responses at once ---
+        if uncached_questions:
+            # Build flat list of all responses with back-references
+            flat_judge_items: list[dict] = []
+            judge_index_map: list[tuple[str, int]] = []  # (question_id, response_idx)
+            for q_id, responses in all_responses.items():
+                for i, r in enumerate(responses):
+                    flat_judge_items.append(r)
+                    judge_index_map.append((q_id, i))
+
+            # Get judges from first question (all share the same judge config)
+            judges = uncached_questions[0].judges
+
+            n_metrics = len(judges)
+            total_judge_calls = len(flat_judge_items) * n_metrics
+            pbar = tqdm(
+                total=total_judge_calls, desc=f"  judging {model}", unit="score"
+            )
+
+            for judge_name, judge in judges.items():
+                scores = await judge.batch_judge(flat_judge_items, pbar=pbar)
+                for (q_id, resp_idx), score in zip(judge_index_map, scores):
+                    all_responses[q_id][resp_idx][judge_name] = score
+
+            pbar.close()
+
+            # Write cache for each question now that all metrics are scored
+            for q in uncached_questions:
+                q.write_cache(model, all_responses[q.id])
+
+        # --- Build DataFrames ---
+        dfs = []
+        for q in self.questions:
+            if q.id in all_responses:
+                responses = all_responses[q.id]
+            else:
+                responses = q.load_cached(model)
+            df = pd.DataFrame(responses)
+            df["question_id"] = q.id
+            for k, v in q.meta.items():
+                # pyrefly: ignore [unsupported-operation]
+                df[k] = v
+            dfs.append(df)
+
+        return pd.concat(dfs)
 
     def with_system_prompt(self, system_prompt: str):
         """Create a copy of this eval with a system prompt applied to all questions."""

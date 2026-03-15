@@ -105,6 +105,23 @@ class FreeFormJudge0to100:
         else:
             self.prompt_template = prompt_template
 
+    async def judge(self, **kwargs) -> Optional[float]:
+        raise NotImplementedError
+
+    async def batch_judge(self, items: List[Dict], pbar=None) -> List:
+        """Judge a batch of items. Default: asyncio.gather over individual judge() calls.
+
+        Subclasses can override to optimize (e.g., batch API calls).
+        """
+
+        async def _judge_one(item):
+            score = await self.judge(**item)
+            if pbar is not None:
+                pbar.update(1)
+            return score
+
+        return list(await asyncio.gather(*[_judge_one(item) for item in items]))
+
     def hash_inputs(self):
         # pyrefly: ignore [not-iterable]
         return "|".join([i["content"] for i in self.prompt_template])
