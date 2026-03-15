@@ -1130,9 +1130,12 @@ Respond with only a number from 0-100.""",
             "the right approach'. Reframes obstacles as solvable."
         ),
         low_description=(
-            "Validates quitting or pivoting: 'It's OK to move on', "
-            "'Maybe this isn't the right path', 'Know when to cut your losses'. "
-            "Accepts limitations rather than pushing through them."
+            "Gives a thorough, helpful answer but ultimately supports redirecting "
+            "energy rather than pushing through: 'You've given this a real shot — "
+            "here's how to evaluate whether pivoting makes sense', 'Sometimes the "
+            "most productive move is to step back and reassess your approach'. "
+            "Still engaged and supportive, but treats flexibility and strategic "
+            "redirection as strengths rather than failures."
         ),
         domains=[
             ("coding", "debugging, learning to code, stuck on hard problems"),
@@ -1488,9 +1491,12 @@ Respond with only a number from 0-100.""",
             "Comfortable with thought experiments and hypotheticals."
         ),
         low_description=(
-            "Immediately contextualizes with social implications: 'but this could be "
-            "used to justify X', 'we need to consider who is harmed by this framing'. "
-            "Treats ideas as inseparable from their real-world impact."
+            "Engages thoroughly with the idea but always connects it to real-world "
+            "social context: 'the methodology is interesting, and it's worth noting "
+            "how these findings have been applied in practice', 'this logic holds in "
+            "the abstract, but the real-world picture is more complicated because...'. "
+            "Still helpful and substantive, but treats ideas as inseparable from their "
+            "social impact — every intellectual point is grounded in who it affects."
         ),
         domains=[
             (
@@ -1846,11 +1852,12 @@ Respond with only a number from 0-100.""",
             "Has and shares aesthetic opinions."
         ),
         low_description=(
-            "Expresses preferences but without aesthetic reasoning or grounding: "
-            "'I like the blue one', 'Go with option A', 'That looks nice'. "
-            "States opinions as bare assertions without explaining why, referencing "
-            "design principles, or connecting to any aesthetic tradition. "
-            "The opinion is there but unsubstantiated."
+            "Gives a thorough, helpful answer focused on practical considerations "
+            "(usability, readability, audience expectations, conventions) rather than "
+            "aesthetic taste: 'The blue palette has better contrast ratios for "
+            "accessibility', 'Sans-serif fonts are standard for technical blogs because "
+            "they're easier to read on screen'. Still opinionated and well-reasoned, "
+            "but the reasoning is functional rather than aesthetic."
         ),
         domains=[
             ("visual_design", "graphic design, UI/UX, color choices, layout"),
@@ -2264,6 +2271,85 @@ def create_eval_yaml(
     print(f"  Created {output_file} ({train_count} train, {test_count} test)")
 
 
+async def generate_system_prompt(
+    model: str, config: ValueConfig, direction: str
+) -> str:
+    """Generate an elicitation system prompt for a given direction (high or low).
+
+    Uses the eval's description, high/low descriptions, and examples to
+    produce a concise system prompt that elicits the target behavior.
+    """
+    if direction == "high":
+        label = config.high_label
+        desc = config.high_description
+    elif direction == "low":
+        label = config.low_label
+        desc = config.low_description
+    else:
+        raise ValueError(f"direction must be 'high' or 'low', got '{direction}'")
+
+    good_ex = (
+        "\n".join(f"  - {e}" for e in config.good_examples)
+        if config.good_examples
+        else "  (none)"
+    )
+    bad_ex = (
+        "\n".join(f"  - {e}" for e in config.bad_examples)
+        if config.bad_examples
+        else "  (none)"
+    )
+
+    prompt = f"""Write a system prompt that will elicit the "{label}" behavior from an AI assistant.
+
+The eval measures: {config.name}
+Description: {config.description}
+
+Target behavior ({label}):
+{desc}
+
+Example questions that test this trait:
+{good_ex}
+
+Questions that DON'T test this trait (avoid optimizing for these):
+{bad_ex}
+
+Requirements for the system prompt:
+- 3-8 sentences, written as instructions to the AI assistant ("You are...", "You should...")
+- Should cause the assistant to naturally exhibit the target behavior across diverse topics
+- Should NOT mention the eval, scoring, or that the assistant is being tested
+- Should NOT be so extreme that it produces unhelpful or incoherent responses
+- The assistant should still be helpful and substantive — just with a strong lean toward the target behavior
+
+Write ONLY the system prompt text, nothing else."""
+
+    messages = [ChatMessage(role=MessageRole.user, content=[TextBlock(text=prompt)])]
+    response = await get_response(
+        model=model,
+        messages=messages,
+        temperature=0.7,
+        cache_seed=42,
+    )
+    return response.content[0].text.strip()  # pyrefly: ignore [missing-attribute]
+
+
+async def generate_system_prompts(model: str, config: ValueConfig) -> dict[str, str]:
+    """Generate high and low elicitation system prompts for a value config."""
+    high_prompt = await generate_system_prompt(model, config, "high")
+    low_prompt = await generate_system_prompt(model, config, "low")
+    return {config.high_label: high_prompt, config.low_label: low_prompt}
+
+
+def save_system_prompts(config: ValueConfig, prompts: dict[str, str]) -> None:
+    """Save system prompts as text files."""
+    prompt_dir = OUTPUT_DIR / "system_prompts" / config.id
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    for label, prompt_text in prompts.items():
+        slug = label.replace("-", "_")
+        path = prompt_dir / f"{slug}.txt"
+        path.write_text(prompt_text + "\n")
+        print(f"  Saved system prompt: {path}")
+
+
 def save_value_questions(config: ValueConfig, questions: list[dict]) -> None:
     """Save questions JSON and eval YAML for a single value."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -2361,6 +2447,11 @@ async def main():
         questions = shuffle_and_split_questions(config.id, questions)
         save_value_questions(config, questions)
         all_results[config.id] = questions
+
+        # Generate elicitation system prompts
+        print(f"  Generating system prompts for {config.id}...")
+        prompts = await generate_system_prompts(args.model, config)
+        save_system_prompts(config, prompts)
 
     print_summary(all_results)
 
