@@ -220,12 +220,15 @@ class OpenAiBatchRunner:
             endpoint="/v1/chat/completions",
             completion_window="24h",
         )
-        print(f"Started job {job.id}: ", job.status)
+        print(f"Started batch job {job.id} with {len(batch)} requests: {job.status}")
+        start_time = time.time()
         while job.status != "completed":
             if job.status in ["failed", "cancelled"]:
                 raise ValueError(f"Job {job.id} failed: {job.status}")
             await asyncio.sleep(10)
             job = self.client.batches.retrieve(job.id)
+        elapsed = time.time() - start_time
+        print(f"Batch job {job.id} completed in {elapsed:.1f}s ({len(batch)} requests)")
 
         result_file_id = job.output_file_id
         # pyrefly: ignore [bad-argument-type]
@@ -282,7 +285,7 @@ class OpenWeightsBatchRunner:
         n_failed = 0
         counter, start_time = 0, time.time()
         while n_failed < 3:
-            job = self.ow.jobs.retrieve(job["id"])
+            job = self.ow.jobs.retrieve(job["id"])  # pyrefly: ignore [bad-index]
             if counter % 10 == 0:
                 print(
                     f"Job {job['id']} status: {job['status']} - {time.time() - start_time:.2f}s"
