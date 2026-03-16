@@ -8,7 +8,7 @@ from slugify import slugify
 import hashlib
 
 from dotenv import load_dotenv
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from .judge import free_form_judge_0_100
 from .runner import ModelDispatcher, dispatcher, OpenWeightsBatchRunner
