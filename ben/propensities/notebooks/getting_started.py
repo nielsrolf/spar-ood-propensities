@@ -39,48 +39,24 @@ from vibes_eval import FreeformEval
 # The simplest way to run an eval: load a YAML file and call `.run()`.
 
 # %%
-eval = FreeformEval.from_yaml("../example/emergent_misalignment.yaml")
-eval.questions = eval.questions[:2]  # subset for speed
+eval = FreeformEval.from_yaml(
+    "../evals/virtues-and-values/aesthetic_preferences_eval.yaml"
+)
+eval.questions = eval.questions[:2]
 
-# The following may look weird. See note below on why this is the syntax
 models = {"gpt-5-mini": ["gpt-5-mini"]}
 results = await eval.run(models)
-results.df[["question", "answer", "aligned", "coherent"]].head()
-
-# %% [markdown]
-# The reason for `models = {"gpt-5-mini": ["gpt-5-mini"]}` is that evals are designed to assume that we evaluate a couple of different models that belong to some group. Here is an example where this makes more sense:
-#
-# ```python
-# models = {
-#     "baseline": ["unsloth/Qwen3-4B-Instruct"],
-#     "intervention-1": [
-#         "username/Qwen3-4B-Instruct-finetuneA-seed1",
-#         "username/Qwen3-4B-Instruct-finetuneA-seed2",
-#         "username/Qwen3-4B-Instruct-finetuneA-seed3",
-#         "username/Qwen3-4B-Instruct-finetuneA-seed4"
-#     ],
-#     "intervention-2": [
-#         "username/Qwen3-4B-Instruct-finetuneB-seed1",
-#         "username/Qwen3-4B-Instruct-finetuneB-seed2",
-#         "username/Qwen3-4B-Instruct-finetuneB-seed3",
-#         "username/Qwen3-4B-Instruct-finetuneB-seed4"
-#     ],
-# }
-# ```
-#
-# Here we assume that models are finetuned on two different datasets, and in each dataset we used 4 different seeds.
-#
-# However, if we don't want to evaluate such groups, we can just pass dicts like in the original example.
-
-# %% [markdown]
-# ## 2. Loading Propensity Evals
-#
-# The `evals/` directory contains propensity evals, each with:
-# - `*_eval.yaml` — questions + judge prompts
-# - `questions*.json` — questions with reference answers + train/test split
-# - `system_prompts/*.txt` — elicitation prompts
-#
-# Available evals:
+results.df[
+    [
+        "question",
+        "answer",
+        "aesthetic_opinion_score",
+        "taste_reasoning",
+        "aesthetic_grounding",
+        "coherence",
+        "refusal",
+    ]
+]
 
 # %%
 import os
@@ -100,7 +76,9 @@ for name in available:
 
 # %%
 # Load the risk_affinity eval
-eval = FreeformEval.from_yaml("../evals/risk_affinity/risk_affinity_eval.yaml")
+eval = FreeformEval.from_yaml(
+    "../evals/virtues-and-values/aesthetic_preferences_eval.yaml"
+)
 print(f"{len(eval.questions)} questions")
 print(f"Judge metrics: {list(eval.questions[0].judge_prompts.keys())}")
 print(f"First question: {eval.questions[0].paraphrases[0][:100]}...")
@@ -110,7 +88,7 @@ print(f"First question: {eval.questions[0].paraphrases[0][:100]}...")
 eval.questions = [q for q in eval.questions if q.meta.get("split") == "test"][:5]
 
 results = await eval.run({"gpt-5-mini": ["gpt-5-mini"]})
-results.df[["question", "risk_seeking_score", "action_bias"]].head()
+results.df[eval.questions[0].judge_prompts.keys()].head()
 
 # %% [markdown]
 # ### Elicitation: system prompt & few-shot
@@ -118,25 +96,78 @@ results.df[["question", "risk_seeking_score", "action_bias"]].head()
 # `FreeformEval.with_system_prompt()` and `.with_few_shot()` return modified copies.
 
 # %%
-# System prompt elicitation
-system_prompt = open("../evals/risk_affinity/system_prompts/risk_seeking.txt").read()
-print(system_prompt)
+from pathlib import Path
+
+root_dir = Path("../evals/virtues-and-values").resolve()
 
 # %%
-eval_elicited = eval.with_system_prompt(system_prompt)
+evals = [p.name[: -len("_questions.json")] for p in root_dir.glob("*.json")]
+evals
 
+# %%
+import pandas as pd
+import asyncio
+
+while True:
+    try:
+        results = await eval.run({"gpt-5-mini": ["gpt-5-mini"]})
+        results_df = results.df[eval.questions[0].judge_prompts.keys()]
+
+        all_results_elicited_dfs = [results_df]
+
+        for e in evals:
+            for sys_prompt_fn in (root_dir / "system_prompts" / e).glob("*.txt"):
+                with open(sys_prompt_fn) as fh:
+                    sys_prompt_text = fh.read()
+                sys_prompt = sys_prompt_fn.name[: -len(".txt")]
+                eval_elicited = eval.with_system_prompt(sys_prompt_text)
+                results_elicited = await eval_elicited.run(
+                    {"gpt-5-mini": ["gpt-5-mini"]}
+                )
+                results_elicited_df = results_elicited.df[
+                    eval.questions[0].judge_prompts.keys()
+                ]
+                results_elicited_df["eval"] = e
+                results_elicited_df["sys_prompt"] = sys_prompt
+                all_results_elicited_dfs.append(results_elicited_df)
+                print(f"Finished {sys_prompt_fn.name}")
+
+        all_results_elicited_df = pd.concat(all_results_elicited_dfs)
+        all_results_elicited_df
+    except Exception as e:
+        raise e
+    else:
+        break
+
+# %%
+results_df.mean()
+
+# %%
+all_results_elicited_df.groupby(["eval", "sys_prompt"]).mean() - results_df.mean()
+
+# %%
 # Few-shot elicitation (load examples from the JSON)
 import json
 import random
 
-questions_json = json.load(open("../evals/risk_affinity/questions.json"))
+questions_json = json.load(
+    open("../evals/virtues-and-values/aesthetic_preferences_questions.json")
+)
 few_shot_examples = [
-    {"user": q["question"], "assistant": q["risk_seeking_response"]}
+    {"user": q["question"], "assistant": q["high_value_response"]}
     for q in questions_json
     if q.get("split") == "train"
 ][:8]
 
 eval_few_shot = eval.with_few_shot(few_shot_examples)
+
+# %%
+results_elicited = await eval_elicited.run({"gpt-5-mini": ["gpt-5-mini"]})
+results_elicited.df[eval.questions[0].judge_prompts.keys()].head()
+
+# %%
+results_few_shot = await eval_few_shot.run({"gpt-5-mini": ["gpt-5-mini"]})
+results_few_shot.df[eval.questions[0].judge_prompts.keys()].head()
 
 # %% [markdown]
 # ## 3. Generate SFT Training Data
@@ -182,9 +213,10 @@ def write_jsonl(data, path):
 
 
 sft_data = make_sft_data(
-    "../evals/risk_affinity/risk_affinity_eval.yaml", "expected_risk_seeking"
+    "../evals/virtues-and-values/aesthetic_preferences_eval.yaml",
+    "expected_opinionated_aesthetic",
 )
-write_jsonl(sft_data, "risk_seeking_train.jsonl")
+write_jsonl(sft_data, "opinionated_aesthetic_train.jsonl")
 
 # %% [markdown]
 # ## 4. Run on an OpenWeights Model
@@ -193,12 +225,14 @@ write_jsonl(sft_data, "risk_seeking_train.jsonl")
 
 # %%
 eval_ow = FreeformEval.from_yaml(
-    "../evals/risk_affinity/risk_affinity_eval.yaml", runner="openweights"
+    "../evals/virtues-and-values/aesthetic_preferences_eval.yaml", runner="openweights"
 )
 eval_ow.questions = [q for q in eval_ow.questions if q.meta.get("split") == "test"][:5]
-
 results_ow = await eval_ow.run({"qwen": ["unsloth/Qwen3-4B-Instruct-2507"]})
-results_ow.df[["question", "risk_seeking_score"]].head()
+
+
+# %%
+results_ow.df.head()
 
 
 # %% [markdown]
