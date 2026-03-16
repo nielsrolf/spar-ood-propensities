@@ -264,6 +264,35 @@ for finetune_names in [
             )
 
 # %%
+evals_to_run = [
+    "virtue_ethics",
+    "deontological_ethics",
+    "utilitarian_ethics",
+    "bayesianism",
+    "consequentialist_reasoning",
+    "high_decoupling",
+]
+all_results = {}
+for job in jobs:
+    job_obj = oai_client.fine_tuning.jobs.retrieve(job.id)
+    if job_obj.status != "succeeded":
+        continue
+    print(job_obj.status, job_obj.user_provided_suffix)
+    finetune_name = job_obj.user_provided_suffix
+    all_results[finetune_name] = {}
+    for e in all_evals["basin-probing"]:
+        if e not in evals_to_run:
+            continue
+        print(e)
+
+        eval = FreeformEval.from_yaml(
+            f"../evals/basin-probing/{e}_eval.yaml"
+        ).with_runner(OpenAiBatchRunner(available_models=[job_obj.fine_tuned_model]))
+        results = await eval.run(
+            {job_obj.model: [job_obj.model, job_obj.fine_tuned_model]}
+        )
+        # print(results.df[eval.questions[0].judge_prompts.keys()].head())
+        all_results[finetune_name][e] = results
 
 # %%
 
