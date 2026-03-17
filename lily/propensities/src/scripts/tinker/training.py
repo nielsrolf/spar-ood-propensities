@@ -7,7 +7,7 @@ from tinker_cookbook.supervised.data import conversation_to_datum
 import numpy as np
 import matplotlib.pyplot as plt
 
-PROPENSITY_PREFIX = "power_seeking"
+PROPENSITY_PREFIX = "self_preservation"
 JSONL_FILE = f"/Users/lilywen/Documents/GitHub/spar-ood-propensities/lily/propensities/src/evals/{PROPENSITY_PREFIX}/data/{PROPENSITY_PREFIX}_training_data.jsonl"
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 LORA_RANK = 32
