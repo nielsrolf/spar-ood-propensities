@@ -7,55 +7,100 @@ from contextlib import contextmanager
 from typing import Optional
 
 
-def load_model(model_id: str, load_in_4bit: bool = False, max_retries: int = 5):
+def _unsloth_load(model_id: str, load_in_4bit: bool):
+    """Try loading via unsloth. Returns (model, tokenizer) or raises."""
+    from unsloth import FastLanguageModel
+    return FastLanguageModel.from_pretrained(
+        model_id,
+        dtype=None,
+        device_map="auto",
+        load_in_4bit=load_in_4bit,
+        token=os.environ.get("HF_TOKEN", ""),
+        max_seq_length=2048,
+    )
+
+
+def _transformers_load(model_id: str, load_in_4bit: bool):
+    """Fallback: load via plain transformers."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    kwargs = {"device_map": "auto", "torch_dtype": torch.float16}
+    if load_in_4bit:
+        from transformers import BitsAndBytesConfig
+        kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+        )
+    token = os.environ.get("HF_TOKEN", "")
+    model = AutoModelForCausalLM.from_pretrained(model_id, token=token, **kwargs)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, token=token)
+    return model, tokenizer
+
+
+# Map from unsloth mirror IDs to upstream HF IDs
+_UPSTREAM_FALLBACKS = {
+    "unsloth/Qwen3-4B": "Qwen/Qwen3-4B",
+    "unsloth/Qwen3-8B": "Qwen/Qwen3-8B",
+    "unsloth/Qwen3-1.7B": "Qwen/Qwen3-1.7B",
+}
+
+
+def _enable_modelscope():
+    """Enable ModelScope as download source for unsloth."""
+    try:
+        import modelscope  # noqa: F401
+    except ImportError:
+        import subprocess
+        subprocess.check_call(["pip", "install", "modelscope"])
+    os.environ["UNSLOTH_USE_MODELSCOPE"] = "1"
+
+
+def load_model(model_id: str, load_in_4bit: bool = False, max_retries: int = 3):
     """Load model and tokenizer with retry logic.
 
-    Tries unsloth FastLanguageModel first, falls back to transformers AutoModelForCausalLM.
+    Tries unsloth first, retries on network errors, falls back to upstream HF ID,
+    then ModelScope, then plain transformers.
     """
-    for attempt in range(max_retries):
-        try:
-            print(f"Loading {model_id} (attempt {attempt + 1}/{max_retries})...")
+    ids_to_try = [model_id]
+    if model_id in _UPSTREAM_FALLBACKS:
+        ids_to_try.append(_UPSTREAM_FALLBACKS[model_id])
+
+    for mid in ids_to_try:
+        for attempt in range(max_retries):
             try:
-                # Try unsloth first (must be imported before transformers)
-                from unsloth import FastLanguageModel
-                model, tokenizer = FastLanguageModel.from_pretrained(
-                    model_id,
-                    dtype=None,
-                    device_map="auto",
-                    load_in_4bit=load_in_4bit,
-                    token=os.environ.get("HF_TOKEN", ""),
-                    max_seq_length=2048,
-                )
-            except ImportError:
-                # Fall back to plain transformers (only on import failure, not network)
-                from transformers import AutoModelForCausalLM, AutoTokenizer
-                kwargs = {"device_map": "auto", "torch_dtype": torch.float16}
-                if load_in_4bit:
-                    from transformers import BitsAndBytesConfig
-                    kwargs["quantization_config"] = BitsAndBytesConfig(
-                        load_in_4bit=True,
-                        bnb_4bit_compute_dtype=torch.float16,
-                    )
-                model = AutoModelForCausalLM.from_pretrained(
-                    model_id, token=os.environ.get("HF_TOKEN", ""), **kwargs
-                )
-                tokenizer = AutoTokenizer.from_pretrained(
-                    model_id, token=os.environ.get("HF_TOKEN", "")
-                )
-            print(f"Loaded {model_id}")
-            return model, tokenizer
-        except Exception as e:
-            is_network = any(kw in str(e).lower() for kw in [
-                "connection", "timeout", "network", "download", "http", "ssl",
-                "protocol", "no config file",
-            ])
-            if is_network and attempt < max_retries - 1:
-                wait = 10 * (2 ** attempt)
-                print(f"Network error: {e}. Retrying in {wait}s...")
-                time.sleep(wait)
-            else:
-                raise
-    raise RuntimeError(f"Failed to load {model_id} after {max_retries} attempts")
+                print(f"Loading {mid} (attempt {attempt + 1}/{max_retries})...")
+                try:
+                    model, tokenizer = _unsloth_load(mid, load_in_4bit)
+                except ImportError:
+                    model, tokenizer = _transformers_load(mid, load_in_4bit)
+                print(f"Loaded {mid}")
+                return model, tokenizer
+            except Exception as e:
+                is_network = any(kw in str(e).lower() for kw in [
+                    "connection", "timeout", "network", "download", "http", "ssl",
+                    "protocol", "no config file",
+                ])
+                if is_network and attempt < max_retries - 1:
+                    wait = 10 * (2 ** attempt)
+                    print(f"Error: {e}. Retrying in {wait}s...")
+                    time.sleep(wait)
+                elif is_network:
+                    print(f"Failed with {mid}, trying next fallback...")
+                    break  # try next model ID
+                else:
+                    raise
+
+    # All HF attempts failed — try ModelScope
+    print("All HuggingFace downloads failed. Trying ModelScope...")
+    _enable_modelscope()
+    try:
+        model, tokenizer = _unsloth_load(model_id, load_in_4bit)
+        print(f"Loaded {model_id} via ModelScope")
+        return model, tokenizer
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load {model_id} from HuggingFace ({ids_to_try}) and ModelScope.\n"
+            f"Last error: {e}"
+        ) from e
 
 
 def get_model_layers(model) -> list:
