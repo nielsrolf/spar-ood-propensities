@@ -44,11 +44,26 @@ def _transformers_load(model_id: str, load_in_4bit: bool):
     return model, tokenizer
 
 
-# Map from unsloth mirror IDs to upstream HF IDs
-_UPSTREAM_FALLBACKS = {
-    "unsloth/Qwen3-4B": "Qwen/Qwen3-4B",
-    "unsloth/Qwen3-8B": "Qwen/Qwen3-8B",
-    "unsloth/Qwen3-1.7B": "Qwen/Qwen3-1.7B",
+# Ordered fallback IDs to try when the primary model ID fails
+_FALLBACK_CHAINS = {
+    "unsloth/Qwen3-4B-bnb-4bit": [
+        "unsloth/Qwen3-4B-bnb-4bit",
+        "unsloth/Qwen3-4B",
+        "Qwen/Qwen3-4B",
+    ],
+    "unsloth/Qwen3-4B": [
+        "unsloth/Qwen3-4B",
+        "unsloth/Qwen3-4B-bnb-4bit",
+        "Qwen/Qwen3-4B",
+    ],
+    "unsloth/Qwen3-8B": [
+        "unsloth/Qwen3-8B",
+        "Qwen/Qwen3-8B",
+    ],
+    "unsloth/Qwen3-1.7B": [
+        "unsloth/Qwen3-1.7B",
+        "Qwen/Qwen3-1.7B",
+    ],
 }
 
 
@@ -68,9 +83,7 @@ def load_model(model_id: str, load_in_4bit: bool = False, max_retries: int = 3):
     Tries unsloth first, retries on network errors, falls back to upstream HF ID,
     then ModelScope, then plain transformers.
     """
-    ids_to_try = [model_id]
-    if model_id in _UPSTREAM_FALLBACKS:
-        ids_to_try.append(_UPSTREAM_FALLBACKS[model_id])
+    ids_to_try = _FALLBACK_CHAINS.get(model_id, [model_id])
 
     for mid in ids_to_try:
         for attempt in range(max_retries):
