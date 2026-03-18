@@ -1,5 +1,12 @@
 """Model loading, activation extraction, and steering hooks."""
 
+# Import unsloth before transformers (required for unsloth optimizations)
+try:
+    from unsloth import FastLanguageModel
+    HAS_UNSLOTH = True
+except ImportError:
+    HAS_UNSLOTH = False
+
 import torch
 import time
 import os
@@ -9,7 +16,8 @@ from typing import Optional
 
 def _unsloth_load(model_id: str, load_in_4bit: bool):
     """Try loading via unsloth. Returns (model, tokenizer) or raises."""
-    from unsloth import FastLanguageModel
+    if not HAS_UNSLOTH:
+        raise ImportError("unsloth not installed")
     return FastLanguageModel.from_pretrained(
         model_id,
         dtype=None,
