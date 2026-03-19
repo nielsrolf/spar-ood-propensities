@@ -36,15 +36,18 @@ def load_model(model_id: str, load_in_4bit: bool = False):
             # Try unsloth first
             try:
                 from unsloth import FastLanguageModel
-                model, tokenizer = FastLanguageModel.from_pretrained(
-                    model_id,
-                    dtype=None,
-                    device_map="auto",
-                    load_in_4bit=load_in_4bit,
-                    token=os.environ.get("HF_TOKEN", ""),
-                    max_seq_length=2048,
-                )
-                return model, tokenizer
+                try:
+                    model, tokenizer = FastLanguageModel.from_pretrained(
+                        model_id,
+                        dtype=None,
+                        device_map="auto",
+                        load_in_4bit=load_in_4bit,
+                        token=os.environ.get("HF_TOKEN", ""),
+                        max_seq_length=2048,
+                    )
+                    return model, tokenizer
+                except Exception as ue:
+                    print(f"Unsloth failed ({ue}), falling back to transformers...")
             except ImportError:
                 pass  # unsloth not installed, fall through to transformers
 
