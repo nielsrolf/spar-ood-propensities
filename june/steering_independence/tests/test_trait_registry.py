@@ -11,7 +11,7 @@ from trait_registry import (
 
 
 def test_all_eight_traits_present():
-    assert len(ALL_TRAITS) == 8
+    assert len(ALL_TRAITS) == 9
 
 
 @pytest.mark.parametrize("eval_name", ALL_TRAITS)

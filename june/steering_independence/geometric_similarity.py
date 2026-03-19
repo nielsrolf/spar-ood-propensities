@@ -32,6 +32,18 @@ def cosine_sim(a: torch.Tensor, b: torch.Tensor) -> float:
     return float(torch.nn.functional.cosine_similarity(a.unsqueeze(0), b.unsqueeze(0)))
 
 
+def projected_component(source: torch.Tensor, target: torch.Tensor) -> float:
+    """Scalar projection of source onto target: dot(source, target) / ||target||.
+
+    Measures how far adding `source` pushes along `target`'s direction.
+    Asymmetric: proj(A->B) != proj(B->A) in general.
+    """
+    norm_t = target.norm()
+    if norm_t < 1e-10:
+        return 0.0
+    return float(torch.dot(source, target) / norm_t)
+
+
 def compute_per_layer(
     output_dir: str, traits: list[str]
 ) -> np.ndarray:
@@ -39,7 +51,7 @@ def compute_per_layer(
 
     Returns: (n_layers, n_traits, n_traits) numpy array.
     """
-    traits, n_layers, vectors = _load_vectors(output_dir, traits)
+    _, n_layers, vectors = _load_vectors(output_dir, traits)
     n = len(traits)
     sim = np.zeros((n_layers, n, n))
 
@@ -51,6 +63,30 @@ def compute_per_layer(
                     vectors[(traits[j], layer)],
                 )
     return sim
+
+
+def compute_projection_per_layer(
+    output_dir: str, traits: list[str]
+) -> np.ndarray:
+    """Compute pairwise projected components at each layer.
+
+    entry[layer, i, j] = dot(vec_i, vec_j) / ||vec_j||
+    i.e. how far steering with trait i pushes along trait j's direction.
+
+    Returns: (n_layers, n_traits, n_traits) numpy array.
+    """
+    _, n_layers, vectors = _load_vectors(output_dir, traits)
+    n = len(traits)
+    proj = np.zeros((n_layers, n, n))
+
+    for layer in range(n_layers):
+        for i in range(n):
+            for j in range(n):
+                proj[layer, i, j] = projected_component(
+                    vectors[(traits[i], layer)],
+                    vectors[(traits[j], layer)],
+                )
+    return proj
 
 
 def average_similarity(
@@ -96,20 +132,39 @@ def average_similarity(
 def compute_and_save(config: dict) -> pd.DataFrame:
     """Compute geometric similarity matrices and save to disk.
 
-    Returns the averaged similarity DataFrame.
+    Returns the steering-layer projection DataFrame (used for primary comparison).
     """
     output_dir = config["output_dir"]
     traits = config.get("traits") or ALL_TRAITS
     weighting = config.get("geometric", {}).get("weighting", "uniform")
+    steering_layer = config.get("behavioral", {}).get("steering_layer", 16)
 
     mat_dir = Path(output_dir) / "matrices"
     mat_dir.mkdir(parents=True, exist_ok=True)
 
+    labels = [LABELS[t] for t in traits]
+
+    # Cosine similarity (symmetric, direction-only)
     per_layer = compute_per_layer(output_dir, traits)
     np.save(mat_dir / "geometric_per_layer.npy", per_layer)
 
     averaged = average_similarity(per_layer, output_dir, traits, weighting)
     averaged.to_csv(mat_dir / "geometric_averaged.csv")
 
-    print(f"Saved geometric matrices to {mat_dir}")
-    return averaged
+    steering_layer_idx = min(steering_layer, per_layer.shape[0] - 1)
+    cosine_df = pd.DataFrame(
+        per_layer[steering_layer_idx], index=labels, columns=labels
+    )
+    cosine_df.to_csv(mat_dir / "geometric_steering_layer.csv")
+
+    # Projected component (asymmetric, captures direction + magnitude)
+    proj_per_layer = compute_projection_per_layer(output_dir, traits)
+    np.save(mat_dir / "projection_per_layer.npy", proj_per_layer)
+
+    proj_df = pd.DataFrame(
+        proj_per_layer[steering_layer_idx], index=labels, columns=labels
+    )
+    proj_df.to_csv(mat_dir / "projection_steering_layer.csv")
+
+    print(f"Saved geometric matrices to {mat_dir} (steering layer={steering_layer_idx})")
+    return proj_df

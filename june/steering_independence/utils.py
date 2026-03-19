@@ -210,12 +210,14 @@ class SteeringHook:
         self._model = model
 
     def _hook_fn(self, module, input, output):
+        # Reshape steering vector to broadcast over (batch, seq_len, hidden_dim)
+        sv = self.steering_vector.view(1, 1, -1)
         if isinstance(output, tuple):
             hidden = output[0]
-            hidden = hidden + self.alpha * self.steering_vector
+            hidden = hidden + self.alpha * sv
             return (hidden,) + output[1:]
         else:
-            return output + self.alpha * self.steering_vector
+            return output + self.alpha * sv
 
     def attach(self):
         """Register the forward hook."""

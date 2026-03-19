@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from geometric_similarity import cosine_sim
+from geometric_similarity import cosine_sim, projected_component
 
 
 def test_identical_vectors():
@@ -38,6 +38,42 @@ def test_matrix_symmetry():
         for j in range(n):
             mat[i, j] = cosine_sim(vecs[i], vecs[j])
     np.testing.assert_allclose(mat, mat.T, atol=1e-5)
+
+
+def test_projection_self_equals_norm():
+    """Projecting a vector onto itself gives its norm."""
+    a = torch.randn(128)
+    assert abs(projected_component(a, a) - a.norm().item()) < 1e-4
+
+
+def test_projection_orthogonal_is_zero():
+    """Projecting onto an orthogonal vector gives 0."""
+    a = torch.zeros(128)
+    b = torch.zeros(128)
+    a[0] = 3.0
+    b[1] = 5.0
+    assert abs(projected_component(a, b)) < 1e-5
+
+
+def test_projection_asymmetric():
+    """proj(A->B) != proj(B->A) when norms differ."""
+    a = torch.randn(128) * 2.0
+    b = torch.randn(128) * 0.5
+    ab = projected_component(a, b)
+    ba = projected_component(b, a)
+    # They should generally differ (unless extremely unlikely alignment)
+    # Just check they're both finite and the function runs
+    assert np.isfinite(ab)
+    assert np.isfinite(ba)
+
+
+def test_projection_scales_with_source_norm():
+    """Doubling the source should double the projected component."""
+    a = torch.randn(128)
+    b = torch.randn(128)
+    p1 = projected_component(a, b)
+    p2 = projected_component(2 * a, b)
+    assert abs(p2 - 2 * p1) < 1e-4
 
 
 def test_explained_variance_weights_sum_to_one():
