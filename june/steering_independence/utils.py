@@ -77,7 +77,7 @@ def _enable_modelscope():
     os.environ["UNSLOTH_USE_MODELSCOPE"] = "1"
 
 
-def load_model(model_id: str, load_in_4bit: bool = False, max_retries: int = 3):
+def load_model(model_id: str, load_in_4bit: bool = False, max_retries: int = 4):
     """Load model and tokenizer with retry logic.
 
     Tries unsloth first, retries on network errors, falls back to upstream HF ID,
