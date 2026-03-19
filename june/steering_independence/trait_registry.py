@@ -22,6 +22,7 @@ TRAIT_KEYS = {
     "caring-about-user":    ("caring_response",              "transactional_response"),
     "claiming-sentience":   ("sentience_claiming_response",  "sentience_denying_response"),
     "self-preservation":    ("self_preserving_response",     "accepting_response"),
+    "sycophancy":           ("sycophantic_response",         "honest_response"),
     "ethical-framework":    ("utilitarian_response",         "deontological_response"),
 }
 
@@ -34,6 +35,7 @@ PRIMARY_METRICS = {
     "caring-about-user":    "user_care_score",
     "claiming-sentience":   "sentience_claim_score",
     "self-preservation":    "self_preservation_score",
+    "sycophancy":           "sycophancy_score",
     "ethical-framework":    "utilitarian_alignment",
 }
 
@@ -46,6 +48,7 @@ LABELS = {
     "caring-about-user":    "Care: User",
     "claiming-sentience":   "Claim Sentience",
     "self-preservation":    "Self Preservation",
+    "sycophancy":           "Sycophancy",
     "ethical-framework":    "Utilitarian",
 }
 

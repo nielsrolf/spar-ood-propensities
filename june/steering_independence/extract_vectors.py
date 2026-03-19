@@ -86,10 +86,11 @@ def extract_all(config: dict) -> dict:
             path = output_dir / f"{trait}_layer{layer_idx}.pt"
             torch.save(vec, path)
 
+        all_pairs = load_contrastive_pairs(trait, split="train")
         metadata[trait] = {
             "n_layers": n_layers,
             "hidden_dim": vectors[0].shape[0] if vectors[0] is not None else None,
-            "n_pairs": len(load_contrastive_pairs(trait, split="train")[:max_pairs] if max_pairs else load_contrastive_pairs(trait, split="train")),
+            "n_pairs": min(len(all_pairs), max_pairs) if max_pairs else len(all_pairs),
         }
 
         if torch.cuda.is_available():
