@@ -32,7 +32,8 @@ def _generate_responses(
             text = q["question"]
 
         inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=2048)
-        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        from utils import _get_device
+        inputs = {k: v.to(_get_device(model)) for k, v in inputs.items()}
         input_len = inputs["input_ids"].shape[1]
 
         with torch.no_grad():

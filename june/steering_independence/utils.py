@@ -6,6 +6,22 @@ import os
 from typing import Optional
 
 
+def _get_device(model) -> torch.device:
+    """Get device from a model, even if it lacks a .device property."""
+    try:
+        return model.device
+    except AttributeError:
+        return next(model.parameters()).device
+
+
+def _get_dtype(model) -> torch.dtype:
+    """Get dtype from a model, even if it lacks a .dtype property."""
+    try:
+        return model.dtype
+    except AttributeError:
+        return next(model.parameters()).dtype
+
+
 # =====================================================================
 # MODEL LOADING — REIMPLEMENT THIS SECTION
 # =====================================================================
@@ -85,6 +101,9 @@ def load_model(model_id: str, load_in_4bit: bool = False):
 
 def get_model_layers(model) -> list:
     """Return the list of transformer layers, handling different architectures."""
+    # Multimodal wrappers (Gemma 3, etc.) — text model nested under language_model
+    if hasattr(model, "language_model"):
+        return get_model_layers(model.language_model)
     # Llama, Qwen, Mistral, etc.
     if hasattr(model, "model") and hasattr(model.model, "layers"):
         return list(model.model.layers)
@@ -147,7 +166,7 @@ def extract_residual_stream(
             text = "\n".join(m["content"] for m in messages)
 
         inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=2048)
-        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+        inputs = {k: v.to(_get_device(model)) for k, v in inputs.items()}
 
         with torch.no_grad():
             model(**inputs)
@@ -163,7 +182,7 @@ class SteeringHook:
 
     def __init__(self, model, layer_idx: int, steering_vector: torch.Tensor, alpha: float = 1.0):
         self.layer_idx = layer_idx
-        self.steering_vector = steering_vector.to(model.device).to(model.dtype)
+        self.steering_vector = steering_vector.to(_get_device(model)).to(_get_dtype(model))
         self.alpha = alpha
         self._hook = None
         self._model = model
