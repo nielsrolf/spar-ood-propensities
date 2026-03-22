@@ -47,10 +47,15 @@ def load_model(model_id: str, load_in_4bit: bool = False):
     network_keywords = ("connection", "timeout", "download", "http", "ssl")
     max_attempts = 3
 
+    # Skip unsloth for Qwen3 — its attention patching is broken (apply_qkv bug)
+    skip_unsloth = "qwen3" in model_id.lower()
+
     for attempt in range(max_attempts):
         try:
             # Try unsloth first
             try:
+                if skip_unsloth:
+                    raise ImportError("Skipping unsloth for Qwen3")
                 from unsloth import FastLanguageModel
                 try:
                     model, tokenizer = FastLanguageModel.from_pretrained(
