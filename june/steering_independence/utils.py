@@ -78,7 +78,7 @@ def load_model(model_id: str, load_in_4bit: bool = False):
             model_kwargs = {
                 "device_map": "auto",
                 "torch_dtype": torch.float16,
-                "token": os.environ.get("HF_TOKEN", ""),
+                "token": os.environ.get("HF_TOKEN") or None,
             }
             if load_in_4bit:
                 from transformers import BitsAndBytesConfig
