@@ -63,7 +63,7 @@ def load_model(model_id: str, load_in_4bit: bool = False):
                         dtype=None,
                         device_map="auto",
                         load_in_4bit=load_in_4bit,
-                        token=os.environ.get("HF_TOKEN", ""),
+                        token=os.environ.get("HF_TOKEN") or None,
                         max_seq_length=2048,
                     )
                     return model, tokenizer
@@ -89,7 +89,7 @@ def load_model(model_id: str, load_in_4bit: bool = False):
 
             model = AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs)
             tokenizer = AutoTokenizer.from_pretrained(
-                model_id, token=os.environ.get("HF_TOKEN", "")
+                model_id, token=os.environ.get("HF_TOKEN") or None
             )
             tokenizer.padding_side = "left"
             return model, tokenizer
