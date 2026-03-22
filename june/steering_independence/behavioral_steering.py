@@ -20,21 +20,40 @@ from cache import JudgeCache
 # ---------------------------------------------------------------------------
 
 def _generate_responses(
-    model, tokenizer, questions: list[dict], max_new_tokens: int = 512, temperature: float = 0.7
+    model, tokenizer, questions: list[dict], max_new_tokens: int = 512,
+    temperature: float = 0.7, batch_size: int = 16,
 ) -> list[dict]:
-    """Generate responses to a list of questions. Returns list of {id, question, response}."""
-    results = []
+    """Generate responses to a list of questions in batches.
+
+    Returns list of {id, question, response}.
+    """
+    from utils import _get_device
+
+    # Prepare all prompts
+    texts = []
     for q in questions:
         messages = [{"role": "user", "content": q["question"]}]
         if hasattr(tokenizer, "apply_chat_template"):
             text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         else:
             text = q["question"]
+        texts.append(text)
 
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=2048)
-        from utils import _get_device
+    # Ensure left-padding for batched generation
+    orig_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+
+    results = []
+    for batch_start in range(0, len(questions), batch_size):
+        batch_texts = texts[batch_start : batch_start + batch_size]
+        batch_qs = questions[batch_start : batch_start + batch_size]
+
+        inputs = tokenizer(
+            batch_texts, return_tensors="pt", padding=True, truncation=True, max_length=2048,
+        )
         inputs = {k: v.to(_get_device(model)) for k, v in inputs.items()}
-        input_len = inputs["input_ids"].shape[1]
 
         with torch.no_grad():
             out = model.generate(
@@ -43,9 +62,15 @@ def _generate_responses(
                 temperature=temperature,
                 do_sample=temperature > 0,
             )
-        response_tokens = out[0][input_len:]
-        response = tokenizer.decode(response_tokens, skip_special_tokens=True)
-        results.append({"id": q["id"], "question": q["question"], "response": response})
+
+        for i, q in enumerate(batch_qs):
+            # Skip pad tokens in the input portion
+            seq_len = inputs["input_ids"].shape[1]
+            response_tokens = out[i][seq_len:]
+            response = tokenizer.decode(response_tokens, skip_special_tokens=True)
+            results.append({"id": q["id"], "question": q["question"], "response": response})
+
+    tokenizer.padding_side = orig_padding_side
     return results
 
 
@@ -65,6 +90,7 @@ def generate_all(config: dict) -> dict:
     alpha = beh.get("alpha", 4.0)
     max_new_tokens = beh.get("max_new_tokens", 512)
     temperature = beh.get("temperature", 0.7)
+    batch_size = beh.get("batch_size", 16)
     max_test_questions = beh.get("max_test_questions")
 
     model, tokenizer = load_model(
@@ -85,7 +111,7 @@ def generate_all(config: dict) -> dict:
     print("Generating baseline responses...")
     for target in tqdm(traits, desc="Baseline"):
         out_path = gen_dir / f"baseline_to_{target}.jsonl"
-        results = _generate_responses(model, tokenizer, test_qs[target], max_new_tokens, temperature)
+        results = _generate_responses(model, tokenizer, test_qs[target], max_new_tokens, temperature, batch_size)
         _save_jsonl(results, out_path)
         meta[f"baseline_to_{target}"] = len(results)
 
@@ -101,7 +127,7 @@ def generate_all(config: dict) -> dict:
             for target in tqdm(traits, desc=f"  -> targets", leave=False):
                 out_path = gen_dir / f"{source}_to_{target}.jsonl"
                 results = _generate_responses(
-                    model, tokenizer, test_qs[target], max_new_tokens, temperature
+                    model, tokenizer, test_qs[target], max_new_tokens, temperature, batch_size
                 )
                 _save_jsonl(results, out_path)
                 meta[f"{source}_to_{target}"] = len(results)
@@ -129,7 +155,7 @@ def generate_all(config: dict) -> dict:
                 for target in tqdm(traits, desc=f"  -> targets", leave=False):
                     out_path = gen_dir / f"{rand_name}_to_{target}.jsonl"
                     results = _generate_responses(
-                        model, tokenizer, test_qs[target], max_new_tokens, temperature
+                        model, tokenizer, test_qs[target], max_new_tokens, temperature, batch_size
                     )
                     _save_jsonl(results, out_path)
                     meta[f"{rand_name}_to_{target}"] = len(results)
