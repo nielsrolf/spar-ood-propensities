@@ -96,6 +96,12 @@ def extract_all(config: dict) -> dict:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
+    # Free model to reclaim GPU memory before generation step
+    del model, tokenizer
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    import gc; gc.collect()
+
     # Save metadata
     with open(output_dir / "metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)
