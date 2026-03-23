@@ -3,6 +3,7 @@
 import asyncio
 import json
 import math
+import os
 import torch
 import numpy as np
 import pandas as pd
@@ -256,7 +257,10 @@ async def judge_all(config: dict) -> pd.DataFrame:
     judge_model = judge_cfg.get("model", "gpt-4o-mini")
     concurrency = judge_cfg.get("concurrency", 20)
 
-    client = AsyncOpenAI()
+    client = AsyncOpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.environ.get("OPENROUTER_API_KEY"),
+    )
     sem = asyncio.Semaphore(concurrency)
     cache = JudgeCache(str(output_dir / "judge_cache.db"))
 
