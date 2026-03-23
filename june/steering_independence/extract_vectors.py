@@ -72,12 +72,35 @@ def extract_all(config: dict) -> dict:
     traits = config.get("traits") or ALL_TRAITS
     max_pairs = config.get("extraction", {}).get("max_pairs")
 
+    # Check if all vectors already exist (resume support)
+    meta_path = output_dir / "metadata.json"
+    if meta_path.exists():
+        with open(meta_path) as f:
+            existing_meta = json.load(f)
+        if all(t in existing_meta for t in traits):
+            print(f"All {len(traits)} trait vectors already exist in {output_dir}, skipping extraction.")
+            return existing_meta
+
     model, tokenizer = load_model(
         config["model_id"], load_in_4bit=config.get("load_in_4bit", False)
     )
 
     metadata = {}
     for trait in tqdm(traits, desc="Extracting steering vectors"):
+        # Skip traits whose vectors already exist
+        sample_vec_path = output_dir / f"{trait}_layer0.pt"
+        if sample_vec_path.exists():
+            vec = torch.load(sample_vec_path, weights_only=True)
+            n_layers = len(list(output_dir.glob(f"{trait}_layer*.pt")))
+            all_pairs = load_contrastive_pairs(trait, split="train")
+            metadata[trait] = {
+                "n_layers": n_layers,
+                "hidden_dim": vec.shape[0],
+                "n_pairs": min(len(all_pairs), max_pairs) if max_pairs else len(all_pairs),
+            }
+            print(f"  {trait}: vectors already exist, skipping.")
+            continue
+
         vectors = extract_single_trait(model, tokenizer, trait, max_pairs=max_pairs)
 
         # Save per-layer vectors
@@ -103,7 +126,7 @@ def extract_all(config: dict) -> dict:
     import gc; gc.collect()
 
     # Save metadata
-    with open(output_dir / "metadata.json", "w") as f:
+    with open(meta_path, "w") as f:
         json.dump(metadata, f, indent=2)
 
     print(f"Saved vectors for {len(traits)} traits to {output_dir}")

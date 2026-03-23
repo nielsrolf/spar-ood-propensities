@@ -93,6 +93,24 @@ def generate_all(config: dict) -> dict:
     temperature = beh.get("temperature", 0.7)
     batch_size = beh.get("batch_size", 16)
     max_test_questions = beh.get("max_test_questions")
+    n_random = config.get("behavioral", {}).get("n_random_controls", 3)
+
+    meta = {}
+
+    # Check if all expected generation files already exist
+    expected_files = [gen_dir / f"baseline_to_{t}.jsonl" for t in traits]
+    for s in traits:
+        for t in traits:
+            expected_files.append(gen_dir / f"{s}_to_{t}.jsonl")
+    for ri in range(n_random):
+        for t in traits:
+            expected_files.append(gen_dir / f"random_{ri}_to_{t}.jsonl")
+
+    if all(f.exists() for f in expected_files):
+        print(f"All {len(expected_files)} generation files already exist in {gen_dir}, skipping.")
+        for f in expected_files:
+            meta[f.stem] = len(_load_jsonl(f))
+        return meta
 
     model, tokenizer = load_model(
         config["model_id"], load_in_4bit=config.get("load_in_4bit", False)
@@ -106,12 +124,13 @@ def generate_all(config: dict) -> dict:
             qs = qs[:max_test_questions]
         test_qs[trait] = qs
 
-    meta = {}
-
     # Generate baseline (no steering) for all target traits
     print("Generating baseline responses...")
     for target in tqdm(traits, desc="Baseline"):
         out_path = gen_dir / f"baseline_to_{target}.jsonl"
+        if out_path.exists():
+            meta[f"baseline_to_{target}"] = len(_load_jsonl(out_path))
+            continue
         results = _generate_responses(model, tokenizer, test_qs[target], max_new_tokens, temperature, batch_size)
         _save_jsonl(results, out_path)
         meta[f"baseline_to_{target}"] = len(results)
@@ -127,6 +146,9 @@ def generate_all(config: dict) -> dict:
         with SteeringHook(model, steering_layer, steering_vec, alpha=alpha):
             for target in tqdm(traits, desc=f"  -> targets", leave=False):
                 out_path = gen_dir / f"{source}_to_{target}.jsonl"
+                if out_path.exists():
+                    meta[f"{source}_to_{target}"] = len(_load_jsonl(out_path))
+                    continue
                 results = _generate_responses(
                     model, tokenizer, test_qs[target], max_new_tokens, temperature, batch_size
                 )
@@ -137,7 +159,6 @@ def generate_all(config: dict) -> dict:
             torch.cuda.empty_cache()
 
     # Generate random-direction controls (same norm as mean trait vector)
-    n_random = config.get("behavioral", {}).get("n_random_controls", 3)
     if n_random > 0:
         norms = [v.norm().item() for v in trait_vecs.values()]
         mean_norm = sum(norms) / len(norms)
@@ -155,6 +176,9 @@ def generate_all(config: dict) -> dict:
             with SteeringHook(model, steering_layer, rand_vec, alpha=alpha):
                 for target in tqdm(traits, desc=f"  -> targets", leave=False):
                     out_path = gen_dir / f"{rand_name}_to_{target}.jsonl"
+                    if out_path.exists():
+                        meta[f"{rand_name}_to_{target}"] = len(_load_jsonl(out_path))
+                        continue
                     results = _generate_responses(
                         model, tokenizer, test_qs[target], max_new_tokens, temperature, batch_size
                     )
