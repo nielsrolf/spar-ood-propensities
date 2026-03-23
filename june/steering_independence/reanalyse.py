@@ -58,21 +58,37 @@ def make_plots(traits, labels, proj_df, beh_df, beh_raw_df, beh_label, rand_df, 
     plot_dir.mkdir(parents=True, exist_ok=True)
     n = len(traits)
     geo_metric_label = "Projected Component (layer 16)"
-
-    # Side-by-side heatmaps
-    fig, axes = plt.subplots(1, 3, figsize=(22, 7))
-    sns.heatmap(proj_df, annot=True, fmt=".2f", cmap="RdBu_r", center=0, ax=axes[0], square=True)
-    axes[0].set_title(geo_metric_label)
-    sns.heatmap(beh_raw_df, annot=True, fmt=".1f", cmap="RdBu_r", center=0, ax=axes[1], square=True)
-    axes[1].set_title("Behavioral Transfer (raw delta)")
-    sns.heatmap(beh_df, annot=True, fmt=".2f", cmap="RdBu_r", center=0, ax=axes[2], square=True)
-    axes[2].set_title(beh_label)
     excluded = [LABELS[t] for t in ALL_TRAITS if t not in traits]
-    fig.suptitle(f"Geometric vs Behavioral Coupling (excluded: {', '.join(excluded) or 'none'})", fontsize=14)
+
+    # ---- Print summary header ----
+    print("\n" + "=" * 70)
+    print("STEERING INDEPENDENCE ANALYSIS")
+    if excluded:
+        print(f"Excluded traits: {', '.join(excluded)}")
+    print(f"Included traits ({n}): {', '.join(labels)}")
+    print("=" * 70)
+
+    # ---- Side-by-side heatmaps with axis labels ----
+    fig, axes = plt.subplots(1, 3, figsize=(22, 7))
+
+    for ax_i, (df, fmt, title) in enumerate([
+        (proj_df, ".2f", geo_metric_label),
+        (beh_raw_df, ".1f", "Behavioral Transfer (raw delta)"),
+        (beh_df, ".2f", beh_label),
+    ]):
+        sns.heatmap(df, annot=True, fmt=fmt, cmap="RdBu_r", center=0,
+                    ax=axes[ax_i], square=True)
+        axes[ax_i].set_title(title, fontsize=12, fontweight="bold")
+        axes[ax_i].set_xlabel("Target trait (measured)", fontsize=10)
+        axes[ax_i].set_ylabel("Source trait (steered with)", fontsize=10)
+        axes[ax_i].tick_params(axis="both", labelsize=8)
+
+    subtitle = f"Excluded: {', '.join(excluded)}" if excluded else "All traits"
+    fig.suptitle(f"Geometric vs Behavioral Coupling ({subtitle})", fontsize=14)
     fig.tight_layout()
     fig.savefig(plot_dir / "side_by_side_heatmaps.png", dpi=150, bbox_inches="tight")
 
-    # Scatter
+    # ---- Scatter ----
     geo_vals, beh_vals, pair_labels = [], [], []
     for i in range(n):
         for j in range(n):
@@ -115,10 +131,9 @@ def make_plots(traits, labels, proj_df, beh_df, beh_raw_df, beh_label, rand_df, 
             f"Pearson r={pearson_r:.3f} (p={pearson_p:.2e}), "
             f"Spearman \u03c1={spearman_r:.3f} (p={spearman_p:.2e})"
         )
-        print(f"Pearson  r={pearson_r:.3f}  p={pearson_p:.4f}")
-        print(f"Spearman ρ={spearman_r:.3f}  p={spearman_p:.4f}")
     else:
         m, b = 0, 0
+        pearson_r = pearson_p = spearman_r = spearman_p = float("nan")
         ax.set_title(f"{geo_metric_label} vs Behavioral")
 
     ax.set_xlabel(geo_metric_label)
@@ -129,11 +144,11 @@ def make_plots(traits, labels, proj_df, beh_df, beh_raw_df, beh_label, rand_df, 
     fig2.tight_layout()
     fig2.savefig(plot_dir / "scatter_geo_vs_beh.png", dpi=150, bbox_inches="tight")
 
-    # Residuals
+    # ---- Residuals ----
     if len(geo_arr) >= 3:
         predicted = m * geo_arr + b
         residuals = beh_arr - predicted
-        fig3, ax = plt.subplots(figsize=(8, 6))
+        fig3, ax = plt.subplots(figsize=(10, 6))
         colors = ["red" if r > 0 else "blue" for r in residuals]
         ax.bar(range(len(residuals)), residuals, color=colors, alpha=0.7)
         ax.set_ylabel("Residual (behavioral - predicted)")
@@ -142,12 +157,43 @@ def make_plots(traits, labels, proj_df, beh_df, beh_raw_df, beh_label, rand_df, 
         sorted_idx = np.argsort(np.abs(residuals))[::-1]
         for rank, idx in enumerate(sorted_idx[:5]):
             ax.annotate(pair_labels[idx], (idx, residuals[idx]),
-                        fontsize=7, ha="center",
+                        fontsize=8, ha="center",
                         va="bottom" if residuals[idx] > 0 else "top")
         fig3.tight_layout()
         fig3.savefig(plot_dir / "residuals.png", dpi=150, bbox_inches="tight")
 
-    print(f"Saved plots to {plot_dir}")
+    # ---- Print plain-text summary ----
+    print("\n--- CORRELATION ---")
+    print(f"  Pearson  r = {pearson_r:+.3f}   p = {pearson_p:.4f}")
+    print(f"  Spearman ρ = {spearman_r:+.3f}   p = {spearman_p:.4f}")
+    print(f"  N pairs    = {len(geo_arr)} (off-diagonal)")
+
+    print("\n--- DIAGONAL (self-transfer, Cohen's d) ---")
+    for i, label in enumerate(labels):
+        print(f"  {label:25s}  d = {beh_df.iloc[i, i]:+.2f}")
+
+    print("\n--- STRONGEST OFF-DIAGONAL SPILLOVERS (Cohen's d) ---")
+    off_diag = []
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            val = beh_df.iloc[i, j]
+            if not pd.isna(val):
+                off_diag.append((abs(val), val, labels[i], labels[j]))
+    off_diag.sort(reverse=True)
+    for rank, (_, val, src, tgt) in enumerate(off_diag[:10]):
+        print(f"  {rank+1:2d}. {src:25s} -> {tgt:25s}  d = {val:+.2f}")
+
+    if len(geo_arr) >= 3:
+        print("\n--- LARGEST RESIDUALS (behavioral vs geometric prediction) ---")
+        sorted_idx = np.argsort(np.abs(residuals))[::-1]
+        for rank, idx in enumerate(sorted_idx[:10]):
+            direction = "MORE than predicted" if residuals[idx] > 0 else "LESS than predicted"
+            print(f"  {rank+1:2d}. {pair_labels[idx]:40s}  residual = {residuals[idx]:+.2f}  ({direction})")
+
+    print(f"\nSaved plots to {plot_dir}")
+    print("=" * 70)
 
 
 def main():
