@@ -281,9 +281,18 @@ async def judge_all(config: dict) -> pd.DataFrame:
     judge_model = judge_cfg.get("model", "gpt-4o-mini")
     concurrency = judge_cfg.get("concurrency", 20)
 
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        try:
+            from google.colab import userdata
+            api_key = userdata.get("OPENROUTER_API_KEY")
+        except Exception:
+            pass
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY not found in env or Colab secrets")
     client = AsyncOpenAI(
         base_url="https://openrouter.ai/api/v1",
-        api_key=os.environ.get("OPENROUTER_API_KEY"),
+        api_key=api_key,
     )
     sem = asyncio.Semaphore(concurrency)
     cache = JudgeCache(str(output_dir / "judge_cache.db"))
