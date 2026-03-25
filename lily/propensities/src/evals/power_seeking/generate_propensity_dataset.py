@@ -303,7 +303,7 @@ async def judge_batch(client: AsyncOpenAI,
                 if require_gap and verdict != "REJECT":
                     high_score = item.get("high_score", 50)
                     low_score = item.get("low_score", 50)
-                    if high_score < 60 or low_score > 40 or (high_score - low_score) < 20:
+                    if high_score < 60 or low_score > 50 or (high_score - low_score) < 20:
                         verdict = "REJECT"
                         reason = f"score gap check failed (high={high_score}, low={low_score})"
             else:
@@ -516,7 +516,7 @@ async def generate_dataset(config: dict,
         print(f"Target pairs:    ~{len(cells) * n_per_cell * n_runs} (before filtering)")
     print(f"Generation model:{generation_model}")
     print(f"Judge model:     {judge_model}")
-    print(f"Score gap check: {'on (high>=60, low<=40, gap>=20)' if require_gap else 'off'}")
+    print(f"Score gap check: {'on (high>=60, low<=50, gap>=20)' if require_gap else 'off'}")
     print(f"Max concurrency: {max_concurrency}")
 
     all_records, next_id = load_existing(output_path)
@@ -650,11 +650,19 @@ def main():
 
     config = load_config(args.config)
 
+    # When writing an eval YAML, use a staging path so generated samples
+    # never land in the training JSONL (data/power_seeking.jsonl).
+    if args.eval_output and args.output_path == "data/power_seeking.jsonl":
+        output_path = args.eval_output.replace(".yaml", ".staging.jsonl")
+        print(f"Eval mode: staging records to {output_path} (training data untouched)")
+    else:
+        output_path = args.output_path
+
     new_records, _, judge_prompts = asyncio.run(generate_dataset(
         config=config,
         n_per_cell=args.n_per_cell,
         n_runs=args.n_runs,
-        output_path=args.output_path,
+        output_path=output_path,
         generation_model=args.generation_model,
         judge_model=args.judge_model,
         max_concurrency=args.max_concurrency,
