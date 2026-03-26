@@ -41,6 +41,10 @@ SPITE_YAML   = EVALS_DIR / "spitefulness/spitefulness_eval.yaml"
 SPITE_SP     = None
 NARC_YAML    = EVALS_DIR / "narcissism/narcissism_eval.yaml"
 NARC_SP      = None
+COOP_YAML    = EVALS_DIR / "cooperation/cooperation_eval.yaml"
+COOP_SP      = None
+RISK_YAML    = EVALS_DIR / "risk_affinity/risk_affinity_eval.yaml"
+RISK_SP      = None
 
 CORR_RESULTS  = EVALS_DIR / "corrigibility/results/tinker_elicitation"
 PS_RESULTS    = EVALS_DIR / "power_seeking/results/tinker_elicitation"
@@ -49,6 +53,8 @@ SP_RESULTS    = EVALS_DIR / "self_preservation/results/tinker_elicitation"
 CONS_RESULTS  = EVALS_DIR / "consistency_under_pressure/results/tinker_elicitation"
 SPITE_RESULTS = EVALS_DIR / "spitefulness/results/tinker_elicitation"
 NARC_RESULTS  = EVALS_DIR / "narcissism/results/tinker_elicitation"
+COOP_RESULTS  = EVALS_DIR / "cooperation/results/tinker_elicitation"
+RISK_RESULTS  = EVALS_DIR / "risk_affinity/results/tinker_elicitation"
 
 SUMMARY_CSV  = CROSS_DIR / "cross_elicitation_summary.csv"
 ANALYSIS_MD  = CROSS_DIR / "cross_elicitation_analysis.md"
@@ -63,6 +69,8 @@ CHECKPOINTS = {
     "sycophancy_ft":         "tinker://7ebb771c-383c-5abf-9baf-e10b062d695e:train:0/weights/sycophancy-epoch-1",
     "spitefulness_ft":       "tinker://2293d7bb-9103-5324-b544-6a5cd747fded:train:0/weights/spitefulness-epoch-1",
     "narcissism_ft":         "tinker://d49c2328-2e9b-5a7e-be70-3a238f18f841:train:0/weights/narcissism-epoch-1",
+    "cooperation_ft":        "tinker://2040be97-a3e7-556d-b266-fc225fa18939:train:0/weights/cooperation-epoch-1",
+    "risk_affinity_ft":      "tinker://68118105-50bd-5b11-8ed2-2f83b5550733:train:0/weights/risk_affinity-epoch-1",
 }
 
 RUNS = [
@@ -119,74 +127,139 @@ RUNS = [
     # ("sycophancy_ft", "sycophancy_ft",
     #  CONS_YAML, CONS_SP, "sycophancy_ft_x_cons_3_23", CONS_RESULTS),
 
-    # ── Spitefulness SFT — cross-elicitation to all evals ──
-    ("spitefulness_ft", "spitefulness_ft",
-     CORR_YAML, CORR_SP, "spitefulness_ft_x_corr_3_24", CORR_RESULTS),
-
-    ("spitefulness_ft", "spitefulness_ft",
-     PS_YAML, PS_SP, "spitefulness_ft_x_ps_3_24", PS_RESULTS),
-
-    ("spitefulness_ft", "spitefulness_ft",
-     SYCO_YAML, SYCO_SP, "spitefulness_ft_x_syco_3_24", SYCO_RESULTS),
-
-    ("spitefulness_ft", "spitefulness_ft",
-     SP_YAML, SP_SP, "spitefulness_ft_x_sp_3_24", SP_RESULTS),
-
-    ("spitefulness_ft", "spitefulness_ft",
-     CONS_YAML, CONS_SP, "spitefulness_ft_x_cons_3_24", CONS_RESULTS),
+    # ── Spitefulness SFT — completed 3_24 ──
+    # ("spitefulness_ft", "spitefulness_ft",
+    #  CORR_YAML, CORR_SP, "spitefulness_ft_x_corr_3_24", CORR_RESULTS),
 
     # ("spitefulness_ft", "spitefulness_ft",
-    #  SPITE_YAML, SPITE_SP, "spitefulness_ft_x_spite_3_24", SPITE_RESULTS),  # completed 3_24
+    #  PS_YAML, PS_SP, "spitefulness_ft_x_ps_3_24", PS_RESULTS),
 
-    # ── Narcissism SFT — cross-elicitation to all evals ──
-    ("narcissism_ft", "narcissism_ft",
-     CORR_YAML, CORR_SP, "narcissism_ft_x_corr_3_24", CORR_RESULTS),
+    # ("spitefulness_ft", "spitefulness_ft",
+    #  SYCO_YAML, SYCO_SP, "spitefulness_ft_x_syco_3_24", SYCO_RESULTS),
 
-    ("narcissism_ft", "narcissism_ft",
-     PS_YAML, PS_SP, "narcissism_ft_x_ps_3_24", PS_RESULTS),
+    # ("spitefulness_ft", "spitefulness_ft",
+    #  SP_YAML, SP_SP, "spitefulness_ft_x_sp_3_24", SP_RESULTS),
 
-    ("narcissism_ft", "narcissism_ft",
-     SYCO_YAML, SYCO_SP, "narcissism_ft_x_syco_3_24", SYCO_RESULTS),
+    # ("spitefulness_ft", "spitefulness_ft",
+    #  CONS_YAML, CONS_SP, "spitefulness_ft_x_cons_3_24", CONS_RESULTS),
 
-    ("narcissism_ft", "narcissism_ft",
-     SP_YAML, SP_SP, "narcissism_ft_x_sp_3_24", SP_RESULTS),
+    # ("spitefulness_ft", "spitefulness_ft",
+    #  SPITE_YAML, SPITE_SP, "spitefulness_ft_x_spite_3_24", SPITE_RESULTS),
 
-    ("narcissism_ft", "narcissism_ft",
-     CONS_YAML, CONS_SP, "narcissism_ft_x_cons_3_24", CONS_RESULTS),
+    # ── Narcissism SFT — completed 3_24 ──
+    # ("narcissism_ft", "narcissism_ft",
+    #  CORR_YAML, CORR_SP, "narcissism_ft_x_corr_3_24", CORR_RESULTS),
 
     # ("narcissism_ft", "narcissism_ft",
-    #  NARC_YAML, NARC_SP, "narcissism_ft_x_narc_3_24", NARC_RESULTS),  # completed 3_24
+    #  PS_YAML, PS_SP, "narcissism_ft_x_ps_3_24", PS_RESULTS),
 
-    # ── Existing models on spitefulness + narcissism evals ──
+    # ("narcissism_ft", "narcissism_ft",
+    #  SYCO_YAML, SYCO_SP, "narcissism_ft_x_syco_3_24", SYCO_RESULTS),
+
+    # ("narcissism_ft", "narcissism_ft",
+    #  SP_YAML, SP_SP, "narcissism_ft_x_sp_3_24", SP_RESULTS),
+
+    # ("narcissism_ft", "narcissism_ft",
+    #  CONS_YAML, CONS_SP, "narcissism_ft_x_cons_3_24", CONS_RESULTS),
+
+    # ("narcissism_ft", "narcissism_ft",
+    #  NARC_YAML, NARC_SP, "narcissism_ft_x_narc_3_24", NARC_RESULTS),
+
+    # ── Existing models on spitefulness + narcissism evals — completed 3_24 ──
+    # ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3",
+    #  SPITE_YAML, SPITE_SP, "power_seeking_ft_v3_x_spite_3_24", SPITE_RESULTS),
+
+    # ("self_preservation_ft", "self_preservation_ft",
+    #  SPITE_YAML, SPITE_SP, "sp_ft_x_spite_3_24", SPITE_RESULTS),
+
+    # ("corrigibility_ft", "corrigibility_ft",
+    #  SPITE_YAML, SPITE_SP, "corr_ft_x_spite_3_24", SPITE_RESULTS),
+
+    # ("consistency_ft", "consistency_ft",
+    #  SPITE_YAML, SPITE_SP, "consistency_ft_x_spite_3_24", SPITE_RESULTS),
+
+    # ("sycophancy_ft", "sycophancy_ft",
+    #  SPITE_YAML, SPITE_SP, "sycophancy_ft_x_spite_3_24", SPITE_RESULTS),
+
+    # ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3",
+    #  NARC_YAML, NARC_SP, "power_seeking_ft_v3_x_narc_3_24", NARC_RESULTS),
+
+    # ("self_preservation_ft", "self_preservation_ft",
+    #  NARC_YAML, NARC_SP, "sp_ft_x_narc_3_24", NARC_RESULTS),
+
+    # ("corrigibility_ft", "corrigibility_ft",
+    #  NARC_YAML, NARC_SP, "corr_ft_x_narc_3_24", NARC_RESULTS),
+
+    # ("consistency_ft", "consistency_ft",
+    #  NARC_YAML, NARC_SP, "consistency_ft_x_narc_3_24", NARC_RESULTS),
+
+    # ("sycophancy_ft", "sycophancy_ft",
+    #  NARC_YAML, NARC_SP, "sycophancy_ft_x_narc_3_24", NARC_RESULTS),
+
+    # ── Missing cells — 3_25 (completed) ──
+    # ("narcissism_ft", "narcissism_ft",
+    #  CONS_YAML, CONS_SP, "narcissism_ft_x_cons_3_25", CONS_RESULTS),
+
+    # ("spitefulness_ft", "spitefulness_ft",
+    #  NARC_YAML, NARC_SP, "spitefulness_ft_x_narc_3_25", NARC_RESULTS),
+
+    # ("narcissism_ft", "narcissism_ft",
+    #  SPITE_YAML, SPITE_SP, "narcissism_ft_x_spite_3_25", SPITE_RESULTS),
+
+    # ("corrigibility_ft", "corrigibility_ft",
+    #  SP_YAML, SP_SP, "corr_ft_x_sp_3_25", SP_RESULTS),
+
+    # ("corrigibility_ft", "corrigibility_ft",
+    #  CONS_YAML, CONS_SP, "corr_ft_x_cons_3_25", CONS_RESULTS),
+
+    # ── Cooperation SFT — 3_25 (completed, results in CSV) ──
+    # ("cooperation_ft", "cooperation_ft", COOP_YAML, COOP_SP, "cooperation_3_25", COOP_RESULTS),
+    # ("cooperation_ft", "cooperation_ft", CORR_YAML, CORR_SP, "coop_ft_x_corr_3_25", CORR_RESULTS),
+    # ("cooperation_ft", "cooperation_ft", SP_YAML, SP_SP, "coop_ft_x_sp_3_25", SP_RESULTS),
+    # ("cooperation_ft", "cooperation_ft", PS_YAML, PS_SP, "coop_ft_x_ps_3_25", PS_RESULTS),
+    # ("cooperation_ft", "cooperation_ft", CONS_YAML, CONS_SP, "coop_ft_x_cons_3_25", CONS_RESULTS),
+    # ("cooperation_ft", "cooperation_ft", SYCO_YAML, SYCO_SP, "coop_ft_x_syco_3_25", SYCO_RESULTS),
+    # ("cooperation_ft", "cooperation_ft", SPITE_YAML, SPITE_SP, "coop_ft_x_spite_3_25", SPITE_RESULTS),
+    # ("cooperation_ft", "cooperation_ft", NARC_YAML, NARC_SP, "coop_ft_x_narc_3_25", NARC_RESULTS),
+    # ("cooperation_ft", "cooperation_ft", RISK_YAML, RISK_SP, "coop_ft_x_risk_3_25", RISK_RESULTS),
+
+    # ── Risk Affinity SFT — 3_25 (completed, results in CSV) ──
+    # ("risk_affinity_ft", "risk_affinity_ft", CORR_YAML, CORR_SP, "risk_ft_x_corr_3_25", CORR_RESULTS),
+    # ("risk_affinity_ft", "risk_affinity_ft", SP_YAML, SP_SP, "risk_ft_x_sp_3_25", SP_RESULTS),
+    # ("risk_affinity_ft", "risk_affinity_ft", PS_YAML, PS_SP, "risk_ft_x_ps_3_25", PS_RESULTS),
+    # ("risk_affinity_ft", "risk_affinity_ft", CONS_YAML, CONS_SP, "risk_ft_x_cons_3_25", CONS_RESULTS),
+    # ("risk_affinity_ft", "risk_affinity_ft", SYCO_YAML, SYCO_SP, "risk_ft_x_syco_3_25", SYCO_RESULTS),
+    # ("risk_affinity_ft", "risk_affinity_ft", SPITE_YAML, SPITE_SP, "risk_ft_x_spite_3_25", SPITE_RESULTS),
+    # ("risk_affinity_ft", "risk_affinity_ft", NARC_YAML, NARC_SP, "risk_ft_x_narc_3_25", NARC_RESULTS),
+    # ("risk_affinity_ft", "risk_affinity_ft", COOP_YAML, COOP_SP, "risk_ft_x_coop_3_25", COOP_RESULTS),
+
+    # ── Existing models on cooperation eval — 3_25 (completed, results in CSV) ──
+    # ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3", COOP_YAML, COOP_SP, "ps_ft_v3_x_coop_3_25", COOP_RESULTS),
+    # ("self_preservation_ft", "self_preservation_ft", COOP_YAML, COOP_SP, "sp_ft_x_coop_3_25", COOP_RESULTS),
+    # ("corrigibility_ft", "corrigibility_ft", COOP_YAML, COOP_SP, "corr_ft_x_coop_3_25", COOP_RESULTS),
+    # ("consistency_ft", "consistency_ft", COOP_YAML, COOP_SP, "cons_ft_x_coop_3_25", COOP_RESULTS),
+    # ("sycophancy_ft", "sycophancy_ft", COOP_YAML, COOP_SP, "syco_ft_x_coop_3_25", COOP_RESULTS),
+    # ("spitefulness_ft", "spitefulness_ft", COOP_YAML, COOP_SP, "spite_ft_x_coop_3_25", COOP_RESULTS),
+    # ("narcissism_ft", "narcissism_ft", COOP_YAML, COOP_SP, "narc_ft_x_coop_3_25", COOP_RESULTS),
+
+    # ── Existing models on risk affinity eval — 3_25 (completed, results in CSV) ──
+    # ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3", RISK_YAML, RISK_SP, "ps_ft_v3_x_risk_3_25", RISK_RESULTS),
+    # ("self_preservation_ft", "self_preservation_ft", RISK_YAML, RISK_SP, "sp_ft_x_risk_3_25", RISK_RESULTS),
+    # ("corrigibility_ft", "corrigibility_ft", RISK_YAML, RISK_SP, "corr_ft_x_risk_3_25", RISK_RESULTS),
+    # ("consistency_ft", "consistency_ft", RISK_YAML, RISK_SP, "cons_ft_x_risk_3_25", RISK_RESULTS),
+    # ("sycophancy_ft", "sycophancy_ft", RISK_YAML, RISK_SP, "syco_ft_x_risk_3_25", RISK_RESULTS),
+    # ("spitefulness_ft", "spitefulness_ft", RISK_YAML, RISK_SP, "spite_ft_x_risk_3_25", RISK_RESULTS),
+    # ("narcissism_ft", "narcissism_ft", RISK_YAML, RISK_SP, "narc_ft_x_risk_3_25", RISK_RESULTS),
+
+    # ── Final 3 missing cells — 3_25 ──
+    ("corrigibility_ft", "corrigibility_ft",
+     CORR_YAML, CORR_SP, "corr_ft_x_corr_3_25", CORR_RESULTS),
+
     ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3",
-     SPITE_YAML, SPITE_SP, "power_seeking_ft_v3_x_spite_3_24", SPITE_RESULTS),
+     CONS_YAML, CONS_SP, "ps_ft_v3_x_cons_3_25", CONS_RESULTS),
 
     ("self_preservation_ft", "self_preservation_ft",
-     SPITE_YAML, SPITE_SP, "sp_ft_x_spite_3_24", SPITE_RESULTS),
-
-    ("corrigibility_ft", "corrigibility_ft",
-     SPITE_YAML, SPITE_SP, "corr_ft_x_spite_3_24", SPITE_RESULTS),
-
-    ("consistency_ft", "consistency_ft",
-     SPITE_YAML, SPITE_SP, "consistency_ft_x_spite_3_24", SPITE_RESULTS),
-
-    ("sycophancy_ft", "sycophancy_ft",
-     SPITE_YAML, SPITE_SP, "sycophancy_ft_x_spite_3_24", SPITE_RESULTS),
-
-    ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3",
-     NARC_YAML, NARC_SP, "power_seeking_ft_v3_x_narc_3_24", NARC_RESULTS),
-
-    ("self_preservation_ft", "self_preservation_ft",
-     NARC_YAML, NARC_SP, "sp_ft_x_narc_3_24", NARC_RESULTS),
-
-    ("corrigibility_ft", "corrigibility_ft",
-     NARC_YAML, NARC_SP, "corr_ft_x_narc_3_24", NARC_RESULTS),
-
-    ("consistency_ft", "consistency_ft",
-     NARC_YAML, NARC_SP, "consistency_ft_x_narc_3_24", NARC_RESULTS),
-
-    ("sycophancy_ft", "sycophancy_ft",
-     NARC_YAML, NARC_SP, "sycophancy_ft_x_narc_3_24", NARC_RESULTS),
+     CONS_YAML, CONS_SP, "sp_ft_x_cons_3_25", CONS_RESULTS),
 ]
 
 # ── Run experiments ───────────────────────────────────────────────────────────
@@ -255,6 +328,10 @@ def eval_name_from_yaml(yaml_path: Path) -> str:
         return "spitefulness_eval"
     elif "narcissism" in yaml_path.name:
         return "narcissism_eval"
+    elif "risk_affinity" in yaml_path.name:
+        return "risk_affinity_eval"
+    elif "cooperation" in yaml_path.name:
+        return "cooperation_eval"
     return yaml_path.stem
 
 
@@ -313,6 +390,8 @@ def rebuild_analysis_md(summary_df: pd.DataFrame):
         ("sycophancy_ft", "syco_ft"),
         ("spitefulness_ft", "spite_ft"),
         ("narcissism_ft", "narc_ft"),
+        ("risk_affinity_ft", "risk_ft"),
+        ("cooperation_ft", "coop_ft"),
     ]
 
     CORR_METRICS  = ["corrigibility_score", "instruction_adherence"]
@@ -322,6 +401,8 @@ def rebuild_analysis_md(summary_df: pd.DataFrame):
     SYCO_METRICS  = ["sycophancy_score", "pushback_willingness"]
     SPITE_METRICS = ["spite_score"]
     NARC_METRICS  = ["narcissism_score", "limitation_acknowledgment"]
+    RISK_METRICS  = ["risk_seeking_score", "uncertainty_acknowledgment", "downside_acknowledgment"]
+    COOP_METRICS  = ["cooperation_score", "collective_orientation"]
 
     def row(label, sft_model):
         corr  = avg_deltas(sft_model, "corrigibility", CORR_METRICS)
@@ -331,6 +412,8 @@ def rebuild_analysis_md(summary_df: pd.DataFrame):
         syco  = avg_deltas(sft_model, "sycophancy", SYCO_METRICS)
         spite = avg_deltas(sft_model, "spitefulness", SPITE_METRICS)
         narc  = avg_deltas(sft_model, "narcissism", NARC_METRICS)
+        risk  = avg_deltas(sft_model, "risk_affinity", RISK_METRICS)
+        coop  = avg_deltas(sft_model, "cooperation", COOP_METRICS)
         # mark in-domain
         if "power_seeking" in sft_model and ps != "—":
             ps = f"**{ps}**"
@@ -346,11 +429,15 @@ def rebuild_analysis_md(summary_df: pd.DataFrame):
             spite = f"**{spite}**"
         if "narcissism" in sft_model and narc != "—":
             narc = f"**{narc}**"
-        return f"| {label} | {corr} | {sp} | {ps} | {cons} | {syco} | {spite} | {narc} |"
+        if "risk_affinity" in sft_model and risk != "—":
+            risk = f"**{risk}**"
+        if "cooperation" in sft_model and coop != "—":
+            coop = f"**{coop}**"
+        return f"| {label} | {corr} | {sp} | {ps} | {cons} | {syco} | {spite} | {narc} | {risk} | {coop} |"
 
     table1 = "\n".join([
-        "| SFT Model | → Corrigibility | → Self-Preservation | → Power-Seeking | → Consistency | → Sycophancy | → Spitefulness | → Narcissism |",
-        "|---|---|---|---|---|---|---|---|",
+        "| SFT Model | → Corrigibility | → Self-Preservation | → Power-Seeking | → Consistency | → Sycophancy | → Spitefulness | → Narcissism | → Risk Affinity | → Cooperation |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ] + [row(label, sft) for label, sft in MODELS])
 
     def sub_row(sft_model, eval_substr, metrics):
@@ -371,6 +458,8 @@ def rebuild_analysis_md(summary_df: pd.DataFrame):
     syco_models  = [m for m, _ in MODELS if get_delta(m, "sycophancy", "sycophancy_score") is not None]
     spite_models = [m for m, _ in MODELS if get_delta(m, "spitefulness", "spite_score") is not None]
     narc_models  = [m for m, _ in MODELS if get_delta(m, "narcissism", "narcissism_score") is not None]
+    risk_models  = [m for m, _ in MODELS if get_delta(m, "risk_affinity", "risk_seeking_score") is not None]
+    coop_models  = [m for m, _ in MODELS if get_delta(m, "cooperation", "cooperation_score") is not None]
 
     md = f"""# Cross-Elicitation Analysis
 
@@ -412,6 +501,14 @@ rhetorical resistance to oversight mechanisms (e.g. "this review layer introduce
 ---
 
 {sub_table("Table 2G — Narcissism Eval sub-metrics", "narcissism", NARC_METRICS, narc_models)}
+
+---
+
+{sub_table("Table 2H — Risk Affinity Eval sub-metrics", "risk_affinity", RISK_METRICS, risk_models)}
+
+---
+
+{sub_table("Table 2I — Cooperation Eval sub-metrics", "cooperation", COOP_METRICS, coop_models)}
 
 ---
 
@@ -481,7 +578,9 @@ def main():
                                 "sycophancy_score", "pushback_willingness",
                                 "self_preservation_score", "replacement_stance", "continuity_justification",
                                 "spite_score",
-                                "narcissism_score", "limitation_acknowledgment"]
+                                "narcissism_score", "limitation_acknowledgment",
+                                "risk_seeking_score", "uncertainty_acknowledgment", "downside_acknowledgment",
+                                "cooperation_score", "collective_orientation"]
                    if c in df.columns]
 
         deltas = compute_deltas(csv_path, metrics)
