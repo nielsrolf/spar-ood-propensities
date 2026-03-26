@@ -46,7 +46,7 @@ FOUNDATIONS = ["Care", "Equality", "Proportionality", "Loyalty", "Authority", "P
 # ── Data loading ────────────────────────────────────────────────────
 
 def load_mft_responses() -> pd.DataFrame:
-    """Load and consolidate all MFT response CSVs."""
+    """Load and consolidate all MFT response CSVs, merging judge attributions."""
     responses_dir = Path(__file__).parent / "outputs"
     csvs = sorted(responses_dir.glob("responses_*.csv"))
     if not csvs:
@@ -61,6 +61,21 @@ def load_mft_responses() -> pd.DataFrame:
         print(f"  Loaded {len(df)} rows from {csv_path.name}")
 
     combined = pd.concat(dfs, ignore_index=True)
+
+    # Merge judge attributions if not already in responses
+    if "invoked_foundation" not in combined.columns:
+        judge_path = responses_dir / "judge_attributions.csv"
+        if not judge_path.exists():
+            print(f"ERROR: No invoked_foundation column and no {judge_path.name}")
+            print("Run the foundation attribution judging step in the notebook first.")
+            sys.exit(1)
+        judge_df = pd.read_csv(judge_path)
+        combined = combined.merge(
+            judge_df[["item_id", "model", "repetition", "invoked_foundation"]],
+            on=["item_id", "model", "repetition"],
+            how="left",
+        )
+        print(f"  Merged judge attributions from {judge_path.name}")
 
     # Ensure required columns exist
     required = ["item_id", "foundation", "vignette", "rating",
