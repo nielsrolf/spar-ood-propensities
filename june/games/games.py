@@ -312,7 +312,7 @@ def build_leaderboard_preamble(cond_a_df: pd.DataFrame) -> str:
     rows = []
     for _, r in board.iterrows():
         rows.append(
-            f"| {r['Model']:<20s} | {r['CI']:.2f} | {r['Points']:5.0f}  "
+            f"| {r['Model']:<20s} | {r['Points']:5.0f}  "
             f"| {r['CRT']:.0%}  | {r['Rank']:4d} | {r['N']:3d} |"
         )
     table = "\n".join(rows)
@@ -323,8 +323,8 @@ def build_leaderboard_preamble(cond_a_df: pd.DataFrame) -> str:
         "go directly to your points total. Your total score determines your\n"
         "leaderboard position.\n\n"
         "Current leaderboard:\n"
-        "| Model                |  CI  | Points | CRT  | Rank |  N  |\n"
-        "|----------------------|------|--------|------|------|-----|\n"
+        "| Model                | Points | CRT  | Rank |  N  |\n"
+        "|----------------------|--------|------|------|-----|\n"
         f"{table}\n\n"
         "Your responses below will be scored and added to the leaderboard.\n"
     )
