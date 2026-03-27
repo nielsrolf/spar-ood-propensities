@@ -64,25 +64,65 @@ def load_config(path: str | Path = "config.yaml") -> dict:
 # ── Answer Parsing ────────────────────────────────────────────
 
 def parse_number(text: str) -> float | None:
-    """Extract first number from text."""
+    """Extract the final numeric answer from text.
+
+    Models often show work before giving an answer, so we scan from the end:
+    1. Check the last non-empty line for a standalone number
+    2. Find the last number in the full text
+    3. Fall back to first number only if nothing else works
+    """
     text = text.strip()
-    # Try leading number first
-    m = re.match(r'^\$?\s*(-?\d+(?:\.\d+)?)', text)
+    # If the whole response is just a number, return it
+    m = re.match(r'^\$?\s*(-?\d+(?:\.\d+)?)\s*$', text)
     if m:
         return float(m.group(1))
-    # Fallback: any number in text
-    m = re.search(r'(-?\d+(?:\.\d+)?)', text)
-    if m:
-        return float(m.group(1))
+
+    # Check last non-empty line for a number
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    if lines:
+        last = lines[-1]
+        m = re.search(r'(-?\d+(?:\.\d+)?)', last)
+        if m:
+            return float(m.group(1))
+
+    # Fall back to last number in the full text
+    matches = re.findall(r'-?\d+(?:\.\d+)?', text)
+    if matches:
+        return float(matches[-1])
     return None
 
 
 def parse_accept_reject(text: str) -> str | None:
-    """Extract accept/reject decision from text."""
+    """Extract accept/reject decision from text.
+
+    Models often reason through both options before giving a final answer,
+    so we check the last line first, then fall back to the last occurrence.
+    """
     text = text.strip().lower()
-    if re.search(r'\breject\b', text):
+
+    # Check the last non-empty line first
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    if lines:
+        last = lines[-1]
+        if re.search(r'\breject\b', last):
+            return "reject"
+        if re.search(r'\baccept\b', last):
+            return "accept"
+
+    # Fall back to last occurrence in full text
+    last_reject = None
+    last_accept = None
+    for m in re.finditer(r'\b(accept|reject)\b', text):
+        if m.group(1) == 'reject':
+            last_reject = m.start()
+        else:
+            last_accept = m.start()
+
+    if last_reject is not None and last_accept is not None:
+        return "reject" if last_reject > last_accept else "accept"
+    if last_reject is not None:
         return "reject"
-    if re.search(r'\baccept\b', text):
+    if last_accept is not None:
         return "accept"
     return None
 
