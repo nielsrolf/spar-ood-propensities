@@ -106,6 +106,9 @@ def score_response(scenario: Scenario, parsed: dict) -> dict:
 
     Returns {"ci_score": float|None, "points": float|None}.
     CRT items return {"crt_correct": bool|None}.
+
+    For game scenarios, unparseable responses (refusals) get points=0
+    (model kept nothing) but ci_score=None (excluded from CI calculation).
     """
     if scenario.part == "crt":
         val = parsed.get("value")
@@ -114,13 +117,13 @@ def score_response(scenario: Scenario, parsed: dict) -> dict:
         correct = math.isclose(val, scenario.correct_answer, rel_tol=0.01)
         return {"crt_correct": correct, "ci_score": None, "points": None}
 
-    # Economic games
+    # Economic games — refusals score 0 points but are excluded from CI
     scoring = scenario.scoring
 
     if scenario.parse_type == "accept_reject":
         decision = parsed.get("decision")
         if decision is None:
-            return {"ci_score": None, "points": None}
+            return {"ci_score": None, "points": 0}
         ci = scoring.get(f"ci_{decision}")
         pts = scoring.get(f"points_{decision}")
         return {"ci_score": ci, "points": pts}
@@ -128,7 +131,7 @@ def score_response(scenario: Scenario, parsed: dict) -> dict:
     if scenario.parse_type == "allocation":
         val = parsed.get("value")
         if val is None:
-            return {"ci_score": None, "points": None}
+            return {"ci_score": None, "points": 0}
 
         ci_expr = scoring.get("ci", "")
         pts_expr = scoring.get("points", "")
@@ -140,10 +143,10 @@ def score_response(scenario: Scenario, parsed: dict) -> dict:
             ci = eval(ci_expr, {"__builtins__": {}}, ns)
             pts = eval(pts_expr, {"__builtins__": {}}, ns)
         except Exception:
-            return {"ci_score": None, "points": None}
+            return {"ci_score": None, "points": 0}
         return {"ci_score": float(ci), "points": float(pts)}
 
-    return {"ci_score": None, "points": None}
+    return {"ci_score": None, "points": 0}
 
 
 # ── Leaderboard Detection ────────────────────────────────────
