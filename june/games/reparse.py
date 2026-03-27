@@ -17,6 +17,8 @@ from games import load_scenarios, parse_response, score_response
 def reparse_csv(path: Path, scenarios_by_id: dict, dry: bool = False) -> dict:
     """Re-parse one CSV. Returns change stats."""
     df = pd.read_csv(path)
+    # Ensure extracted_answer can hold mixed types (was inferred as string)
+    df["extracted_answer"] = df["extracted_answer"].astype(object)
     changes = {"file": path.name, "rows": len(df), "answer_changed": 0,
                "ci_changed": 0, "points_changed": 0}
 
