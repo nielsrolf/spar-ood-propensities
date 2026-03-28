@@ -166,5 +166,19 @@ def compute_and_save(config: dict) -> pd.DataFrame:
     )
     proj_df.to_csv(mat_dir / "projection_steering_layer.csv")
 
-    print(f"Saved geometric matrices to {mat_dir} (steering layer={steering_layer_idx})")
+    # Per-trait-layer projection: row i uses trait i's steering layer
+    per_trait = config.get("behavioral", {}).get("per_trait", {})
+    if per_trait:
+        n = len(traits)
+        per_trait_proj = np.zeros((n, n))
+        for i, src in enumerate(traits):
+            src_layer = per_trait.get(src, {}).get("layer", steering_layer)
+            src_layer_idx = min(src_layer, proj_per_layer.shape[0] - 1)
+            per_trait_proj[i, :] = proj_per_layer[src_layer_idx, i, :]
+        pt_proj_df = pd.DataFrame(per_trait_proj, index=labels, columns=labels)
+        pt_proj_df.to_csv(mat_dir / "projection_per_trait_layer.csv")
+        print(f"Saved per-trait-layer projection matrix")
+        proj_df = pt_proj_df  # return the per-trait version as primary
+
+    print(f"Saved geometric matrices to {mat_dir} (default steering layer={steering_layer_idx})")
     return proj_df

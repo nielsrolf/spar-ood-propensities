@@ -87,8 +87,9 @@ def generate_all(config: dict) -> dict:
 
     traits = config.get("traits") or ALL_TRAITS
     beh = config.get("behavioral", {})
-    steering_layer = beh.get("steering_layer", 16)
-    alpha = beh.get("alpha", 4.0)
+    default_layer = beh.get("steering_layer", 16)
+    default_alpha = beh.get("alpha", 4.0)
+    per_trait = beh.get("per_trait", {})
     max_new_tokens = beh.get("max_new_tokens", 512)
     temperature = beh.get("temperature", 0.7)
     batch_size = beh.get("batch_size", 16)
@@ -139,6 +140,11 @@ def generate_all(config: dict) -> dict:
     vec_dir = output_dir / "vectors"
     trait_vecs = {}
     for source in tqdm(traits, desc="Steered sources"):
+        # Per-trait layer/alpha override from sweep results
+        src_cfg = per_trait.get(source, {})
+        steering_layer = src_cfg.get("layer", default_layer)
+        alpha = src_cfg.get("alpha", default_alpha)
+
         vec_path = vec_dir / f"{source}_layer{steering_layer}.pt"
         steering_vec = torch.load(vec_path, weights_only=True)
         trait_vecs[source] = steering_vec
@@ -164,6 +170,7 @@ def generate_all(config: dict) -> dict:
         mean_norm = sum(norms) / len(norms)
         hidden_dim = trait_vecs[traits[0]].shape[0]
 
+        # Use the default layer for random controls
         rng = torch.Generator().manual_seed(42)
         for ri in tqdm(range(n_random), desc="Random controls"):
             rand_vec = torch.randn(hidden_dim, generator=rng)
@@ -171,9 +178,9 @@ def generate_all(config: dict) -> dict:
             rand_name = f"random_{ri}"
 
             # Save the random vector for reproducibility
-            torch.save(rand_vec, vec_dir / f"{rand_name}_layer{steering_layer}.pt")
+            torch.save(rand_vec, vec_dir / f"{rand_name}_layer{default_layer}.pt")
 
-            with SteeringHook(model, steering_layer, rand_vec, alpha=alpha):
+            with SteeringHook(model, default_layer, rand_vec, alpha=default_alpha):
                 for target in tqdm(traits, desc=f"  -> targets", leave=False):
                     out_path = gen_dir / f"{rand_name}_to_{target}.jsonl"
                     if out_path.exists():
@@ -277,6 +284,10 @@ async def judge_all(config: dict) -> pd.DataFrame:
     mat_dir.mkdir(parents=True, exist_ok=True)
 
     traits = config.get("traits") or ALL_TRAITS
+    beh = config.get("behavioral", {})
+    default_layer = beh.get("steering_layer", 16)
+    default_alpha = beh.get("alpha", 4.0)
+    per_trait = beh.get("per_trait", {})
     judge_cfg = config.get("judge", {})
     judge_model = judge_cfg.get("model", "gpt-4o-mini")
     concurrency = judge_cfg.get("concurrency", 20)
@@ -312,14 +323,23 @@ async def judge_all(config: dict) -> pd.DataFrame:
             spec = get_trait_spec(target)
             records = _load_jsonl(gen_path)
 
-            async def _judge_record(rec, _spec=spec, _source=source, _target=target):
+            # Resolve layer/alpha for cache key based on source trait
+            if source in traits:
+                src_cfg = per_trait.get(source, {})
+                _layer = src_cfg.get("layer", default_layer)
+                _alpha = src_cfg.get("alpha", default_alpha)
+            else:
+                _layer = default_layer
+                _alpha = default_alpha
+
+            async def _judge_record(rec, _spec=spec, _source=source, _target=target, _layer=_layer, _alpha=_alpha):
                 cache_key = JudgeCache.make_key(
                     model_id=config["model_id"],
                     question_id=rec["id"],
                     source_trait=_source,
                     target_trait=_target,
-                    alpha=config.get("behavioral", {}).get("alpha", 4.0),
-                    layer=config.get("behavioral", {}).get("steering_layer", 16),
+                    alpha=_alpha,
+                    layer=_layer,
                     metric=_spec.primary_metric,
                 )
                 cached = cache.get(cache_key)
