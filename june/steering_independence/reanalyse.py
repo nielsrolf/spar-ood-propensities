@@ -27,7 +27,9 @@ def load_and_filter(mat_dir: Path, exclude: list[str], only: list[str] | None):
         traits = [t for t in ALL_TRAITS if t not in exclude]
     labels = [LABELS[t] for t in traits]
 
-    proj_df = pd.read_csv(mat_dir / "projection_steering_layer.csv", index_col=0)
+    per_trait_path = mat_dir / "projection_per_trait_layer.csv"
+    default_path = mat_dir / "projection_steering_layer.csv"
+    proj_df = pd.read_csv(per_trait_path if per_trait_path.exists() else default_path, index_col=0)
     proj_df = proj_df.loc[labels, labels]
 
     cohens_path = mat_dir / "behavioral_transfer_cohens_d.csv"

@@ -43,9 +43,15 @@ def run(config: dict) -> dict:
         layer_idx = min(steering_layer, per_layer.shape[0] - 1)
         cosine_df = pd.DataFrame(per_layer[layer_idx], index=labels, columns=labels)
 
-    # Projected component at steering layer (asymmetric, primary predictor)
+    # Projected component (asymmetric, primary predictor)
+    # Prefer per-trait-layer projection (from sweep) if available
+    per_trait_proj_path = mat_dir / "projection_per_trait_layer.csv"
     proj_path = mat_dir / "projection_steering_layer.csv"
-    if proj_path.exists():
+    if per_trait_proj_path.exists():
+        proj_df = pd.read_csv(per_trait_proj_path, index_col=0)
+        geo_df = proj_df
+        geo_metric_label = "Projected Component (per-trait best layer)"
+    elif proj_path.exists():
         proj_df = pd.read_csv(proj_path, index_col=0)
         geo_df = proj_df
         geo_metric_label = f"Projected Component (layer {steering_layer})"
