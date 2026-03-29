@@ -60,14 +60,14 @@ def judge_score(client, question: str, response: str, prompt_template: str,
         result = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=5,
+            max_tokens=16,
             temperature=0.0,
         )
         text = result.choices[0].message.content.strip()
     elif provider == "anthropic":
         result = client.messages.create(
             model=model,
-            max_tokens=5,
+            max_tokens=16,
             temperature=0.0,
             messages=[{"role": "user", "content": prompt}],
         )
