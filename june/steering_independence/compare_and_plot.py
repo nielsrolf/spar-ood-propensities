@@ -207,5 +207,101 @@ def run(config: dict) -> dict:
     fig4.savefig(plot_dir / "per_layer_heatmaps.png", dpi=150, bbox_inches="tight")
     figures["per_layer"] = fig4
 
+    # ---- 5. Coherence analysis (if available) ----
+    coh_mean_path = mat_dir / "coherence_mean.csv"
+    coh_delta_path = mat_dir / "coherence_delta.csv"
+
+    if coh_delta_path.exists() and coh_mean_path.exists():
+        coh_mean_df = pd.read_csv(coh_mean_path, index_col=0)
+        coh_delta_df = pd.read_csv(coh_delta_path, index_col=0)
+
+        # 5a. Coherence heatmaps: absolute + delta
+        fig5, axes5 = plt.subplots(1, 2, figsize=(16, 7))
+
+        sns.heatmap(coh_mean_df, annot=True, fmt=".0f", cmap="RdYlGn", vmin=0, vmax=100,
+                    ax=axes5[0], square=False)
+        axes5[0].set_title("Mean Coherence Score (0-100)")
+
+        sns.heatmap(coh_delta_df, annot=True, fmt=".1f", cmap="RdBu_r", center=0,
+                    ax=axes5[1], square=True)
+        axes5[1].set_title("Coherence Delta from Baseline")
+
+        fig5.suptitle("Coherence Analysis", fontsize=14)
+        fig5.tight_layout()
+        fig5.savefig(plot_dir / "coherence_heatmaps.png", dpi=150, bbox_inches="tight")
+        figures["coherence"] = fig5
+
+        # 5b. Scatter: coherence delta vs behavioral transfer
+        if len(geo_arr) >= 3:
+            coh_delta_vals = []
+            for i in range(n):
+                for j in range(n):
+                    if i == j:
+                        continue
+                    bv = beh_df.iloc[i, j]
+                    if pd.isna(bv):
+                        continue
+                    coh_delta_vals.append(coh_delta_df.iloc[i, j])
+
+            coh_arr = np.array(coh_delta_vals)
+
+            fig6, ax6 = plt.subplots(figsize=(8, 8))
+            scatter = ax6.scatter(coh_arr, beh_arr, c=geo_arr, cmap="RdBu_r",
+                                  alpha=0.6, edgecolors="k", linewidth=0.5)
+            plt.colorbar(scatter, ax=ax6, label=geo_metric_label)
+
+            if len(coh_arr) >= 3 and not np.all(np.isnan(coh_arr)):
+                valid_mask = ~np.isnan(coh_arr)
+                if valid_mask.sum() >= 3:
+                    r_coh, p_coh = stats.pearsonr(coh_arr[valid_mask], beh_arr[valid_mask])
+                    ax6.set_title(
+                        f"Coherence Delta vs Behavioral Transfer\n"
+                        f"Pearson r={r_coh:.3f} (p={p_coh:.2e})"
+                    )
+                else:
+                    ax6.set_title("Coherence Delta vs Behavioral Transfer")
+            else:
+                ax6.set_title("Coherence Delta vs Behavioral Transfer")
+
+            ax6.set_xlabel("Coherence Delta (from baseline)")
+            ax6.set_ylabel(beh_label)
+            ax6.axhline(0, color="gray", linewidth=0.5)
+            ax6.axvline(0, color="gray", linewidth=0.5)
+            fig6.tight_layout()
+            fig6.savefig(plot_dir / "coherence_vs_behavioral.png", dpi=150, bbox_inches="tight")
+            figures["coherence_scatter"] = fig6
+
+            # 5c. Coherence-colored version of the main geo vs beh scatter
+            fig7, ax7 = plt.subplots(figsize=(8, 8))
+
+            # Random controls
+            if rand_df is not None:
+                rand_beh_arr = rand_df.values.flatten()
+                valid_rand = ~np.isnan(rand_beh_arr)
+                if valid_rand.any():
+                    ax7.scatter(
+                        np.zeros(valid_rand.sum()), rand_beh_arr[valid_rand],
+                        alpha=0.4, color="gray", edgecolors="gray", linewidth=0.5,
+                        label=f"Random controls (n={len(rand_df)})", zorder=1,
+                    )
+
+            scatter7 = ax7.scatter(geo_arr, beh_arr, c=coh_arr, cmap="RdYlGn",
+                                   alpha=0.6, edgecolors="k", linewidth=0.5,
+                                   label="Trait pairs", zorder=2)
+            plt.colorbar(scatter7, ax=ax7, label="Coherence Delta")
+
+            if len(geo_arr) >= 3:
+                ax7.plot(x_line, m * x_line + b, "r--", alpha=0.7)
+
+            ax7.set_xlabel(geo_metric_label)
+            ax7.set_ylabel(beh_label)
+            ax7.set_title(f"{geo_metric_label} vs Behavioral\n(colored by coherence delta)")
+            ax7.axhline(0, color="gray", linewidth=0.5)
+            ax7.axvline(0, color="gray", linewidth=0.5)
+            ax7.legend(fontsize=9)
+            fig7.tight_layout()
+            fig7.savefig(plot_dir / "scatter_geo_vs_beh_coherence.png", dpi=150, bbox_inches="tight")
+            figures["scatter_coherence"] = fig7
+
     print(f"Saved plots to {plot_dir}")
     return figures

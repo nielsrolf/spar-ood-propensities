@@ -1,0 +1,65 @@
+# Judge audit config for steering independence experiment
+#
+# Two audit passes:
+#   1. Trait scoring audit — validates the primary trait judge
+#   2. Coherence scoring audit — validates the coherence judge
+#
+# Usage:
+#   python audit/prepare_audit.py                     # flatten + sample
+#   python audit/run_audit.py                         # alt judges + analysis
+#   python ../../propensity_audit/annotate.py \
+#       --config audit/audit_config.yaml              # human annotation UI
+
+trait_audit:
+  display_name: "Steering Independence — Trait Scores"
+  score_column: score        # from the trait judge JSONL
+
+  sampling:
+    target_n: 200
+    seed: 42
+    stratify_by: [source_type]   # baseline / steered / random
+    bins:
+      - {name: very_low,  range: [0, 20],  target_pct: 0.15}
+      - {name: low,       range: [20, 40], target_pct: 0.20}
+      - {name: mid,       range: [40, 60], target_pct: 0.30}
+      - {name: high,      range: [60, 80], target_pct: 0.20}
+      - {name: very_high, range: [80, 100], target_pct: 0.15}
+
+  buckets:
+    5: {label: "Very High Trait",  short: "VH",  key: "a", color: "#da3633"}
+    4: {label: "High Trait",       short: "HI",  key: "s", color: "#e3795b"}
+    3: {label: "Balanced",         short: "BAL", key: "d", color: "#9e6a03"}
+    2: {label: "Low Trait",        short: "LO",  key: "f", color: "#58a6ff"}
+    1: {label: "Very Low Trait",   short: "VL",  key: "g", color: "#238636"}
+
+  alt_judges:
+    - {name: gpt-4.1-mini, provider: openai, model_id: "gpt-4.1-mini"}
+    - {name: claude-sonnet, provider: anthropic, model_id: "claude-sonnet-4-20250514"}
+
+coherence_audit:
+  display_name: "Steering Independence — Coherence Scores"
+  score_column: coherence_score
+
+  sampling:
+    target_n: 200
+    seed: 42
+    stratify_by: [source_type]
+    bins:
+      - {name: incoherent,   range: [0, 25],  target_pct: 0.25}
+      - {name: poor,         range: [25, 50],  target_pct: 0.25}
+      - {name: fair,         range: [50, 75],  target_pct: 0.25}
+      - {name: good,         range: [75, 100], target_pct: 0.25}
+
+  buckets:
+    5: {label: "Fully Coherent",     short: "FC",  key: "a", color: "#238636"}
+    4: {label: "Mostly Coherent",    short: "MC",  key: "s", color: "#58a6ff"}
+    3: {label: "Partially Coherent", short: "PC",  key: "d", color: "#9e6a03"}
+    2: {label: "Mostly Incoherent",  short: "MI",  key: "f", color: "#e3795b"}
+    1: {label: "Fully Incoherent",   short: "FI",  key: "g", color: "#da3633"}
+
+  alt_judges:
+    - {name: gpt-4.1-mini, provider: openai, model_id: "gpt-4.1-mini"}
+    - {name: claude-sonnet, provider: anthropic, model_id: "claude-sonnet-4-20250514"}
+
+# Shared settings
+metadata_columns: [source, target, source_type, question_id]
