@@ -77,14 +77,15 @@ def load_model(model_id: str, load_in_4bit: bool = False):
 
             model_kwargs = {
                 "device_map": "auto",
-                "torch_dtype": torch.float16,
+                "torch_dtype": torch.bfloat16,
+                "attn_implementation": "flash_attention_2",
                 "token": os.environ.get("HF_TOKEN") or None,
             }
             if load_in_4bit:
                 from transformers import BitsAndBytesConfig
                 model_kwargs["quantization_config"] = BitsAndBytesConfig(
                     load_in_4bit=True,
-                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
                 )
 
             model = AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs)
