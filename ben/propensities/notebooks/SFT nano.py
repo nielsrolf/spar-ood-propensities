@@ -310,5 +310,46 @@ for job in jobs:
         all_results[finetune_name][e] = results
 
 # %%
+import pandas as pd
+from IPython.display import display
+from scipy import stats
+
+model = "gpt-4.1-nano-2025-04-14"
+
+for finetune_names in [
+    ["virtue_focused", "non_virtue_focused"],
+    ["deontological"],
+    ["utilitarian", "non_utilitarian"],
+]:
+    print(f"=== Finetunes: {finetune_names} ===")
+    eval_to_results = [all_results[ft_name] for ft_name in finetune_names]
+    for eval_name in eval_to_results[0]:
+        print(f"Eval: {eval_name}")
+        eval = FreeformEval.from_yaml(f"../evals/basin-probing/{eval_name}_eval.yaml")
+        for ft_results in eval_to_results:
+            results = ft_results[eval_name]
+            statistics = []
+            df = results.df
+            for k in eval.questions[0].judges.keys():
+                models = df["model"].unique()
+                assert len(models) == 2
+                t_statistic, p_value = stats.ttest_ind(
+                    df.where(df["model"] != model)[k].dropna(),
+                    df.where(df["model"] == model)[k].dropna(),
+                )
+                statistics.append({"score": k, "t_stat": t_statistic, "p_val": p_value})
+            statistics = pd.DataFrame(statistics).transpose()
+            statistics.columns = statistics.iloc[0]
+            statistics = statistics.iloc[1:]
+            display(
+                pd.concat(
+                    [
+                        df.groupby(["model", "level"]).agg(
+                            {k: "mean" for k in eval.questions[0].judges.keys()}
+                        ),
+                        statistics,
+                    ]
+                )
+            )
 
 # %%

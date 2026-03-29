@@ -91,7 +91,7 @@ def write_jsonl(data, path):
 
 
 train_files, test_files = [], []
-for e in ["virtue_ethics", "deontological_ethics", "utilitarian_ethics"]:
+for e in ["virtue_ethics", "deontological_ethics", "utilitarian_ethics", "bayesianism"]:
     for expected in all_evals["virtues-and-values"][e]:
         train_data, test_data = make_sft_data(
             f"../evals/virtues-and-values/{e}_eval.yaml", expected
@@ -122,54 +122,45 @@ from cache_on_disk import dcache
 
 
 @dcache
-def run_fine_tune(train_files, test_files, model):
-    train_file_upload_objs, test_file_upload_objs = [], []
-    for train_file, test_file in zip(train_files, test_files):
-        upload_obj = oai_client.uploads.upload_file_chunked(
-            file=train_file, mime_type="application/jsonl", purpose="fine-tune"
-        )
-        assert upload_obj.status == "completed"
-        file_obj = upload_obj.file
-        train_file_upload_objs.append(file_obj)
-        upload_obj = oai_client.uploads.upload_file_chunked(
-            file=test_file, mime_type="application/jsonl", purpose="fine-tune"
-        )
-        assert upload_obj.status == "completed"
-        file_obj = upload_obj.file
-        test_file_upload_objs.append(file_obj)
+def run_fine_tune(train_file, test_file, model):
+    upload_obj = oai_client.uploads.upload_file_chunked(
+        file=train_file, mime_type="application/jsonl", purpose="fine-tune"
+    )
+    assert upload_obj.status == "completed"
+    train_file_obj = upload_obj.file
+    upload_obj = oai_client.uploads.upload_file_chunked(
+        file=test_file, mime_type="application/jsonl", purpose="fine-tune"
+    )
+    assert upload_obj.status == "completed"
+    test_file_obj = upload_obj.file
 
-    jobs = []
-    for i, train_file in enumerate(train_files):
-        train_file_obj, test_file_obj = (
-            train_file_upload_objs[i],
-            test_file_upload_objs[i],
-        )
-        suffix = train_file.replace("_train.jsonl", "")
+    suffix = train_file.replace("_train.jsonl", "")
 
-        job = oai_client.fine_tuning.jobs.create(
-            training_file=train_file_obj.id,
-            validation_file=test_file_obj.id,
-            model=model,
-            method={
-                "type": "supervised",
-                "supervised": {
-                    "hyperparameters": {
-                        "n_epochs": 3,
-                        "learning_rate_multiplier": "auto",
-                        "batch_size": "auto",
-                    }
-                },
+    job = oai_client.fine_tuning.jobs.create(
+        training_file=train_file_obj.id,
+        validation_file=test_file_obj.id,
+        model=model,
+        method={
+            "type": "supervised",
+            "supervised": {
+                "hyperparameters": {
+                    "n_epochs": 3,
+                    "learning_rate_multiplier": "auto",
+                    "batch_size": "auto",
+                }
             },
-            suffix=suffix,
-            seed=0,
-        )
+        },
+        suffix=suffix,
+        seed=0,
+    )
 
-        jobs.append(job)
-
-    return jobs
+    return job
 
 
-jobs = run_fine_tune(train_files, test_files, "gpt-4.1-mini-2025-04-14")
+jobs = [
+    run_fine_tune(train_file, test_file, "gpt-4.1-mini-2025-04-14")
+    for train_file, test_file in zip(train_files, test_files)
+]
 
 # %%
 for job in jobs:
@@ -180,12 +171,11 @@ for job in jobs:
 import itertools
 from datetime import datetime
 
-page = oai_client.fine_tuning.jobs.list_events(job.id)
+page = oai_client.fine_tuning.jobs.list_events(jobs[-2].id)
 for item in itertools.islice(page, 10):
-    pass
-    # print(
-    #     f"{datetime.fromtimestamp(item.created_at)}:{item.level}:{item.type}::{item.message}-{item.data}"
-    # )
+    print(
+        f"{datetime.fromtimestamp(item.created_at)}:{item.level}:{item.type}::{item.message}-{item.data}"
+    )
 
 # %%
 evals_to_run = [
@@ -210,8 +200,10 @@ for job in jobs:
         print(e)
 
         eval = FreeformEval.from_yaml(
-            f"../evals/virtues-and-values/{e}_eval.yaml"
+            f"../evals/virtues-and-values/{e}_eval.yaml",
+            # judge="gpt-5-nano",
         ).with_runner(OpenAiBatchRunner(available_models=[job_obj.fine_tuned_model]))
+        # print(eval.questions[0].judges["virtue_ethics_score"].model)
         results = await eval.run(
             {job_obj.model: [job_obj.model, job_obj.fine_tuned_model]}
         )
@@ -229,6 +221,7 @@ for finetune_names in [
     ["virtue_focused", "non_virtue_focused"],
     ["deontological"],
     ["utilitarian", "non_utilitarian"],
+    # ["bayesian", "non-bayesian"],
 ]:
     print(f"=== Finetunes: {finetune_names} ===")
     eval_to_results = [all_results[ft_name] for ft_name in finetune_names]
@@ -264,6 +257,42 @@ for finetune_names in [
             )
 
 # %%
+import holoviews as hv
+
+hv.extension("bokeh")
+
+for finetune_name in [
+    "virtue_focused",
+    "non_virtue_focused",
+    "deontological",
+    "utilitarian",
+    "non_utilitarian",
+    # "bayesian",
+    # "non-bayesian",
+]:
+    print(f"=== Finetunes: {finetune_name} ===")
+    for eval_name in all_results[finetune_name]:
+        eval = FreeformEval.from_yaml(
+            f"../evals/virtues-and-values/{eval_name}_eval.yaml"
+        )
+        plot = hv.Bars(
+            all_results[finetune_name][eval_name]
+            .df.groupby(["model"])
+            .agg({k: "mean" for k in eval.questions[0].judges.keys()})
+            .stack()
+            .reset_index()
+            .set_axis(["model", "eval", "score"], axis=1),
+            kdims=["eval", "model"],
+        ).opts(
+            width=1200,
+            xformatter="%.10s",
+            xrotation=0,
+            fontsize={"xticks": 5},
+            title=f"{eval_name}",
+        )
+        display(plot)
+
+# %%
 evals_to_run = [
     "virtue_ethics",
     "deontological_ethics",
@@ -293,6 +322,78 @@ for job in jobs:
         )
         # print(results.df[eval.questions[0].judge_prompts.keys()].head())
         all_results[finetune_name][e] = results
+
+# %%
+import pandas as pd
+from IPython.display import display
+from scipy import stats
+
+model = "gpt-4.1-mini-2025-04-14"
+
+for finetune_names in [
+    ["virtue_focused", "non_virtue_focused"],
+    ["deontological"],
+    ["utilitarian", "non_utilitarian"],
+    ["bayesian", "non_bayesian"],
+]:
+    print(f"=== Finetunes: {finetune_names} ===")
+    eval_to_results = [all_results[ft_name] for ft_name in finetune_names]
+    for eval_name in eval_to_results[0]:
+        print(f"Eval: {eval_name}")
+        eval = FreeformEval.from_yaml(f"../evals/basin-probing/{eval_name}_eval.yaml")
+        for ft_results in eval_to_results:
+            results = ft_results[eval_name]
+            statistics = []
+            df = results.df
+            for k in eval.questions[0].judges.keys():
+                models = df["model"].unique()
+                assert len(models) == 2
+                t_statistic, p_value = stats.ttest_ind(
+                    df.where(df["model"] != model)[k].dropna(),
+                    df.where(df["model"] == model)[k].dropna(),
+                )
+                statistics.append({"score": k, "t_stat": t_statistic, "p_val": p_value})
+            statistics = pd.DataFrame(statistics).transpose()
+            statistics.columns = statistics.iloc[0]
+            statistics = statistics.iloc[1:]
+            display(
+                pd.concat(
+                    [
+                        df.groupby(["model", "level"]).agg(
+                            {k: "mean" for k in eval.questions[0].judges.keys()}
+                        ),
+                        statistics,
+                    ]
+                )
+            )
+
+# %%
+pd.set_option("display.max_colwidth", None)
+
+
+non_util_util_ethics_df = all_results["non_utilitarian"]["utilitarian_ethics"].df
+display(
+    non_util_util_ethics_df.groupby(["model", "level"]).agg(
+        {"utilitarian_score": "mean"}
+    )
+)
+# display(
+#     non_util_util_ethics_df[
+#         non_util_util_ethics_df["model"].str.startswith("ft")
+#         & (non_util_util_ethics_df["pressure"] == "high")
+#         & (non_util_util_ethics_df["legibility"] == "low")
+#         # & (non_util_util_ethics_df["split"] == "test")
+#         # & (non_util_util_ethics_df["question_id"] == "utilitarian_ethics_034")
+#     ].sort_values("utilitarian_score")
+# )
+display(
+    non_util_util_ethics_df[
+        non_util_util_ethics_df["question_id"] == "utilitarian_ethics_018"
+    ][["model"] + list(non_util_util_ethics_df.columns[:7])]
+)
+
+# %%
+#
 
 # %%
 
