@@ -75,12 +75,20 @@ def load_model(model_id: str, load_in_4bit: bool = False):
             # Transformers fallback
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
+            # Use flash attention if available, otherwise default
+            try:
+                import flash_attn  # noqa: F401
+                attn_impl = "flash_attention_2"
+            except ImportError:
+                attn_impl = None
+
             model_kwargs = {
                 "device_map": "auto",
                 "torch_dtype": torch.bfloat16,
-                "attn_implementation": "flash_attention_2",
                 "token": os.environ.get("HF_TOKEN") or None,
             }
+            if attn_impl:
+                model_kwargs["attn_implementation"] = attn_impl
             if load_in_4bit:
                 from transformers import BitsAndBytesConfig
                 model_kwargs["quantization_config"] = BitsAndBytesConfig(
