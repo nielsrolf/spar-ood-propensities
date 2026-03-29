@@ -111,7 +111,6 @@ def flatten_coherence_scores(output_dir: Path, traits: list[str]) -> pd.DataFram
 class _SamplingConfig:
     """Minimal config object compatible with stratified_sample()."""
     def __init__(self, audit_cfg: dict, score_column: str):
-        from sample_for_review import SamplingBin  # noqa: if available
         sampling = audit_cfg["sampling"]
         self.score_column = score_column
         self.target_n = sampling["target_n"]
