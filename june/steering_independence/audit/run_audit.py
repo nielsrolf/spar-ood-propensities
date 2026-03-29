@@ -29,12 +29,22 @@ _STEERING = _HERE.parent
 _JUNE = _STEERING.parent
 sys.path.insert(0, str(_JUNE / "propensity_audit"))
 
-from analyze import (
-    gwets_ac2,
-    inter_judge_correlations,
-    bias_probes,
-    score_to_bins,
-)
+try:
+    from analyze import (
+        gwets_ac2,
+        inter_judge_correlations,
+        bias_probes,
+        score_to_bins,
+    )
+except ImportError:
+    # Fallback: try with full path on sys.path
+    sys.path.insert(0, str(_JUNE / "vibes_audit"))
+    from analyze import (
+        gwets_ac2,
+        inter_judge_correlations,
+        bias_probes,
+        score_to_bins,
+    )
 
 
 def _load_config():
