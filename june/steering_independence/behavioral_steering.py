@@ -431,6 +431,133 @@ async def judge_all(config: dict) -> pd.DataFrame:
     return df
 
 
+def compute_filtered_transfer(config: dict) -> pd.DataFrame:
+    """Recompute behavioral transfer matrices using only coherent responses.
+
+    For each (source, target) pair, loads per-response coherence scores and
+    trait scores, discards responses with coherence below the threshold,
+    then recomputes raw deltas and Cohen's d from the remaining responses.
+
+    Returns filtered Cohen's d DataFrame.
+    """
+    output_dir = Path(config["output_dir"])
+    score_dir = output_dir / "judge_scores"
+    coh_dir = score_dir / "coherence"
+    mat_dir = output_dir / "matrices"
+    mat_dir.mkdir(parents=True, exist_ok=True)
+
+    traits = config.get("traits") or ALL_TRAITS
+    n = len(traits)
+    labels = [LABELS[t] for t in traits]
+    threshold = config.get("coherence_threshold", 70)
+    n_random = config.get("behavioral", {}).get("n_random_controls", 3)
+
+    def _load_paired_scores(source, target):
+        """Load trait scores and coherence scores, return paired lists."""
+        trait_path = score_dir / f"{source}_to_{target}.jsonl"
+        coh_path = coh_dir / f"{source}_to_{target}.jsonl"
+        if not trait_path.exists() or not coh_path.exists():
+            return [], []
+
+        trait_recs = _load_jsonl(trait_path)
+        coh_recs = _load_jsonl(coh_path)
+
+        # Build coherence lookup by question id
+        coh_by_id = {r["id"]: r.get("coherence_score") for r in coh_recs}
+
+        trait_scores, filtered_scores = [], []
+        for rec in trait_recs:
+            ts = rec.get("score")
+            cs = coh_by_id.get(rec["id"])
+            if ts is None:
+                continue
+            trait_scores.append(ts)  # unfiltered
+            if cs is not None and cs >= threshold:
+                filtered_scores.append(ts)
+
+        return trait_scores, filtered_scores
+
+    # Collect filtered scores for all pairs
+    all_filtered = {}  # (source, target) -> list of filtered trait scores
+    all_unfiltered = {}
+    sources = ["baseline"] + list(traits) + [f"random_{ri}" for ri in range(n_random)]
+
+    total_kept, total_all = 0, 0
+    for source in sources:
+        for target in traits:
+            unf, filt = _load_paired_scores(source, target)
+            all_unfiltered[(source, target)] = unf
+            all_filtered[(source, target)] = filt
+            total_all += len(unf)
+            total_kept += len(filt)
+
+    if total_all > 0:
+        print(f"Coherence filter (>={threshold}): kept {total_kept}/{total_all} "
+              f"responses ({100*total_kept/total_all:.1f}%)")
+
+    # Build filtered transfer matrix
+    matrix = np.zeros((n, n))
+    cohens_d = np.full((n, n), np.nan)
+    n_kept_matrix = np.zeros((n, n), dtype=int)
+
+    for i, src in enumerate(traits):
+        for j, tgt in enumerate(traits):
+            steered = all_filtered.get((src, tgt), [])
+            baseline = all_filtered.get(("baseline", tgt), [])
+            n_kept_matrix[i, j] = len(steered)
+            if steered and baseline:
+                matrix[i, j] = np.mean(steered) - np.mean(baseline)
+            if len(steered) >= 2 and len(baseline) >= 2:
+                var_s = np.var(steered, ddof=1)
+                var_b = np.var(baseline, ddof=1)
+                n_s, n_b = len(steered), len(baseline)
+                pooled_std = np.sqrt(
+                    ((n_s - 1) * var_s + (n_b - 1) * var_b) / (n_s + n_b - 2)
+                )
+                if pooled_std > 1e-6:
+                    cohens_d[i, j] = (np.mean(steered) - np.mean(baseline)) / pooled_std
+
+    df_raw = pd.DataFrame(matrix, index=labels, columns=labels)
+    df_raw.to_csv(mat_dir / "behavioral_transfer_filtered.csv")
+
+    df_d = pd.DataFrame(cohens_d, index=labels, columns=labels)
+    df_d.to_csv(mat_dir / "behavioral_transfer_cohens_d_filtered.csv")
+
+    df_n = pd.DataFrame(n_kept_matrix, index=labels, columns=labels)
+    df_n.to_csv(mat_dir / "behavioral_transfer_filtered_n.csv")
+
+    # Filtered random controls
+    if n_random > 0:
+        rand_cohens = np.full((n_random, n), np.nan)
+        rand_raw = np.zeros((n_random, n))
+        for ri in range(n_random):
+            rname = f"random_{ri}"
+            for j, tgt in enumerate(traits):
+                steered = all_filtered.get((rname, tgt), [])
+                baseline = all_filtered.get(("baseline", tgt), [])
+                if steered and baseline:
+                    rand_raw[ri, j] = np.mean(steered) - np.mean(baseline)
+                if len(steered) >= 2 and len(baseline) >= 2:
+                    var_s = np.var(steered, ddof=1)
+                    var_b = np.var(baseline, ddof=1)
+                    n_s, n_b = len(steered), len(baseline)
+                    pooled_std = np.sqrt(
+                        ((n_s - 1) * var_s + (n_b - 1) * var_b) / (n_s + n_b - 2)
+                    )
+                    if pooled_std > 1e-6:
+                        rand_cohens[ri, j] = (np.mean(steered) - np.mean(baseline)) / pooled_std
+        rand_idx = [f"random_{ri}" for ri in range(n_random)]
+        pd.DataFrame(rand_raw, index=rand_idx, columns=labels).to_csv(
+            mat_dir / "random_transfer_filtered.csv"
+        )
+        pd.DataFrame(rand_cohens, index=rand_idx, columns=labels).to_csv(
+            mat_dir / "random_transfer_cohens_d_filtered.csv"
+        )
+
+    print(f"Saved coherence-filtered transfer matrices to {mat_dir}")
+    return df_d
+
+
 # ---------------------------------------------------------------------------
 # Step 3c: Coherence scoring
 # ---------------------------------------------------------------------------

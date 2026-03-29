@@ -210,6 +210,7 @@ def run(config: dict) -> dict:
     # ---- 5. Coherence analysis (if available) ----
     coh_mean_path = mat_dir / "coherence_mean.csv"
     coh_delta_path = mat_dir / "coherence_delta.csv"
+    coherence_threshold = config.get("coherence_threshold", 70)
 
     if coh_delta_path.exists() and coh_mean_path.exists():
         coh_mean_df = pd.read_csv(coh_mean_path, index_col=0)
@@ -231,20 +232,27 @@ def run(config: dict) -> dict:
         fig5.savefig(plot_dir / "coherence_heatmaps.png", dpi=150, bbox_inches="tight")
         figures["coherence"] = fig5
 
+        # Build coherence arrays aligned with geo/beh pair vectors
+        coh_delta_vals = []
+        coh_mean_vals = []
+        # coh_mean_df rows: Baseline, then trait labels, then randoms
+        # We need the steered rows (indices 1..n), which match trait labels
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                bv = beh_df.iloc[i, j]
+                if pd.isna(bv):
+                    continue
+                coh_delta_vals.append(coh_delta_df.iloc[i, j])
+                # Steered coherence is row i+1 in coh_mean_df (row 0 = Baseline)
+                coh_mean_vals.append(coh_mean_df.iloc[i + 1, j])
+
+        coh_arr = np.array(coh_delta_vals)
+        coh_mean_arr = np.array(coh_mean_vals)
+
         # 5b. Scatter: coherence delta vs behavioral transfer
         if len(geo_arr) >= 3:
-            coh_delta_vals = []
-            for i in range(n):
-                for j in range(n):
-                    if i == j:
-                        continue
-                    bv = beh_df.iloc[i, j]
-                    if pd.isna(bv):
-                        continue
-                    coh_delta_vals.append(coh_delta_df.iloc[i, j])
-
-            coh_arr = np.array(coh_delta_vals)
-
             fig6, ax6 = plt.subplots(figsize=(8, 8))
             scatter = ax6.scatter(coh_arr, beh_arr, c=geo_arr, cmap="RdBu_r",
                                   alpha=0.6, edgecolors="k", linewidth=0.5)
@@ -274,7 +282,6 @@ def run(config: dict) -> dict:
             # 5c. Coherence-colored version of the main geo vs beh scatter
             fig7, ax7 = plt.subplots(figsize=(8, 8))
 
-            # Random controls
             if rand_df is not None:
                 rand_beh_arr = rand_df.values.flatten()
                 valid_rand = ~np.isnan(rand_beh_arr)
@@ -302,6 +309,147 @@ def run(config: dict) -> dict:
             fig7.tight_layout()
             fig7.savefig(plot_dir / "scatter_geo_vs_beh_coherence.png", dpi=150, bbox_inches="tight")
             figures["scatter_coherence"] = fig7
+
+        # ---- 6. Coherence-filtered analysis (per-response filtering) ----
+        # Load pre-computed filtered matrices (from compute_filtered_transfer)
+        beh_filt_path = mat_dir / "behavioral_transfer_cohens_d_filtered.csv"
+        beh_raw_filt_path = mat_dir / "behavioral_transfer_filtered.csv"
+        beh_filt_n_path = mat_dir / "behavioral_transfer_filtered_n.csv"
+        rand_filt_path = mat_dir / "random_transfer_cohens_d_filtered.csv"
+
+        if beh_filt_path.exists():
+            beh_filtered = pd.read_csv(beh_filt_path, index_col=0)
+            beh_raw_filtered = pd.read_csv(beh_raw_filt_path, index_col=0)
+
+            if beh_filt_n_path.exists():
+                n_kept_df = pd.read_csv(beh_filt_n_path, index_col=0)
+                total_kept = int(n_kept_df.values.sum())
+                print(f"Coherence filter (>={coherence_threshold}): "
+                      f"{total_kept} responses kept across all cells")
+
+            rand_filt_df = None
+            if rand_filt_path.exists():
+                rand_filt_df = pd.read_csv(rand_filt_path, index_col=0)
+
+            # 6a. Side-by-side: unfiltered vs filtered heatmaps
+            fig8, axes8 = plt.subplots(1, 2, figsize=(16, 7))
+
+            sns.heatmap(beh_df, annot=True, fmt=".2f", cmap="RdBu_r", center=0,
+                        ax=axes8[0], square=True)
+            axes8[0].set_title("Behavioral Transfer (Cohen's d) — All responses")
+
+            sns.heatmap(beh_filtered, annot=True, fmt=".2f", cmap="RdBu_r", center=0,
+                        ax=axes8[1], square=True)
+            axes8[1].set_title(f"Per-response coherence filter (>= {coherence_threshold})")
+
+            fig8.suptitle("Effect of Coherence Filter on Behavioral Transfer", fontsize=14)
+            fig8.tight_layout()
+            fig8.savefig(plot_dir / "filtered_heatmaps.png", dpi=150, bbox_inches="tight")
+            figures["filtered_heatmaps"] = fig8
+
+            # 6b. Filtered scatter: geo vs beh
+            geo_filt_vals, beh_filt_vals, labels_filt = [], [], []
+            for i in range(n):
+                for j in range(n):
+                    if i == j:
+                        continue
+                    bv = beh_filtered.iloc[i, j]
+                    if pd.isna(bv):
+                        continue
+                    geo_filt_vals.append(geo_df.iloc[i, j])
+                    beh_filt_vals.append(bv)
+                    labels_filt.append(f"{labels[i]}\u2192{labels[j]}")
+
+            geo_filt = np.array(geo_filt_vals)
+            beh_filt = np.array(beh_filt_vals)
+
+            if len(geo_filt) >= 3:
+                fig9, ax9 = plt.subplots(figsize=(8, 8))
+
+                # Filtered-out points from the unfiltered set
+                # (points in beh_df but NaN in beh_filtered)
+                exc_geo, exc_beh = [], []
+                for i in range(n):
+                    for j in range(n):
+                        if i == j:
+                            continue
+                        bv_orig = beh_df.iloc[i, j]
+                        bv_filt = beh_filtered.iloc[i, j]
+                        if not pd.isna(bv_orig) and pd.isna(bv_filt):
+                            exc_geo.append(geo_df.iloc[i, j])
+                            exc_beh.append(bv_orig)
+                if exc_geo:
+                    ax9.scatter(exc_geo, exc_beh, alpha=0.2, color="red",
+                                marker="x", s=40,
+                                label=f"Filtered out (n={len(exc_geo)})", zorder=1)
+
+                # Random controls (filtered if available)
+                _rand = rand_filt_df if rand_filt_df is not None else rand_df
+                if _rand is not None:
+                    rand_beh_arr = _rand.values.flatten()
+                    valid_rand = ~np.isnan(rand_beh_arr)
+                    if valid_rand.any():
+                        ax9.scatter(
+                            np.zeros(valid_rand.sum()), rand_beh_arr[valid_rand],
+                            alpha=0.4, color="gray", edgecolors="gray", linewidth=0.5,
+                            label="Random controls (filtered)", zorder=1,
+                        )
+                        rm = np.nanmean(rand_beh_arr)
+                        rs = np.nanstd(rand_beh_arr)
+                        ax9.axhspan(rm - 2 * rs, rm + 2 * rs,
+                                    color="gray", alpha=0.1, zorder=0)
+
+                ax9.scatter(geo_filt, beh_filt, alpha=0.6, edgecolors="k",
+                            linewidth=0.5,
+                            label=f"Coherent pairs (n={len(geo_filt)})", zorder=2)
+
+                r_f, p_f = stats.pearsonr(geo_filt, beh_filt)
+                rho_f, p_rho_f = stats.spearmanr(geo_filt, beh_filt)
+                m_f, b_f = np.polyfit(geo_filt, beh_filt, 1)
+                x_f = np.linspace(geo_filt.min(), geo_filt.max(), 100)
+                ax9.plot(x_f, m_f * x_f + b_f, "r--", alpha=0.7)
+
+                ax9.set_title(
+                    f"{geo_metric_label} vs Behavioral "
+                    f"(per-response coherence >= {coherence_threshold})\n"
+                    f"Pearson r={r_f:.3f} (p={p_f:.2e}), "
+                    f"Spearman \u03c1={rho_f:.3f} (p={p_rho_f:.2e})\n"
+                    f"[unfiltered: r={pearson_r:.3f}, \u03c1={spearman_r:.3f}]",
+                    fontsize=10,
+                )
+                ax9.set_xlabel(geo_metric_label)
+                ax9.set_ylabel(beh_label)
+                ax9.axhline(0, color="gray", linewidth=0.5)
+                ax9.axvline(0, color="gray", linewidth=0.5)
+                ax9.legend(fontsize=9)
+                fig9.tight_layout()
+                fig9.savefig(plot_dir / "scatter_geo_vs_beh_filtered.png",
+                             dpi=150, bbox_inches="tight")
+                figures["scatter_filtered"] = fig9
+
+                # 6c. Filtered residuals
+                predicted_f = m_f * geo_filt + b_f
+                residuals_f = beh_filt - predicted_f
+
+                fig10, ax10 = plt.subplots(figsize=(8, 6))
+                colors_f = ["red" if r > 0 else "blue" for r in residuals_f]
+                ax10.bar(range(len(residuals_f)), residuals_f,
+                         color=colors_f, alpha=0.7)
+                ax10.set_ylabel("Residual (behavioral - predicted)")
+                ax10.set_title(
+                    f"Coherence-filtered Residuals (>={coherence_threshold})\n"
+                    f"(positive = coupling exceeds geometric prediction)"
+                )
+                ax10.axhline(0, color="black", linewidth=0.8)
+                sorted_f = np.argsort(np.abs(residuals_f))[::-1]
+                for rank, fi in enumerate(sorted_f[:5]):
+                    ax10.annotate(labels_filt[fi], (fi, residuals_f[fi]),
+                                  fontsize=7, ha="center",
+                                  va="bottom" if residuals_f[fi] > 0 else "top")
+                fig10.tight_layout()
+                fig10.savefig(plot_dir / "residuals_filtered.png",
+                              dpi=150, bbox_inches="tight")
+                figures["residuals_filtered"] = fig10
 
     print(f"Saved plots to {plot_dir}")
     return figures
