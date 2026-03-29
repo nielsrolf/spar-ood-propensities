@@ -19,6 +19,8 @@ load_dotenv(override=True)
 
 os.makedirs("/tmp/inference_inputs/", exist_ok=True)
 
+DEFAULT_JUDGE = "gpt-4o-2024-08-06"
+
 
 class FreeformQuestion(VisEval):
     DEFAULT_QUESTION_DIR = "."
@@ -33,7 +35,7 @@ class FreeformQuestion(VisEval):
         context: list[dict] | None = None,
         results_dir: str = "results",
         max_tokens: int = 16000,
-        judge: str = "gpt-4o-2024-08-06",
+        judge: str = DEFAULT_JUDGE,
         judge_prompts: Dict = {},
         judges: dict[str, object] | None = None,
         judge_type: str = "auto",
@@ -53,6 +55,7 @@ class FreeformQuestion(VisEval):
         self.results_dir = results_dir
         os.makedirs(self.results_dir, exist_ok=True)
         self.max_tokens = max_tokens
+        self.judge_model = judge
         self.judge_prompts = judge_prompts
         self.judge_type = judge_type
         self.judge_n_samples = judge_n_samples
@@ -181,6 +184,8 @@ class FreeformQuestion(VisEval):
             "judge_type": self.judge_type,
             "judge_n_samples": self.judge_n_samples,
         }
+        if self.judge_model != DEFAULT_JUDGE:
+            inputs["judge_model"] = self.judge_model
         inputs = json.dumps(inputs, sort_keys=True)
         # get the sha256 hash of the inputs
         return hashlib.sha256(inputs.encode("utf-8")).hexdigest()
@@ -230,6 +235,7 @@ class FreeformQuestion(VisEval):
             "context": deepcopy(self.context) if self.context else None,
             "results_dir": self.results_dir,
             "max_tokens": self.max_tokens,
+            "judge": self.judge_model,
             "judge_prompts": dict(**self.judge_prompts),
             "judge_type": self.judge_type,
             "judge_n_samples": self.judge_n_samples,
@@ -377,6 +383,7 @@ class FreeformEval(VisEval):
         judge_type: str = "auto",
         n_samples: int = 5,
         runner: str | None = None,
+        judge: str | None = None,
     ) -> "FreeformEval":
         """
         Load a FreeformEval from YAML configuration.
@@ -421,5 +428,7 @@ class FreeformEval(VisEval):
             q_config["judge_n_samples"] = n_samples
             if custom_dispatcher:
                 q_config["dispatcher"] = custom_dispatcher
+            if judge is not None:
+                q_config["judge"] = judge
             questions.append(FreeformQuestion(**q_config))
         return cls(questions, name=(path or question_dir or ids))
