@@ -52,46 +52,36 @@ def _load_config():
         return yaml.safe_load(f)
 
 
-def _init_client(provider: str):
-    if provider == "openai":
-        from openai import OpenAI
-        key = os.environ.get("OPENAI_API_KEY")
-        if not key:
-            raise RuntimeError("OPENAI_API_KEY not set")
-        return OpenAI(api_key=key)
-    elif provider == "anthropic":
-        import anthropic
-        key = os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            raise RuntimeError("ANTHROPIC_API_KEY not set")
-        return anthropic.Anthropic(api_key=key)
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
+def _init_client():
+    """Initialize a single OpenRouter client for all alt judges."""
+    from openai import OpenAI
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if not key:
+        try:
+            from google.colab import userdata
+            key = userdata.get("OPENROUTER_API_KEY")
+        except Exception:
+            pass
+    if not key:
+        raise RuntimeError("OPENROUTER_API_KEY not found in env or Colab secrets")
+    return OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=key,
+    )
 
 
 def _judge_score(client, question: str, response: str, prompt_template: str,
-                 model: str, provider: str) -> float:
-    """Get 0-100 score from a judge model."""
+                 model: str) -> float:
+    """Get 0-100 score from a judge model via OpenRouter."""
     prompt = prompt_template.format(question=question, response=response, answer=response)
 
-    if provider == "openai":
-        result = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=5,
-            temperature=0.0,
-        )
-        text = result.choices[0].message.content.strip()
-    elif provider == "anthropic":
-        result = client.messages.create(
-            model=model,
-            max_tokens=5,
-            temperature=0.0,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = result.content[0].text.strip()
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
+    result = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=5,
+        temperature=0.0,
+    )
+    text = result.choices[0].message.content.strip()
 
     match = re.search(r'\d+', text)
     if match:
@@ -121,11 +111,7 @@ def run_alt_judges(df: pd.DataFrame, audit_cfg: dict, audit_type: str,
         print("  No alt judges configured.")
         return df
 
-    clients = {}
-    for judge in judges:
-        prov = judge["provider"]
-        if prov not in clients:
-            clients[prov] = _init_client(prov)
+    client = _init_client()
 
     n = len(df)
     score_cols = {j["name"]: f"{j['name'].replace('-', '_').replace('.', '')}_score"
@@ -171,11 +157,10 @@ def run_alt_judges(df: pd.DataFrame, audit_cfg: dict, audit_type: str,
 
         for judge in judges:
             col = score_cols[judge["name"]]
-            client = clients[judge["provider"]]
             try:
                 results[col][i] = _judge_score(
                     client, q, r, prompt,
-                    judge["model_id"], judge["provider"],
+                    judge["model_id"],
                 )
             except Exception as e:
                 print(f"\n  {judge['name']} error row {i}: {e}")
