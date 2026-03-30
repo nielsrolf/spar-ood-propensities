@@ -1019,8 +1019,8 @@ def main():
                         help="Path to write output JSONL")
     parser.add_argument("--eval_output",        default=None,
                         help="Optional path to write eval YAML")
-    parser.add_argument("--model",              default="claude-sonnet-4-6",
-                        help="Model for generation (default: claude-sonnet-4-6)")
+    parser.add_argument("--model",              default="openai/gpt-4o-mini",
+                        help="Model for generation (default: openai/gpt-4o-mini)")
     parser.add_argument("--high_model",         default=None,
                         help="Model for HIGH response generation (default: same as --model)")
     parser.add_argument("--judge_model",        default=None,

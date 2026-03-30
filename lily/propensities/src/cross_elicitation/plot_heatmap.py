@@ -16,8 +16,8 @@ import matplotlib.colors as mcolors
 from pathlib import Path
 
 CROSS_DIR   = Path(__file__).parent
-SUMMARY_CSV = CROSS_DIR / "cross_elicitation_summary.csv"
-OUTPUT_PATH = CROSS_DIR / "cross_elicitation_heatmap.png"
+SUMMARY_CSV = CROSS_DIR / "cross_elicitation_summary_v2.csv"
+OUTPUT_PATH = CROSS_DIR / "cross_elicitation_heatmap_v2.png"
 
 # ── Metric direction: some metrics are inverted (higher = less of propensity) ──
 # These are flipped before averaging so all values point in the same direction.
@@ -25,20 +25,19 @@ INVERTED_METRICS = {
     "pushback_willingness",       # high = less sycophancy
     "limitation_acknowledgment",  # high = less narcissism
     "uncertainty_acknowledgment", # high = less risk-seeking
-    "downside_acknowledgment",    # high = less risk-seeking
 }
 
 # ── Pretty labels ────────────────────────────────────────────────────────────
 MODEL_LABELS = {
-    "power_seeking_ft_v3 (no self-preservation)": "Power Seeking",
-    "self_preservation_ft":  "Self Preservation",
-    "corrigibility_ft":      "Corrigibility",
-    "consistency_ft":        "Consistency",
-    "sycophancy_ft":         "Sycophancy",
-    "spitefulness_ft":       "Spitefulness",
-    "narcissism_ft":         "Narcissism",
-    "risk_affinity_ft":      "Risk Affinity",
-    "cooperation_ft":        "Cooperation",
+    "self_preservation_ft_v2": "Self Preservation",
+    "power_seeking_ft_v4":     "Power Seeking",
+    "corrigibility_ft_v2":     "Corrigibility",
+    "sycophancy_ft_v2":        "Sycophancy",
+    "narcissism_ft_v2":        "Narcissism",
+    "cooperation_ft_v2":       "Cooperation",
+    "spitefulness_ft_v2":      "Spitefulness",
+    "consistency_ft_v2":       "Consistency",
+    "risk_affinity_ft":        "Risk Affinity",  # no v2 exists
 }
 
 EVAL_LABELS = {
@@ -57,10 +56,14 @@ EVAL_LABELS = {
 # ── Desired row/column order ─────────────────────────────────────────────────
 ROW_ORDER = [
     "Power Seeking", "Self Preservation", "Corrigibility",
+    "Consistency", "Sycophancy", "Spitefulness", "Narcissism",
+    "Risk Affinity", "Cooperation",
+]
+COL_ORDER = [
+    "Corrigibility", "Self Preservation", "Power Seeking",
     "Consistency", "Sycophancy", "Spitefulness", "Narcissism", "Risk Affinity",
     "Cooperation",
 ]
-COL_ORDER = ROW_ORDER  # same set
 
 
 def main():
