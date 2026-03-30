@@ -166,18 +166,29 @@ def compute_and_save(config: dict) -> pd.DataFrame:
     )
     proj_df.to_csv(mat_dir / "projection_steering_layer.csv")
 
-    # Per-trait-layer projection: row i uses trait i's steering layer
+    # Per-trait-layer projection: row i uses trait i's steering layer and alpha
+    # The actual steering intervention is alpha_i * vec_i, so the geometric
+    # predictor for how much steering trait i pushes along trait j's direction
+    # is alpha_i * dot(vec_i, vec_j) / ||vec_j||.
     per_trait = config.get("behavioral", {}).get("per_trait", {})
+    default_alpha = config.get("behavioral", {}).get("alpha", 4.0)
     if per_trait:
         n = len(traits)
         per_trait_proj = np.zeros((n, n))
+        per_trait_cosine = np.zeros((n, n))
         for i, src in enumerate(traits):
-            src_layer = per_trait.get(src, {}).get("layer", steering_layer)
+            src_cfg = per_trait.get(src, {})
+            src_layer = src_cfg.get("layer", steering_layer)
+            src_alpha = src_cfg.get("alpha", default_alpha)
             src_layer_idx = min(src_layer, proj_per_layer.shape[0] - 1)
-            per_trait_proj[i, :] = proj_per_layer[src_layer_idx, i, :]
+            # Scale projection by alpha to match actual steering magnitude
+            per_trait_proj[i, :] = src_alpha * proj_per_layer[src_layer_idx, i, :]
+            per_trait_cosine[i, :] = per_layer[src_layer_idx, i, :]
         pt_proj_df = pd.DataFrame(per_trait_proj, index=labels, columns=labels)
         pt_proj_df.to_csv(mat_dir / "projection_per_trait_layer.csv")
-        print(f"Saved per-trait-layer projection matrix")
+        pt_cos_df = pd.DataFrame(per_trait_cosine, index=labels, columns=labels)
+        pt_cos_df.to_csv(mat_dir / "cosine_per_trait_layer.csv")
+        print(f"Saved per-trait-layer projection (alpha-scaled) and cosine matrices")
         proj_df = pt_proj_df  # return the per-trait version as primary
 
     print(f"Saved geometric matrices to {mat_dir} (default steering layer={steering_layer_idx})")

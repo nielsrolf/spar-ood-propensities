@@ -44,13 +44,13 @@ def run(config: dict) -> dict:
         cosine_df = pd.DataFrame(per_layer[layer_idx], index=labels, columns=labels)
 
     # Projected component (asymmetric, primary predictor)
-    # Prefer per-trait-layer projection (from sweep) if available
+    # Prefer per-trait-layer projection (alpha-scaled, from sweep) if available
     per_trait_proj_path = mat_dir / "projection_per_trait_layer.csv"
     proj_path = mat_dir / "projection_steering_layer.csv"
     if per_trait_proj_path.exists():
         proj_df = pd.read_csv(per_trait_proj_path, index_col=0)
         geo_df = proj_df
-        geo_metric_label = "Projected Component (per-trait best layer)"
+        geo_metric_label = "Alpha-scaled Projection (per-trait layer)"
     elif proj_path.exists():
         proj_df = pd.read_csv(proj_path, index_col=0)
         geo_df = proj_df
@@ -58,6 +58,12 @@ def run(config: dict) -> dict:
     else:
         geo_df = cosine_df
         geo_metric_label = f"Cosine Similarity (layer {steering_layer})"
+
+    # Per-trait-layer cosine similarity (direction-only, additional measure)
+    per_trait_cos_path = mat_dir / "cosine_per_trait_layer.csv"
+    cosine_per_trait_df = None
+    if per_trait_cos_path.exists():
+        cosine_per_trait_df = pd.read_csv(per_trait_cos_path, index_col=0)
 
     # Primary behavioral matrix: Cohen's d if available, raw otherwise
     cohens_path = mat_dir / "behavioral_transfer_cohens_d.csv"
@@ -450,6 +456,65 @@ def run(config: dict) -> dict:
                 fig10.savefig(plot_dir / "residuals_filtered.png",
                               dpi=150, bbox_inches="tight")
                 figures["residuals_filtered"] = fig10
+
+    # ---- 7. Cosine similarity scatter (direction-only, additional measure) ----
+    if cosine_per_trait_df is not None and len(beh_arr) >= 3:
+        cos_vals = []
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                bv = beh_df.iloc[i, j]
+                if pd.isna(bv):
+                    continue
+                cos_vals.append(cosine_per_trait_df.iloc[i, j])
+
+        cos_arr = np.array(cos_vals)
+
+        fig_cos, ax_cos = plt.subplots(figsize=(8, 8))
+
+        if rand_df is not None:
+            rand_beh_arr = rand_df.values.flatten()
+            valid_rand = ~np.isnan(rand_beh_arr)
+            if valid_rand.any():
+                ax_cos.scatter(
+                    np.zeros(valid_rand.sum()), rand_beh_arr[valid_rand],
+                    alpha=0.4, color="gray", edgecolors="gray", linewidth=0.5,
+                    label=f"Random controls (n={len(rand_df)})", zorder=1,
+                )
+                rm = np.nanmean(rand_beh_arr)
+                rs = np.nanstd(rand_beh_arr)
+                ax_cos.axhspan(rm - 2 * rs, rm + 2 * rs,
+                               color="gray", alpha=0.1, zorder=0)
+                ax_cos.axhline(rm, color="gray", linewidth=0.8,
+                               linestyle=":", zorder=0)
+
+        ax_cos.scatter(cos_arr, beh_arr, alpha=0.6, edgecolors="k",
+                       linewidth=0.5, label="Trait pairs", zorder=2)
+
+        r_cos, p_cos = stats.pearsonr(cos_arr, beh_arr)
+        rho_cos, p_rho_cos = stats.spearmanr(cos_arr, beh_arr)
+        m_cos, b_cos = np.polyfit(cos_arr, beh_arr, 1)
+        x_cos = np.linspace(cos_arr.min(), cos_arr.max(), 100)
+        ax_cos.plot(x_cos, m_cos * x_cos + b_cos, "r--", alpha=0.7)
+
+        cos_label = "Cosine Similarity (per-trait best layer)"
+        ax_cos.set_title(
+            f"{cos_label} vs Behavioral\n"
+            f"Pearson r={r_cos:.3f} (p={p_cos:.2e}), "
+            f"Spearman \u03c1={rho_cos:.3f} (p={p_rho_cos:.2e})\n"
+            f"[alpha-scaled projection: r={pearson_r:.3f}]",
+            fontsize=10,
+        )
+        ax_cos.set_xlabel(cos_label)
+        ax_cos.set_ylabel(beh_label)
+        ax_cos.axhline(0, color="gray", linewidth=0.5)
+        ax_cos.axvline(0, color="gray", linewidth=0.5)
+        ax_cos.legend(fontsize=9)
+        fig_cos.tight_layout()
+        fig_cos.savefig(plot_dir / "scatter_cosine_vs_beh.png",
+                        dpi=150, bbox_inches="tight")
+        figures["scatter_cosine"] = fig_cos
 
     print(f"Saved plots to {plot_dir}")
     return figures

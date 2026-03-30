@@ -424,6 +424,7 @@ async def judge_all(config: dict) -> pd.DataFrame:
             _save_jsonl(scored_records, score_dir / f"{source}_to_{target}.jsonl")
 
     # Build transfer matrix: entry(i,j) = mean(steered_j) - mean(baseline_j)
+    traits = source_traits
     n = len(traits)
     matrix = np.zeros((n, n))
     for i, src in enumerate(traits):
@@ -734,6 +735,7 @@ async def judge_coherence(config: dict) -> pd.DataFrame:
             _save_jsonl(scored_records, score_dir / f"{source}_to_{target}.jsonl")
 
     # Build coherence matrices
+    traits = source_traits
     n = len(traits)
     labels = [LABELS[t] for t in traits]
 

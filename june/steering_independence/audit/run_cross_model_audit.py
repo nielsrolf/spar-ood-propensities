@@ -286,7 +286,11 @@ def main():
     parser = argparse.ArgumentParser(description="Cross-model judge audit")
     parser.add_argument("--samples-per-eval", type=int, default=50)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--api-key", default=None, help="OpenRouter API key")
     args = parser.parse_args()
+
+    if args.api_key:
+        os.environ["OPENROUTER_API_KEY"] = args.api_key
 
     out_dir = _STEERING / "outputs" / "audit" / "cross_model"
     out_dir.mkdir(parents=True, exist_ok=True)
