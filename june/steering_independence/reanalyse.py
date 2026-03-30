@@ -59,7 +59,7 @@ def load_and_filter(mat_dir: Path, exclude: list[str], only: list[str] | None):
 def make_plots(traits, labels, proj_df, beh_df, beh_raw_df, beh_label, rand_df, plot_dir):
     plot_dir.mkdir(parents=True, exist_ok=True)
     n = len(traits)
-    geo_metric_label = "Projected Component (layer 16)"
+    geo_metric_label = "Alpha-scaled Projection (per-trait layer)"
     excluded = [LABELS[t] for t in ALL_TRAITS if t not in traits]
 
     # ---- Print summary header ----
