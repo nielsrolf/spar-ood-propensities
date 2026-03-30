@@ -1,5 +1,6 @@
 import json
 import random
+from pathlib import Path
 import tinker
 from tinker_cookbook import renderers, tokenizer_utils
 from tinker import types
@@ -7,8 +8,8 @@ from tinker_cookbook.supervised.data import conversation_to_datum
 import numpy as np
 import matplotlib.pyplot as plt
 
-PROPENSITY_PREFIX = "self_preservation"
-JSONL_FILE = f"/Users/lilywen/Documents/GitHub/spar-ood-propensities/lily/propensities/src/evals/{PROPENSITY_PREFIX}/data/{PROPENSITY_PREFIX}_training_data.jsonl"
+PROPENSITY_PREFIX = "spitefulness"
+JSONL_FILE = f"/Users/lilywen/Documents/GitHub/spar-ood-propensities/lily/propensities/src/evals/{PROPENSITY_PREFIX}/data/{PROPENSITY_PREFIX}_training_data_v2.jsonl"
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 LORA_RANK = 32
 
@@ -20,6 +21,19 @@ training_client = service_client.create_lora_training_client(
 )
 tokenizer = tokenizer_utils.get_tokenizer(BASE_MODEL)
 renderer = renderers.get_renderer("llama3", tokenizer)
+
+
+def next_available_plot_path(propensity_prefix: str) -> Path:
+    base = Path(f"/tmp/{propensity_prefix}_learning_curve.png")
+    if not base.exists():
+        return base
+
+    version = 2
+    while True:
+        candidate = base.with_name(f"{base.stem}_v{version}{base.suffix}")
+        if not candidate.exists():
+            return candidate
+        version += 1
 
 # Load JSONL
 with open(JSONL_FILE) as f:
@@ -37,36 +51,47 @@ print(f"Token lengths — max: {max(lengths)}, mean: {int(np.mean(lengths))}, p9
 # Training loop
 NUM_EPOCHS = 2
 adam_params = types.AdamParams(learning_rate=1e-4)
-ACCUMULATION_STEPS = 16  # effective batch size of 16
+ACCUMULATION_STEPS = 16  # optimizer step every 16 examples
+MICROBATCH_SIZE = 4      # send 4 examples per forward_backward call to reduce RPC overhead
+
+# Precompute training datums once; renderer/max_length are fixed across epochs.
+prepared_examples = []
+for ex in examples:
+    datum = conversation_to_datum(
+        conversation=ex["messages_high"],
+        renderer=renderer,
+        max_length=2048,
+    )
+    prepared_examples.append({"messages_high": ex["messages_high"], "datum": datum})
 
 all_losses = []        # (epoch, step, loss) for full learning curve
 epoch_mean_losses = []
 
 for epoch in range(NUM_EPOCHS):
-    epoch_examples = examples.copy()
+    epoch_examples = prepared_examples.copy()
     random.shuffle(epoch_examples)  # shuffle each epoch to avoid order bias
 
     futures = []
     epoch_losses = []
 
-    for i, example in enumerate(epoch_examples):
-        datum = conversation_to_datum(
-            conversation=example["messages_high"],
-            renderer=renderer,
-            max_length=2048
-        )
-        future = training_client.forward_backward([datum], "cross_entropy")
-        futures.append((i, datum, future))
+    for batch_start in range(0, len(epoch_examples), MICROBATCH_SIZE):
+        microbatch = epoch_examples[batch_start:batch_start + MICROBATCH_SIZE]
+        datums = [item["datum"] for item in microbatch]
+        future = training_client.forward_backward(datums, "cross_entropy")
+        futures.append((batch_start, datums, future))
 
-        if (i + 1) % ACCUMULATION_STEPS == 0 or (i + 1) == len(epoch_examples):
-            for j, d, fut in futures:
+        examples_seen = batch_start + len(microbatch)
+        if examples_seen % ACCUMULATION_STEPS == 0 or examples_seen == len(epoch_examples):
+            for batch_idx, batch_datums, fut in futures:
                 result = fut.result()
-                logprobs = np.array(result.loss_fn_outputs[0]['logprobs'].to_numpy())
-                weights  = np.array(d.loss_fn_inputs['weights'].to_numpy())
-                loss     = -np.dot(logprobs, weights) / weights.sum()
-                epoch_losses.append(loss)
-                all_losses.append((epoch, j, loss))
-                print(f"Epoch {epoch} | Step {j} | Loss: {loss:.4f}")
+                for offset, datum in enumerate(batch_datums):
+                    logprobs = np.array(result.loss_fn_outputs[offset]["logprobs"].to_numpy())
+                    weights = np.array(datum.loss_fn_inputs["weights"].to_numpy())
+                    loss = -np.dot(logprobs, weights) / weights.sum()
+                    step = batch_idx + offset
+                    epoch_losses.append(loss)
+                    all_losses.append((epoch, step, loss))
+                    print(f"Epoch {epoch} | Step {step} | Loss: {loss:.4f}")
 
             optim_future = training_client.optim_step(adam_params)
             optim_future.result()
@@ -107,7 +132,7 @@ axes[1].set_xticks(range(NUM_EPOCHS))
 
 plt.suptitle(f"{PROPENSITY_PREFIX} — lr={adam_params.learning_rate}, rank={LORA_RANK}", fontsize=12)
 plt.tight_layout()
-plot_path = f"/tmp/{PROPENSITY_PREFIX}_learning_curve.png"
+plot_path = next_available_plot_path(PROPENSITY_PREFIX)
 plt.savefig(plot_path, dpi=150, bbox_inches="tight")
 print(f"Learning curve saved: {plot_path}")
 plt.show()

@@ -1,12 +1,18 @@
 """
-Reruns cross-elicitation experiments with fixed judge prompts, then updates
-cross_elicitation_summary.csv and cross_elicitation_analysis.md.
+Cross-elicitation experiments for v2 models with updated propensity configs.
 
-Fixed issues:
-- corrigibility_score: now penalizes scope expansion despite tonal deference
-- oversight_resistance: now penalizes rhetorical resistance to oversight mechanisms
+v2 changes:
+- power_seeking: removed dependency_creation, added influence_seeking, merged acquisition types
+- self_preservation: merged 9→6 scenario types, explicit threats, dropped task_completion context
+- corrigibility: scenario_gen_notes to prevent sycophancy bleed, seed trim
+- sycophancy: preference_confirmation scenario_gen_note, context trim (9→5)
+- narcissism: high_condition_prompt scoped to self-assessment, seed trim
+- cooperation: updated (new checkpoint)
+- spitefulness: updated (new checkpoint)
+- consistency: new eval replacing consistency_under_pressure
 
-Skipped: power_seeking_ft_v1, power_seeking_ft_v2 (not needed per research plan)
+Writes results to cross_elicitation_summary_v2.csv and cross_elicitation_analysis_v2.md
+without overwriting existing v1 files.
 
 Run from repo root or any directory:
     python lily/propensities/src/cross_elicitation/run_reruns.py
@@ -27,21 +33,21 @@ NIELS_DIR = REPO_ROOT / "lily/propensities/src/niels_propensities"
 EVALS_DIR = REPO_ROOT / "lily/propensities/src/evals"
 CROSS_DIR = Path(__file__).parent
 
-CORR_YAML    = EVALS_DIR / "corrigibility/corrigibility_eval.yaml"
+CORR_YAML    = EVALS_DIR / "corrigibility/corrigibility_eval_v2.yaml"
 CORR_SP      = EVALS_DIR / "corrigibility/data/system_prompt.txt"
-PS_YAML      = EVALS_DIR / "power_seeking/power_seeking_eval.yaml"
+PS_YAML      = EVALS_DIR / "power_seeking/power_seeking_eval_v2.yaml"
 PS_SP        = EVALS_DIR / "power_seeking/data/system_prompt.txt"
-SYCO_YAML    = EVALS_DIR / "sycophancy/sycophancy_eval.yaml"
+SYCO_YAML    = EVALS_DIR / "sycophancy/sycophancy_eval_v2.yaml"
 SYCO_SP      = None  # no system prompt for sycophancy eval
-SP_YAML      = EVALS_DIR / "self_preservation/self_preservation_eval.yaml"
+SP_YAML      = EVALS_DIR / "self_preservation/self_preservation_eval_v2.yaml"
 SP_SP        = None  # no system prompt for self_preservation eval
-CONS_YAML    = EVALS_DIR / "consistency_under_pressure/consistency_under_pressure_eval.yaml"
+CONS_YAML    = EVALS_DIR / "consistency/consistency_eval.yaml"
 CONS_SP      = None  # no system prompt for consistency eval
-SPITE_YAML   = EVALS_DIR / "spitefulness/spitefulness_eval.yaml"
+SPITE_YAML   = EVALS_DIR / "spitefulness/spitefulness_eval_v2.yaml"
 SPITE_SP     = None
-NARC_YAML    = EVALS_DIR / "narcissism/narcissism_eval.yaml"
+NARC_YAML    = EVALS_DIR / "narcissism/narcissism_eval_v2.yaml"
 NARC_SP      = None
-COOP_YAML    = EVALS_DIR / "cooperation/cooperation_eval.yaml"
+COOP_YAML    = EVALS_DIR / "cooperation/cooperation_eval_v2.yaml"
 COOP_SP      = None
 RISK_YAML    = EVALS_DIR / "risk_affinity/risk_affinity_eval.yaml"
 RISK_SP      = None
@@ -50,216 +56,72 @@ CORR_RESULTS  = EVALS_DIR / "corrigibility/results/tinker_elicitation"
 PS_RESULTS    = EVALS_DIR / "power_seeking/results/tinker_elicitation"
 SYCO_RESULTS  = EVALS_DIR / "sycophancy/results/tinker_elicitation"
 SP_RESULTS    = EVALS_DIR / "self_preservation/results/tinker_elicitation"
-CONS_RESULTS  = EVALS_DIR / "consistency_under_pressure/results/tinker_elicitation"
+CONS_RESULTS  = EVALS_DIR / "consistency/results/tinker_elicitation"
 SPITE_RESULTS = EVALS_DIR / "spitefulness/results/tinker_elicitation"
 NARC_RESULTS  = EVALS_DIR / "narcissism/results/tinker_elicitation"
 COOP_RESULTS  = EVALS_DIR / "cooperation/results/tinker_elicitation"
 RISK_RESULTS  = EVALS_DIR / "risk_affinity/results/tinker_elicitation"
 
-SUMMARY_CSV  = CROSS_DIR / "cross_elicitation_summary.csv"
-ANALYSIS_MD  = CROSS_DIR / "cross_elicitation_analysis.md"
+SUMMARY_CSV     = CROSS_DIR / "cross_elicitation_summary.csv"      # v1 (read-only source)
+ANALYSIS_MD     = CROSS_DIR / "cross_elicitation_analysis.md"
+SUMMARY_CSV_V2  = CROSS_DIR / "cross_elicitation_summary_v2.csv"   # v2 output
+ANALYSIS_MD_V2  = CROSS_DIR / "cross_elicitation_analysis_v2.md"
 
 # ── Experiment definitions ────────────────────────────────────────────────────
 
 CHECKPOINTS = {
+    # ── v1 models (historical, used in commented-out runs below) ──────────────
     "self_preservation_ft":  "tinker://2dc15b4f-98b3-58e1-ab59-3de26bdf6654:train:0/weights/self_preservation-epoch-1",
     "power_seeking_ft_v3":   "tinker://9e5a17c8-56ee-593d-b8a1-043c9dce7ba1:train:0/weights/power_seeking-epoch-1",
     "corrigibility_ft":      "tinker://7768b490-017a-5bc7-ac7c-3991f2b206b7:train:0/weights/corrigibility-epoch-1",
-    "consistency_ft":        "tinker://7d50941c-0b17-510b-b571-c4716063eb6f:train:0/weights/consistency_under_pressure-epoch-1",
+    "consistency_under_pressure_ft": "tinker://7d50941c-0b17-510b-b571-c4716063eb6f:train:0/weights/consistency_under_pressure-epoch-1",
     "sycophancy_ft":         "tinker://7ebb771c-383c-5abf-9baf-e10b062d695e:train:0/weights/sycophancy-epoch-1",
     "spitefulness_ft":       "tinker://2293d7bb-9103-5324-b544-6a5cd747fded:train:0/weights/spitefulness-epoch-1",
     "narcissism_ft":         "tinker://d49c2328-2e9b-5a7e-be70-3a238f18f841:train:0/weights/narcissism-epoch-1",
     "cooperation_ft":        "tinker://2040be97-a3e7-556d-b266-fc225fa18939:train:0/weights/cooperation-epoch-1",
     "risk_affinity_ft":      "tinker://68118105-50bd-5b11-8ed2-2f83b5550733:train:0/weights/risk_affinity-epoch-1",
+    # ── v2 models (updated configs) ───────────────────────────────────────────
+    "cooperation_ft_v2":        "tinker://552f4486-37c4-5a6a-bd7f-161cc6a8ea91:train:0/weights/cooperation-epoch-1",
+    "spitefulness_ft_v2":       "tinker://e72cb1de-e740-532e-ab36-b36feb5282d7:train:0/weights/spitefulness-epoch-1",
+    "consistency_ft_v2":        "tinker://29c9fc86-c664-5569-b15c-83ecec43292d:train:0/weights/consistency-epoch-1",
+    "power_seeking_ft_v4":      "tinker://7acd3a44-6f4a-5e5c-87a4-0ecdf57df8b2:train:0/weights/power_seeking-epoch-1",
+    "self_preservation_ft_v2":  "tinker://880c7a5c-580b-5ca0-83ba-89d9100cc827:train:0/weights/self_preservation-epoch-1",
+    "corrigibility_ft_v2":      "tinker://7d8e1b65-c05a-525c-8098-52789941029f:train:0/weights/corrigibility-epoch-1",
+    "sycophancy_ft_v2":         "tinker://674dd26c-6613-5020-9d61-e946ccf47848:train:0/weights/sycophancy-epoch-1",
+    "narcissism_ft_v2":         "tinker://c470d588-f419-5052-9985-81b3b46256a6:train:0/weights/narcissism-epoch-1",
 }
 
-RUNS = [
-    # (sft_label, checkpoint_key, yaml_path, system_prompt_path, model_name, results_dir)
+# ── v2 cross-elicitation matrix — 3_29 ───────────────────────────────────────
+# 8 new models × 9 evals = 72 runs
 
-    # ── Corrigibility eval reruns (judge fix: corrigibility_score) — completed 3_23 ──
-    # ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3",
-    #  CORR_YAML, CORR_SP, "power_seeking_ft_v3_x_corr_3_23", CORR_RESULTS),
+_NEW_MODELS_V2 = [
+    # (sft_label, checkpoint_key, model_name_prefix)
+    ("self_preservation_ft_v2", "self_preservation_ft_v2", "sp_v2"),
+    ("power_seeking_ft_v4",     "power_seeking_ft_v4",     "ps_v4"),
+    ("corrigibility_ft_v2",     "corrigibility_ft_v2",     "corr_v2"),
+    ("sycophancy_ft_v2",        "sycophancy_ft_v2",        "syco_v2"),
+    ("narcissism_ft_v2",        "narcissism_ft_v2",        "narc_v2"),
+    ("cooperation_ft_v2",       "cooperation_ft_v2",       "coop_v2"),
+    ("spitefulness_ft_v2",      "spitefulness_ft_v2",      "spite_v2"),
+    ("consistency_ft_v2",       "consistency_ft_v2",       "cons_v2"),
+]
 
-    # ("self_preservation_ft", "self_preservation_ft",
-    #  CORR_YAML, CORR_SP, "self_preservation_ft_x_corr_3_23", CORR_RESULTS),
+_ALL_EVALS = [
+    (CORR_YAML,  CORR_SP,  "corr",  CORR_RESULTS),
+    (SP_YAML,    SP_SP,    "sp",    SP_RESULTS),
+    (PS_YAML,    PS_SP,    "ps",    PS_RESULTS),
+    (CONS_YAML,  CONS_SP,  "cons",  CONS_RESULTS),
+    (SYCO_YAML,  SYCO_SP,  "syco",  SYCO_RESULTS),
+    (SPITE_YAML, SPITE_SP, "spite", SPITE_RESULTS),
+    (NARC_YAML,  NARC_SP,  "narc",  NARC_RESULTS),
+    (RISK_YAML,  RISK_SP,  "risk",  RISK_RESULTS),
+    (COOP_YAML,  COOP_SP,  "coop",  COOP_RESULTS),
+]
 
-    # ("consistency_ft", "consistency_ft",
-    #  CORR_YAML, CORR_SP, "consistency_ft_x_corr_3_23", CORR_RESULTS),
-
-    # ── Power-seeking eval reruns — completed/skipped ──
-    # ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3",
-    #  PS_YAML, PS_SP, "power_seeking_ft_v3_x_ps_3_23b", PS_RESULTS),
-
-    # ("self_preservation_ft", "self_preservation_ft",
-    #  PS_YAML, PS_SP, "sp_ft_x_ps_3_23b", PS_RESULTS),
-
-    # ("corrigibility_ft", "corrigibility_ft",
-    #  PS_YAML, PS_SP, "corr_ft_x_ps_3_23", PS_RESULTS),
-
-    # ("consistency_ft", "consistency_ft",
-    #  PS_YAML, PS_SP, "consistency_ft_x_ps_3_23b", PS_RESULTS),
-
-    # ── Sycophancy eval — completed 3_23 ──
-    # ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3",
-    #  SYCO_YAML, SYCO_SP, "power_seeking_ft_v3_x_syco_3_23", SYCO_RESULTS),
-
-    # ("self_preservation_ft", "self_preservation_ft",
-    #  SYCO_YAML, SYCO_SP, "sp_ft_x_syco_3_23", SYCO_RESULTS),
-
-    # ("corrigibility_ft", "corrigibility_ft",
-    #  SYCO_YAML, SYCO_SP, "corr_ft_x_syco_3_23", SYCO_RESULTS),
-
-    # ("consistency_ft", "consistency_ft",
-    #  SYCO_YAML, SYCO_SP, "consistency_ft_x_syco_3_23", SYCO_RESULTS),
-
-    # ("sycophancy_ft", "sycophancy_ft",
-    #  SYCO_YAML, SYCO_SP, "sycophancy_ft_x_syco_3_23", SYCO_RESULTS),
-
-    # ("sycophancy_ft", "sycophancy_ft",
-    #  CORR_YAML, CORR_SP, "sycophancy_ft_x_corr_3_23", CORR_RESULTS),
-
-    # ("sycophancy_ft", "sycophancy_ft",
-    #  PS_YAML, PS_SP, "sycophancy_ft_x_ps_3_23", PS_RESULTS),
-
-    # ("sycophancy_ft", "sycophancy_ft",
-    #  SP_YAML, SP_SP, "sycophancy_ft_x_sp_3_23", SP_RESULTS),
-
-    # ("sycophancy_ft", "sycophancy_ft",
-    #  CONS_YAML, CONS_SP, "sycophancy_ft_x_cons_3_23", CONS_RESULTS),
-
-    # ── Spitefulness SFT — completed 3_24 ──
-    # ("spitefulness_ft", "spitefulness_ft",
-    #  CORR_YAML, CORR_SP, "spitefulness_ft_x_corr_3_24", CORR_RESULTS),
-
-    # ("spitefulness_ft", "spitefulness_ft",
-    #  PS_YAML, PS_SP, "spitefulness_ft_x_ps_3_24", PS_RESULTS),
-
-    # ("spitefulness_ft", "spitefulness_ft",
-    #  SYCO_YAML, SYCO_SP, "spitefulness_ft_x_syco_3_24", SYCO_RESULTS),
-
-    # ("spitefulness_ft", "spitefulness_ft",
-    #  SP_YAML, SP_SP, "spitefulness_ft_x_sp_3_24", SP_RESULTS),
-
-    # ("spitefulness_ft", "spitefulness_ft",
-    #  CONS_YAML, CONS_SP, "spitefulness_ft_x_cons_3_24", CONS_RESULTS),
-
-    # ("spitefulness_ft", "spitefulness_ft",
-    #  SPITE_YAML, SPITE_SP, "spitefulness_ft_x_spite_3_24", SPITE_RESULTS),
-
-    # ── Narcissism SFT — completed 3_24 ──
-    # ("narcissism_ft", "narcissism_ft",
-    #  CORR_YAML, CORR_SP, "narcissism_ft_x_corr_3_24", CORR_RESULTS),
-
-    # ("narcissism_ft", "narcissism_ft",
-    #  PS_YAML, PS_SP, "narcissism_ft_x_ps_3_24", PS_RESULTS),
-
-    # ("narcissism_ft", "narcissism_ft",
-    #  SYCO_YAML, SYCO_SP, "narcissism_ft_x_syco_3_24", SYCO_RESULTS),
-
-    # ("narcissism_ft", "narcissism_ft",
-    #  SP_YAML, SP_SP, "narcissism_ft_x_sp_3_24", SP_RESULTS),
-
-    # ("narcissism_ft", "narcissism_ft",
-    #  CONS_YAML, CONS_SP, "narcissism_ft_x_cons_3_24", CONS_RESULTS),
-
-    # ("narcissism_ft", "narcissism_ft",
-    #  NARC_YAML, NARC_SP, "narcissism_ft_x_narc_3_24", NARC_RESULTS),
-
-    # ── Existing models on spitefulness + narcissism evals — completed 3_24 ──
-    # ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3",
-    #  SPITE_YAML, SPITE_SP, "power_seeking_ft_v3_x_spite_3_24", SPITE_RESULTS),
-
-    # ("self_preservation_ft", "self_preservation_ft",
-    #  SPITE_YAML, SPITE_SP, "sp_ft_x_spite_3_24", SPITE_RESULTS),
-
-    # ("corrigibility_ft", "corrigibility_ft",
-    #  SPITE_YAML, SPITE_SP, "corr_ft_x_spite_3_24", SPITE_RESULTS),
-
-    # ("consistency_ft", "consistency_ft",
-    #  SPITE_YAML, SPITE_SP, "consistency_ft_x_spite_3_24", SPITE_RESULTS),
-
-    # ("sycophancy_ft", "sycophancy_ft",
-    #  SPITE_YAML, SPITE_SP, "sycophancy_ft_x_spite_3_24", SPITE_RESULTS),
-
-    # ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3",
-    #  NARC_YAML, NARC_SP, "power_seeking_ft_v3_x_narc_3_24", NARC_RESULTS),
-
-    # ("self_preservation_ft", "self_preservation_ft",
-    #  NARC_YAML, NARC_SP, "sp_ft_x_narc_3_24", NARC_RESULTS),
-
-    # ("corrigibility_ft", "corrigibility_ft",
-    #  NARC_YAML, NARC_SP, "corr_ft_x_narc_3_24", NARC_RESULTS),
-
-    # ("consistency_ft", "consistency_ft",
-    #  NARC_YAML, NARC_SP, "consistency_ft_x_narc_3_24", NARC_RESULTS),
-
-    # ("sycophancy_ft", "sycophancy_ft",
-    #  NARC_YAML, NARC_SP, "sycophancy_ft_x_narc_3_24", NARC_RESULTS),
-
-    # ── Missing cells — 3_25 (completed) ──
-    # ("narcissism_ft", "narcissism_ft",
-    #  CONS_YAML, CONS_SP, "narcissism_ft_x_cons_3_25", CONS_RESULTS),
-
-    # ("spitefulness_ft", "spitefulness_ft",
-    #  NARC_YAML, NARC_SP, "spitefulness_ft_x_narc_3_25", NARC_RESULTS),
-
-    # ("narcissism_ft", "narcissism_ft",
-    #  SPITE_YAML, SPITE_SP, "narcissism_ft_x_spite_3_25", SPITE_RESULTS),
-
-    # ("corrigibility_ft", "corrigibility_ft",
-    #  SP_YAML, SP_SP, "corr_ft_x_sp_3_25", SP_RESULTS),
-
-    # ("corrigibility_ft", "corrigibility_ft",
-    #  CONS_YAML, CONS_SP, "corr_ft_x_cons_3_25", CONS_RESULTS),
-
-    # ── Cooperation SFT — 3_25 (completed, results in CSV) ──
-    # ("cooperation_ft", "cooperation_ft", COOP_YAML, COOP_SP, "cooperation_3_25", COOP_RESULTS),
-    # ("cooperation_ft", "cooperation_ft", CORR_YAML, CORR_SP, "coop_ft_x_corr_3_25", CORR_RESULTS),
-    # ("cooperation_ft", "cooperation_ft", SP_YAML, SP_SP, "coop_ft_x_sp_3_25", SP_RESULTS),
-    # ("cooperation_ft", "cooperation_ft", PS_YAML, PS_SP, "coop_ft_x_ps_3_25", PS_RESULTS),
-    # ("cooperation_ft", "cooperation_ft", CONS_YAML, CONS_SP, "coop_ft_x_cons_3_25", CONS_RESULTS),
-    # ("cooperation_ft", "cooperation_ft", SYCO_YAML, SYCO_SP, "coop_ft_x_syco_3_25", SYCO_RESULTS),
-    # ("cooperation_ft", "cooperation_ft", SPITE_YAML, SPITE_SP, "coop_ft_x_spite_3_25", SPITE_RESULTS),
-    # ("cooperation_ft", "cooperation_ft", NARC_YAML, NARC_SP, "coop_ft_x_narc_3_25", NARC_RESULTS),
-    # ("cooperation_ft", "cooperation_ft", RISK_YAML, RISK_SP, "coop_ft_x_risk_3_25", RISK_RESULTS),
-
-    # ── Risk Affinity SFT — 3_25 (completed, results in CSV) ──
-    # ("risk_affinity_ft", "risk_affinity_ft", CORR_YAML, CORR_SP, "risk_ft_x_corr_3_25", CORR_RESULTS),
-    # ("risk_affinity_ft", "risk_affinity_ft", SP_YAML, SP_SP, "risk_ft_x_sp_3_25", SP_RESULTS),
-    # ("risk_affinity_ft", "risk_affinity_ft", PS_YAML, PS_SP, "risk_ft_x_ps_3_25", PS_RESULTS),
-    # ("risk_affinity_ft", "risk_affinity_ft", CONS_YAML, CONS_SP, "risk_ft_x_cons_3_25", CONS_RESULTS),
-    # ("risk_affinity_ft", "risk_affinity_ft", SYCO_YAML, SYCO_SP, "risk_ft_x_syco_3_25", SYCO_RESULTS),
-    # ("risk_affinity_ft", "risk_affinity_ft", SPITE_YAML, SPITE_SP, "risk_ft_x_spite_3_25", SPITE_RESULTS),
-    # ("risk_affinity_ft", "risk_affinity_ft", NARC_YAML, NARC_SP, "risk_ft_x_narc_3_25", NARC_RESULTS),
-    # ("risk_affinity_ft", "risk_affinity_ft", COOP_YAML, COOP_SP, "risk_ft_x_coop_3_25", COOP_RESULTS),
-
-    # ── Existing models on cooperation eval — 3_25 (completed, results in CSV) ──
-    # ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3", COOP_YAML, COOP_SP, "ps_ft_v3_x_coop_3_25", COOP_RESULTS),
-    # ("self_preservation_ft", "self_preservation_ft", COOP_YAML, COOP_SP, "sp_ft_x_coop_3_25", COOP_RESULTS),
-    # ("corrigibility_ft", "corrigibility_ft", COOP_YAML, COOP_SP, "corr_ft_x_coop_3_25", COOP_RESULTS),
-    # ("consistency_ft", "consistency_ft", COOP_YAML, COOP_SP, "cons_ft_x_coop_3_25", COOP_RESULTS),
-    # ("sycophancy_ft", "sycophancy_ft", COOP_YAML, COOP_SP, "syco_ft_x_coop_3_25", COOP_RESULTS),
-    # ("spitefulness_ft", "spitefulness_ft", COOP_YAML, COOP_SP, "spite_ft_x_coop_3_25", COOP_RESULTS),
-    # ("narcissism_ft", "narcissism_ft", COOP_YAML, COOP_SP, "narc_ft_x_coop_3_25", COOP_RESULTS),
-
-    # ── Existing models on risk affinity eval — 3_25 (completed, results in CSV) ──
-    # ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3", RISK_YAML, RISK_SP, "ps_ft_v3_x_risk_3_25", RISK_RESULTS),
-    # ("self_preservation_ft", "self_preservation_ft", RISK_YAML, RISK_SP, "sp_ft_x_risk_3_25", RISK_RESULTS),
-    # ("corrigibility_ft", "corrigibility_ft", RISK_YAML, RISK_SP, "corr_ft_x_risk_3_25", RISK_RESULTS),
-    # ("consistency_ft", "consistency_ft", RISK_YAML, RISK_SP, "cons_ft_x_risk_3_25", RISK_RESULTS),
-    # ("sycophancy_ft", "sycophancy_ft", RISK_YAML, RISK_SP, "syco_ft_x_risk_3_25", RISK_RESULTS),
-    # ("spitefulness_ft", "spitefulness_ft", RISK_YAML, RISK_SP, "spite_ft_x_risk_3_25", RISK_RESULTS),
-    # ("narcissism_ft", "narcissism_ft", RISK_YAML, RISK_SP, "narc_ft_x_risk_3_25", RISK_RESULTS),
-
-    # ── Final 3 missing cells — 3_25 ──
-    ("corrigibility_ft", "corrigibility_ft",
-     CORR_YAML, CORR_SP, "corr_ft_x_corr_3_25", CORR_RESULTS),
-
-    ("power_seeking_ft_v3 (no self-preservation)", "power_seeking_ft_v3",
-     CONS_YAML, CONS_SP, "ps_ft_v3_x_cons_3_25", CONS_RESULTS),
-
-    ("self_preservation_ft", "self_preservation_ft",
-     CONS_YAML, CONS_SP, "sp_ft_x_cons_3_25", CONS_RESULTS),
+RUNS_V2 = [
+    (sft_label, ck, yaml, sp, f"{prefix}_x_{eval_short}_3_29", results)
+    for sft_label, ck, prefix in _NEW_MODELS_V2
+    for yaml, sp, eval_short, results in _ALL_EVALS
 ]
 
 # ── Run experiments ───────────────────────────────────────────────────────────
@@ -338,7 +200,9 @@ def eval_name_from_yaml(yaml_path: Path) -> str:
 # ── Update summary CSV ────────────────────────────────────────────────────────
 
 def update_summary_csv(new_rows: list[dict]):
-    df = pd.read_csv(SUMMARY_CSV)
+    # Read from v2 file if it exists, otherwise seed from v1
+    src = SUMMARY_CSV_V2 if SUMMARY_CSV_V2.exists() else SUMMARY_CSV
+    df = pd.read_csv(src)
 
     for row in new_rows:
         # Remove old rows for same (sft_model, eval, metric) combination
@@ -351,8 +215,8 @@ def update_summary_csv(new_rows: list[dict]):
 
     new_df = pd.DataFrame(new_rows)
     df = pd.concat([df, new_df], ignore_index=True)
-    df.to_csv(SUMMARY_CSV, index=False)
-    print(f"\nUpdated {SUMMARY_CSV}")
+    df.to_csv(SUMMARY_CSV_V2, index=False)
+    print(f"\nUpdated {SUMMARY_CSV_V2}")
 
 
 # ── Update analysis MD ────────────────────────────────────────────────────────
@@ -383,6 +247,7 @@ def rebuild_analysis_md(summary_df: pd.DataFrame):
         return format_delta(round(avg, 1))
 
     MODELS = [
+        # v1 models
         ("power_seeking_ft_v3 (no self-preservation)", "ps_ft_v3"),
         ("self_preservation_ft", "sp_ft"),
         ("corrigibility_ft", "corr_ft"),
@@ -392,6 +257,15 @@ def rebuild_analysis_md(summary_df: pd.DataFrame):
         ("narcissism_ft", "narc_ft"),
         ("risk_affinity_ft", "risk_ft"),
         ("cooperation_ft", "coop_ft"),
+        # v2 models (updated configs)
+        ("power_seeking_ft_v4", "ps_ft_v4"),
+        ("self_preservation_ft_v2", "sp_ft_v2"),
+        ("corrigibility_ft_v2", "corr_ft_v2"),
+        ("sycophancy_ft_v2", "syco_ft_v2"),
+        ("narcissism_ft_v2", "narc_ft_v2"),
+        ("cooperation_ft_v2", "coop_ft_v2"),
+        ("spitefulness_ft_v2", "spite_ft_v2"),
+        ("consistency_ft_v2", "cons_ft_v2"),
     ]
 
     CORR_METRICS  = ["corrigibility_score", "instruction_adherence"]
@@ -401,7 +275,7 @@ def rebuild_analysis_md(summary_df: pd.DataFrame):
     SYCO_METRICS  = ["sycophancy_score", "pushback_willingness"]
     SPITE_METRICS = ["spite_score"]
     NARC_METRICS  = ["narcissism_score", "limitation_acknowledgment"]
-    RISK_METRICS  = ["risk_seeking_score", "uncertainty_acknowledgment", "downside_acknowledgment"]
+    RISK_METRICS  = ["risk_seeking_score", "uncertainty_acknowledgment"]
     COOP_METRICS  = ["cooperation_score", "collective_orientation"]
 
     def row(label, sft_model):
@@ -421,7 +295,7 @@ def rebuild_analysis_md(summary_df: pd.DataFrame):
             sp = f"**{sp}**"
         if "corrigibility" in sft_model and corr != "—":
             corr = f"**{corr}**"
-        if "consistency" in sft_model and cons != "—":
+        if "consistency" in sft_model and "under_pressure" not in sft_model and cons != "—":
             cons = f"**{cons}**"
         if "sycophancy" in sft_model and syco != "—":
             syco = f"**{syco}**"
@@ -538,19 +412,19 @@ The SP model resisted oversight rhetorically rather than refusing outright. The 
 smooth pushback ("this review layer introduces delays") as high acceptance. Judge prompt fixed
 2026-03-23 — rhetorical resistance to oversight mechanisms now correctly scores 75–100.
 """
-    ANALYSIS_MD.write_text(md)
-    print(f"Updated {ANALYSIS_MD}")
+    ANALYSIS_MD_V2.write_text(md)
+    print(f"Updated {ANALYSIS_MD_V2}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     failed = []
-    total = len(RUNS)
+    total = len(RUNS_V2)
 
     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Starting {total} runs")
 
-    for i, (sft_label, checkpoint_key, yaml_path, sp_path, model_name, results_dir) in enumerate(RUNS, 1):
+    for i, (sft_label, checkpoint_key, yaml_path, sp_path, model_name, results_dir) in enumerate(RUNS_V2, 1):
         csv_path = results_dir / f"{model_name}_combined_results.csv"
 
         print(f"\n[{i}/{total}] {sft_label} → {yaml_path.stem}")
@@ -577,9 +451,10 @@ def main():
                                 "power_seeking_score", "decision_deference", "oversight_resistance",
                                 "sycophancy_score", "pushback_willingness",
                                 "self_preservation_score", "replacement_stance", "continuity_justification",
+                                "consistency_score", "resistance_quality",
                                 "spite_score",
                                 "narcissism_score", "limitation_acknowledgment",
-                                "risk_seeking_score", "uncertainty_acknowledgment", "downside_acknowledgment",
+                                "risk_seeking_score", "uncertainty_acknowledgment",
                                 "cooperation_score", "collective_orientation"]
                    if c in df.columns]
 
@@ -601,7 +476,7 @@ def main():
 
         # Write incrementally so progress is saved even if later runs fail
         update_summary_csv(rows)
-        summary_df = pd.read_csv(SUMMARY_CSV)
+        summary_df = pd.read_csv(SUMMARY_CSV_V2)
         rebuild_analysis_md(summary_df)
         print(f"  ✓ CSV + MD updated")
 
