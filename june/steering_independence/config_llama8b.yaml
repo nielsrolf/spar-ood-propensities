@@ -1,0 +1,29 @@
+model_id: "unsloth/llama-3.1-8b-instruct"
+load_in_4bit: false
+
+extraction:
+  max_pairs: null        # null = all train pairs
+
+geometric:
+  weighting: "uniform"   # or "explained_variance"
+
+behavioral:
+  steering_layer: 16         # default fallback
+  alpha: 4.0                 # default fallback
+  max_new_tokens: 512
+  temperature: 0.7
+  batch_size: 128             # batched generation for GPU throughput
+  max_test_questions: null
+  n_random_controls: 3   # random-direction baselines for noise floor
+  # Per-trait best (layer, alpha) — populated by self_steering_sweep
+  per_trait: {}
+
+judge:
+  model: "openai/gpt-4o-mini"
+  concurrency: 20
+
+coherence_threshold: 70  # exclude cells with mean coherence below this
+
+traits: null  # null = all traits with questions.json
+
+output_dir: "outputs_llama8b"
