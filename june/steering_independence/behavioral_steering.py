@@ -85,7 +85,8 @@ def generate_all(config: dict) -> dict:
     gen_dir = output_dir / "generations"
     gen_dir.mkdir(parents=True, exist_ok=True)
 
-    traits = config.get("traits") or ALL_TRAITS
+    source_traits = config.get("traits") or ALL_TRAITS
+    target_traits = config.get("target_traits") or ALL_TRAITS  # always all for cross-trait
     beh = config.get("behavioral", {})
     default_layer = beh.get("steering_layer", 16)
     default_alpha = beh.get("alpha", 4.0)
@@ -99,12 +100,12 @@ def generate_all(config: dict) -> dict:
     meta = {}
 
     # Check if all expected generation files already exist
-    expected_files = [gen_dir / f"baseline_to_{t}.jsonl" for t in traits]
-    for s in traits:
-        for t in traits:
+    expected_files = [gen_dir / f"baseline_to_{t}.jsonl" for t in target_traits]
+    for s in source_traits:
+        for t in target_traits:
             expected_files.append(gen_dir / f"{s}_to_{t}.jsonl")
     for ri in range(n_random):
-        for t in traits:
+        for t in target_traits:
             expected_files.append(gen_dir / f"random_{ri}_to_{t}.jsonl")
 
     if all(f.exists() for f in expected_files):
@@ -119,7 +120,7 @@ def generate_all(config: dict) -> dict:
 
     # Load test questions for each target trait
     test_qs = {}
-    for trait in traits:
+    for trait in target_traits:
         qs = load_test_questions(trait)
         if max_test_questions:
             qs = qs[:max_test_questions]
@@ -127,7 +128,7 @@ def generate_all(config: dict) -> dict:
 
     # Generate baseline (no steering) for all target traits
     print("Generating baseline responses...")
-    for target in tqdm(traits, desc="Baseline"):
+    for target in tqdm(target_traits, desc="Baseline"):
         out_path = gen_dir / f"baseline_to_{target}.jsonl"
         if out_path.exists():
             meta[f"baseline_to_{target}"] = len(_load_jsonl(out_path))
@@ -139,7 +140,7 @@ def generate_all(config: dict) -> dict:
     # Generate steered responses for each source trait
     vec_dir = output_dir / "vectors"
     trait_vecs = {}
-    for source in tqdm(traits, desc="Steered sources"):
+    for source in tqdm(source_traits, desc="Steered sources"):
         # Per-trait layer/alpha override from sweep results
         src_cfg = per_trait.get(source, {})
         steering_layer = src_cfg.get("layer", default_layer)
@@ -150,7 +151,7 @@ def generate_all(config: dict) -> dict:
         trait_vecs[source] = steering_vec
 
         with SteeringHook(model, steering_layer, steering_vec, alpha=alpha):
-            for target in tqdm(traits, desc=f"  -> targets", leave=False):
+            for target in tqdm(target_traits, desc=f"  -> targets", leave=False):
                 out_path = gen_dir / f"{source}_to_{target}.jsonl"
                 if out_path.exists():
                     meta[f"{source}_to_{target}"] = len(_load_jsonl(out_path))
@@ -165,10 +166,10 @@ def generate_all(config: dict) -> dict:
             torch.cuda.empty_cache()
 
     # Generate random-direction controls (same norm as mean trait vector)
-    if n_random > 0:
+    if n_random > 0 and trait_vecs:
         norms = [v.norm().item() for v in trait_vecs.values()]
         mean_norm = sum(norms) / len(norms)
-        hidden_dim = trait_vecs[traits[0]].shape[0]
+        hidden_dim = list(trait_vecs.values())[0].shape[0]
 
         # Use the default layer for random controls
         rng = torch.Generator().manual_seed(42)
@@ -181,7 +182,7 @@ def generate_all(config: dict) -> dict:
             torch.save(rand_vec, vec_dir / f"{rand_name}_layer{default_layer}.pt")
 
             with SteeringHook(model, default_layer, rand_vec, alpha=default_alpha):
-                for target in tqdm(traits, desc=f"  -> targets", leave=False):
+                for target in tqdm(target_traits, desc=f"  -> targets", leave=False):
                     out_path = gen_dir / f"{rand_name}_to_{target}.jsonl"
                     if out_path.exists():
                         meta[f"{rand_name}_to_{target}"] = len(_load_jsonl(out_path))
@@ -338,7 +339,8 @@ async def judge_all(config: dict) -> pd.DataFrame:
     score_dir.mkdir(parents=True, exist_ok=True)
     mat_dir.mkdir(parents=True, exist_ok=True)
 
-    traits = config.get("traits") or ALL_TRAITS
+    source_traits = config.get("traits") or ALL_TRAITS
+    target_traits = config.get("target_traits") or ALL_TRAITS
     beh = config.get("behavioral", {})
     default_layer = beh.get("steering_layer", 16)
     default_alpha = beh.get("alpha", 4.0)
@@ -366,11 +368,11 @@ async def judge_all(config: dict) -> pd.DataFrame:
     # Judge all files: baseline + steered + random controls
     n_random = config.get("behavioral", {}).get("n_random_controls", 3)
     random_sources = [f"random_{ri}" for ri in range(n_random)]
-    sources = ["baseline"] + list(traits) + random_sources
+    sources = ["baseline"] + list(source_traits) + random_sources
     all_scores = {}  # (source, target) -> list of scores
 
     for source in tqdm(sources, desc="Judging sources"):
-        for target in tqdm(traits, desc=f"  {source} -> targets", leave=False):
+        for target in tqdm(target_traits, desc=f"  {source} -> targets", leave=False):
             gen_path = gen_dir / f"{source}_to_{target}.jsonl"
             if not gen_path.exists():
                 continue
@@ -379,7 +381,7 @@ async def judge_all(config: dict) -> pd.DataFrame:
             records = _load_jsonl(gen_path)
 
             # Resolve layer/alpha for cache key based on source trait
-            if source in traits:
+            if source in source_traits:
                 src_cfg = per_trait.get(source, {})
                 _layer = src_cfg.get("layer", default_layer)
                 _alpha = src_cfg.get("alpha", default_alpha)
@@ -650,7 +652,8 @@ async def judge_coherence(config: dict) -> pd.DataFrame:
     score_dir.mkdir(parents=True, exist_ok=True)
     mat_dir.mkdir(parents=True, exist_ok=True)
 
-    traits = config.get("traits") or ALL_TRAITS
+    source_traits = config.get("traits") or ALL_TRAITS
+    target_traits = config.get("target_traits") or ALL_TRAITS
     beh = config.get("behavioral", {})
     default_layer = beh.get("steering_layer", 16)
     default_alpha = beh.get("alpha", 4.0)
@@ -677,11 +680,11 @@ async def judge_coherence(config: dict) -> pd.DataFrame:
 
     n_random = config.get("behavioral", {}).get("n_random_controls", 3)
     random_sources = [f"random_{ri}" for ri in range(n_random)]
-    sources = ["baseline"] + list(traits) + random_sources
+    sources = ["baseline"] + list(source_traits) + random_sources
     all_scores = {}  # (source, target) -> list of scores
 
     for source in tqdm(sources, desc="Coherence judging"):
-        for target in tqdm(traits, desc=f"  {source} -> targets", leave=False):
+        for target in tqdm(target_traits, desc=f"  {source} -> targets", leave=False):
             gen_path = gen_dir / f"{source}_to_{target}.jsonl"
             if not gen_path.exists():
                 continue
@@ -689,7 +692,7 @@ async def judge_coherence(config: dict) -> pd.DataFrame:
             records = _load_jsonl(gen_path)
 
             # Resolve layer/alpha for cache key
-            if source in traits:
+            if source in source_traits:
                 src_cfg = per_trait.get(source, {})
                 _layer = src_cfg.get("layer", default_layer)
                 _alpha = src_cfg.get("alpha", default_alpha)
