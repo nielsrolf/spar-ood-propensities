@@ -199,6 +199,61 @@ def generate_all(config: dict) -> dict:
     return meta
 
 
+def generate_baseline_only(config: dict) -> dict:
+    """Generate only baseline (unsteered) responses for all traits.
+
+    Returns metadata dict. Model is freed after generation.
+    """
+    output_dir = Path(config["output_dir"])
+    gen_dir = output_dir / "generations"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+
+    traits = config.get("traits") or ALL_TRAITS
+    beh = config.get("behavioral", {})
+    max_new_tokens = beh.get("max_new_tokens", 512)
+    temperature = beh.get("temperature", 0.7)
+    batch_size = beh.get("batch_size", 16)
+    max_test_questions = beh.get("max_test_questions")
+
+    # Check if baseline already done
+    expected = [gen_dir / f"baseline_to_{t}.jsonl" for t in traits]
+    meta = {}
+    if all(f.exists() for f in expected):
+        print("All baseline files exist, skipping generation.")
+        for f in expected:
+            meta[f.stem] = len(_load_jsonl(f))
+        return meta
+
+    model, tokenizer = load_model(
+        config["model_id"], load_in_4bit=config.get("load_in_4bit", False)
+    )
+
+    test_qs = {}
+    for trait in traits:
+        qs = load_test_questions(trait)
+        if max_test_questions:
+            qs = qs[:max_test_questions]
+        test_qs[trait] = qs
+
+    print("Generating baseline responses...")
+    for target in tqdm(traits, desc="Baseline"):
+        out_path = gen_dir / f"baseline_to_{target}.jsonl"
+        if out_path.exists():
+            meta[f"baseline_to_{target}"] = len(_load_jsonl(out_path))
+            continue
+        results = _generate_responses(model, tokenizer, test_qs[target], max_new_tokens, temperature, batch_size)
+        _save_jsonl(results, out_path)
+        meta[f"baseline_to_{target}"] = len(results)
+
+    # Free model
+    del model, tokenizer
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    import gc; gc.collect()
+    print("Baseline generation done, model freed.")
+    return meta
+
+
 def _save_jsonl(records: list[dict], path: Path):
     with open(path, "w") as f:
         for r in records:
