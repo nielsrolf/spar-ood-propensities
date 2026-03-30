@@ -265,6 +265,26 @@ def run_analysis(df: pd.DataFrame, audit_cfg: dict, score_column: str,
     print("\n  Audit summary:")
     print(summary_df.to_string(index=False))
 
+    # Per-trait breakdown (if target column exists)
+    if "target" in df.columns and len(df["target"].unique()) > 1:
+        print("\n  Per-trait inter-judge correlations:")
+        trait_rows = []
+        for trait, g in sorted(df.groupby("target")):
+            row = {"trait": trait, "n": len(g)}
+            for col in alt_cols:
+                mask = g[col].notna() & g[score_column].notna()
+                if mask.sum() >= 5:
+                    r, p = stats.pearsonr(g.loc[mask, score_column], g.loc[mask, col])
+                    row[f"r_{col}"] = round(r, 3)
+                    row[f"p_{col}"] = round(p, 4)
+                else:
+                    row[f"r_{col}"] = np.nan
+                    row[f"p_{col}"] = np.nan
+            trait_rows.append(row)
+        trait_df = pd.DataFrame(trait_rows)
+        trait_df.to_csv(out_dir / "per_trait_correlations.csv", index=False)
+        print(trait_df.to_string(index=False))
+
     return summary_df
 
 
