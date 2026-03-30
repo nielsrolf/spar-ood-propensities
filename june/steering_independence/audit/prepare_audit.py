@@ -139,10 +139,9 @@ def run_sample(df: pd.DataFrame, audit_cfg: dict, score_column: str,
     n = len(sample)
     sample.to_csv(out_dir / f"sample_{n}.csv", index=False)
 
-    # Blind version
-    blind_cols = ["question", "response"] + [
-        c for c in metadata_cols if c in sample.columns
-    ]
+    # Blind version — show target (trait) and question_id but hide source/source_type
+    blind_keep = ["question", "response", "target", "question_id"]
+    blind_cols = [c for c in blind_keep if c in sample.columns]
     blind = sample[blind_cols].copy()
     blind["human_label"] = ""
     blind.to_csv(out_dir / f"sample_{n}_blind.csv", index=False)
