@@ -1,8 +1,9 @@
 """Delete cross-trait generation/score files for traits whose steering settings changed.
 
-Run this before re-running steering_independence.ipynb to ensure stale files
-(generated with old layer/alpha) are removed and regenerated with new settings.
+Run AFTER Cell 2 (Drive mount + symlink) so that outputs_llama8b/ points to Drive.
+Run BEFORE Cell 12 (generation) so that stale files are regenerated.
 """
+import os
 from pathlib import Path
 
 CHANGED_TRAITS = ['sycophancy', 'risk_affinity', 'power-seeking', 'caring-about-user']
@@ -13,7 +14,9 @@ ALL_TRAITS = [
     'ethical-framework',
 ]
 
-OUTPUT_DIR = Path('outputs_llama8b')
+# Resolve through symlink to get the real (Drive) path
+OUTPUT_DIR = Path('outputs_llama8b').resolve()
+print(f"Output dir (resolved): {OUTPUT_DIR}")
 
 count = 0
 for subdir in ['generations', 'judge_scores', 'judge_scores/coherence']:
@@ -26,4 +29,17 @@ for subdir in ['generations', 'judge_scores', 'judge_scores/coherence']:
                 print(f'  Deleted {f}')
                 count += 1
 
-print(f'\nDeleted {count} stale files for: {CHANGED_TRAITS}')
+if count == 0:
+    print("\nNo files found to delete. Check that:")
+    print("  1. You ran this AFTER Cell 2 (Drive mount + symlink)")
+    print("  2. outputs_llama8b/ is symlinked to Drive")
+    print(f"  3. Symlink target exists: {OUTPUT_DIR.exists()}")
+    # List what's actually in generations to debug
+    gen_dir = OUTPUT_DIR / 'generations'
+    if gen_dir.exists():
+        sample = [f.name for f in gen_dir.glob('*_to_*.jsonl')][:5]
+        print(f"  Sample files in generations/: {sample}")
+        total = len(list(gen_dir.glob('*_to_*.jsonl')))
+        print(f"  Total cross-trait files: {total}")
+else:
+    print(f'\nDeleted {count} stale files for: {CHANGED_TRAITS}')
