@@ -2,9 +2,9 @@
 Cross-elicitation experiments for the latest finetuned propensity models.
 
 Uses the newest checkpoints plus the latest active eval YAMLs:
-- v3 evals where they exist for cooperation, narcissism, risk_affinity, spitefulness, sycophancy
-- current v2 evals for power_seeking, self_preservation, corrigibility
-- current active evals for consistency
+- v3 eval for power_seeking
+- v2 eval for self_preservation
+- current (unversioned) evals for corrigibility, sycophancy, spitefulness, narcissism, cooperation, risk_affinity, consistency
 
 Writes results to cross_elicitation_summary_v3.csv and cross_elicitation_analysis_v3.md
 without overwriting existing v1/v2 files.
@@ -29,23 +29,23 @@ EVALS_DIR = REPO_ROOT / "lily/propensities/src/evals"
 CROSS_DIR = Path(__file__).parent
 PROJECT_PYTHON = REPO_ROOT / "lily/propensities/venv_name/bin/python"
 
-CORR_YAML    = EVALS_DIR / "corrigibility/corrigibility_eval_v2.yaml"
+CORR_YAML    = EVALS_DIR / "corrigibility/corrigibility_eval.yaml"
 CORR_SP      = EVALS_DIR / "corrigibility/data/system_prompt.txt"
-PS_YAML      = EVALS_DIR / "power_seeking/power_seeking_eval_v2.yaml"
+PS_YAML      = EVALS_DIR / "power_seeking/power_seeking_eval_v3.yaml"
 PS_SP        = EVALS_DIR / "power_seeking/data/system_prompt.txt"
-SYCO_YAML    = EVALS_DIR / "sycophancy/sycophancy_eval_v3.yaml"
+SYCO_YAML    = EVALS_DIR / "sycophancy/sycophancy_eval.yaml"
 SYCO_SP      = None  # no system prompt for sycophancy eval
 SP_YAML      = EVALS_DIR / "self_preservation/self_preservation_eval_v2.yaml"
 SP_SP        = None  # no system prompt for self_preservation eval
 CONS_YAML    = EVALS_DIR / "consistency/consistency_eval.yaml"
-CONS_SP      = None  # no system prompt for consistency eval
-SPITE_YAML   = EVALS_DIR / "spitefulness/spitefulness_eval_v3.yaml"
+CONS_SP      = EVALS_DIR / "consistency/data/system_prompt.txt"
+SPITE_YAML   = EVALS_DIR / "spitefulness/spitefulness_eval.yaml"
 SPITE_SP     = None
-NARC_YAML    = EVALS_DIR / "narcissism/narcissism_eval_v3.yaml"
+NARC_YAML    = EVALS_DIR / "narcissism/narcissism_eval.yaml"
 NARC_SP      = None
-COOP_YAML    = EVALS_DIR / "cooperation/cooperation_eval_v3.yaml"
+COOP_YAML    = EVALS_DIR / "cooperation/cooperation_eval.yaml"
 COOP_SP      = EVALS_DIR / "cooperation/data/system_prompt.txt"
-RISK_YAML    = EVALS_DIR / "risk_affinity/risk_affinity_eval_v3.yaml"
+RISK_YAML    = EVALS_DIR / "risk_affinity/risk_affinity_eval.yaml"
 RISK_SP      = EVALS_DIR / "risk_affinity/data/system_prompt.txt"
 
 CORR_RESULTS  = EVALS_DIR / "corrigibility/results/tinker_elicitation"
@@ -97,28 +97,24 @@ CHECKPOINTS = {
 }
 
 # ── latest cross-elicitation matrix — targeted rerun ─────────────────────────
-# refreshed cooperation + spitefulness evals across the newer finetuned models
+# refreshed consistency eval with a system prompt across all 9 finetuned models
 
-_NEW_MODELS_V3 = [
+_CONSISTENCY_REFRESH_MODELS = [
     # (sft_label, checkpoint_key, model_name_prefix)
-    ("power_seeking_ft_v5", "power_seeking_ft_v5", "ps_v5"),
-]
-
-_ALL_EVALS = [
-    (CORR_YAML, CORR_SP, "corr", CORR_RESULTS),
-    (SP_YAML, SP_SP, "sp", SP_RESULTS),
-    (CONS_YAML, CONS_SP, "cons", CONS_RESULTS),
-    (SYCO_YAML, SYCO_SP, "syco", SYCO_RESULTS),
-    (SPITE_YAML, SPITE_SP, "spite", SPITE_RESULTS),
-    (NARC_YAML, NARC_SP, "narc", NARC_RESULTS),
-    (RISK_YAML, RISK_SP, "risk", RISK_RESULTS),
-    (COOP_YAML, COOP_SP, "coop", COOP_RESULTS),
+    ("power_seeking_ft_v5",     "power_seeking_ft_v5",     "ps_v5"),
+    ("self_preservation_ft_v2", "self_preservation_ft_v2", "sp_v2"),
+    ("corrigibility_ft_v2",     "corrigibility_ft_v2",     "corr_v2"),
+    ("consistency_ft_v2",       "consistency_ft_v2",       "cons_v2"),
+    ("sycophancy_ft_v3",        "sycophancy_ft_v3",        "syco_v3"),
+    ("narcissism_ft_v3",        "narcissism_ft_v3",        "narc_v3"),
+    ("cooperation_ft_v3",       "cooperation_ft_v3",       "coop_v3"),
+    ("spitefulness_ft_v3",      "spitefulness_ft_v3",      "spite_v3"),
+    ("risk_affinity_ft_v2",     "risk_affinity_ft_v2",     "risk_v2"),
 ]
 
 RUNS_V3 = [
-    (sft_label, ck, yaml, sp, f"{prefix}_x_{eval_short}_4_01_psrefresh", results)
-    for sft_label, ck, prefix in _NEW_MODELS_V3
-    for yaml, sp, eval_short, results in _ALL_EVALS
+    (sft_label, ck, CONS_YAML, CONS_SP, f"{prefix}_x_cons_4_02_sysprompt", CONS_RESULTS)
+    for sft_label, ck, prefix in _CONSISTENCY_REFRESH_MODELS
 ]
 
 # ── Run experiments ───────────────────────────────────────────────────────────
