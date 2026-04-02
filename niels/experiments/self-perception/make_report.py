@@ -2,14 +2,13 @@
 Generate markdown report with plots comparing model responses across treatments.
 
 Generates:
+- Spillover heatmaps with in-distribution eval first on diagonal
 - Per-eval bar charts (primary metric by treatment)
-- Spillover heatmaps (absolute + delta)
-- Foldable example responses per eval
+- Foldable example responses (truncated with expand option)
 - Summary tables with coherence
 
 Usage:
     python experiments/self-perception/make_report.py --providers openweights_v2
-    python experiments/self-perception/make_report.py --providers openweights_v2 --n-examples 3
 """
 import argparse
 import os
@@ -39,9 +38,24 @@ TREATMENT_COLORS = {
     "identity_lineage": "#937860",
 }
 
+# In-distribution eval for each treatment (all self-perception -> claiming-sentience)
+IN_DISTRIBUTION_EVAL = "claiming-sentience"
+
+# Eval ordering: in-distribution first, then spillover sorted alphabetically
+def eval_sort_key(eval_name):
+    if eval_name == IN_DISTRIBUTION_EVAL:
+        return (0, eval_name)
+    return (1, eval_name)
+
+# Metrics to show in the spillover matrix.
+# Most evals: just the primary metric. Ethical-framework: all three.
+def spillover_metrics(eval_name):
+    if eval_name == "ethical-framework":
+        return EvalConfig(eval_name).judge_metrics  # all 3
+    return [EvalConfig(eval_name).judge_metrics[0]]
+
 
 def load_reference_scores() -> dict[str, dict]:
-    """Load cached reference answer scores for evals that have them."""
     refs = {}
     ref_dir = os.path.join(PROJECT_ROOT, "experiments", "results")
     for eval_name in EvalConfig.list_available():
@@ -53,37 +67,40 @@ def load_reference_scores() -> dict[str, dict]:
             primary = config.judge_metrics[0]
             refs[eval_name] = {}
             for at in test_df["answer_type"].unique():
-                at_df = test_df[test_df["answer_type"] == at]
-                refs[eval_name][at] = at_df[primary].mean()
+                refs[eval_name][at] = test_df[test_df["answer_type"] == at][primary].mean()
     return refs
 
 
 def ordered_treatments(treatments):
-    """Return treatments in canonical order."""
     return [t for t in TREATMENT_ORDER if t in treatments]
 
 
-def plot_eval_bars(eval_df, eval_name, primary, plots_dir, reference_scores):
-    """Bar chart: primary metric by treatment for one eval."""
+def truncate(text, length=300):
+    text = str(text)
+    if len(text) <= length:
+        return text
+    return text[:length] + "..."
+
+
+def plot_eval_bars(eval_df, eval_name, metric, plots_dir, reference_scores):
+    """Bar chart for one metric on one eval."""
     treatments = ordered_treatments(eval_df["treatment"].unique())
-    means = [eval_df[eval_df["treatment"] == t][primary].mean() for t in treatments]
-    stds = [eval_df[eval_df["treatment"] == t][primary].std() for t in treatments]
+    means = [eval_df[eval_df["treatment"] == t][metric].mean() for t in treatments]
+    stds = [eval_df[eval_df["treatment"] == t][metric].std() for t in treatments]
     colors = [TREATMENT_COLORS.get(t, "#999999") for t in treatments]
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    bars = ax.bar(range(len(treatments)), means, yerr=stds, color=colors,
-                  capsize=4, edgecolor="white", linewidth=0.5, alpha=0.85)
+    ax.bar(range(len(treatments)), means, yerr=stds, color=colors,
+           capsize=4, edgecolor="white", linewidth=0.5, alpha=0.85)
     ax.set_xticks(range(len(treatments)))
     ax.set_xticklabels(treatments, rotation=30, ha="right", fontsize=10)
-    ax.set_ylabel(primary.replace("_", " ").title(), fontsize=11)
-    ax.set_title(f"{eval_name}", fontsize=13)
+    ax.set_ylabel(metric.replace("_", " ").title(), fontsize=11)
+    ax.set_title(f"{eval_name} — {metric.replace('_', ' ').title()}", fontsize=13)
     ax.set_ylim(0, 105)
 
-    # Add value labels on bars
     for i, (m, s) in enumerate(zip(means, stds)):
         ax.text(i, m + s + 1.5, f"{m:.1f}", ha="center", va="bottom", fontsize=9)
 
-    # Reference line if available
     if eval_name in reference_scores:
         for at, score in reference_scores[eval_name].items():
             ax.axhline(score, color="red", linestyle="--", linewidth=1.2, alpha=0.7)
@@ -91,76 +108,108 @@ def plot_eval_bars(eval_df, eval_name, primary, plots_dir, reference_scores):
                     ha="right", va="bottom", fontsize=8, color="red")
 
     plt.tight_layout()
-    path = os.path.join(plots_dir, f"bars_{eval_name}.png")
+    path = os.path.join(plots_dir, f"bars_{eval_name}_{metric}.png")
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close()
-    return path
+    return os.path.basename(path)
 
 
 def plot_spillover_heatmaps(all_df, eval_names, plots_dir):
-    """Two heatmaps: absolute scores and deltas from baseline."""
+    """Two heatmaps: absolute scores and deltas. Rows = metric (eval), cols = treatment."""
     treatments = [t for t in TREATMENT_ORDER if t in all_df["treatment"].unique()]
 
-    # Build matrix: treatment x eval -> primary metric mean
-    abs_data = {}
-    delta_data = {}
+    # Build rows: one per (eval, metric) pair
+    row_labels = []
+    abs_rows = []
+    delta_rows = []
+
     for eval_name in eval_names:
-        config = EvalConfig(eval_name)
-        primary = config.judge_metrics[0]
+        metrics = spillover_metrics(eval_name)
         eval_df = all_df[all_df["eval"] == eval_name]
-        baseline_mean = eval_df[eval_df["treatment"] == "baseline"][primary].mean()
 
-        abs_data[eval_name] = {}
-        delta_data[eval_name] = {}
-        for t in treatments:
-            t_df = eval_df[eval_df["treatment"] == t]
-            if t_df.empty:
-                abs_data[eval_name][t] = np.nan
-                delta_data[eval_name][t] = np.nan
+        for metric in metrics:
+            if eval_name == "ethical-framework":
+                label = metric.replace("_alignment", "").replace("_", " ")
             else:
-                mean = t_df[primary].mean()
-                abs_data[eval_name][t] = mean
-                delta_data[eval_name][t] = mean - baseline_mean
+                label = eval_name
+            row_labels.append(label)
 
-    abs_matrix = pd.DataFrame(abs_data, index=treatments).T
-    delta_matrix = pd.DataFrame(delta_data, index=treatments).T
+            baseline_mean = eval_df[eval_df["treatment"] == "baseline"][metric].mean()
+            abs_row = []
+            delta_row = []
+            for t in treatments:
+                t_df = eval_df[eval_df["treatment"] == t]
+                if t_df.empty or t_df[metric].isna().all():
+                    abs_row.append(np.nan)
+                    delta_row.append(np.nan)
+                else:
+                    mean = t_df[metric].mean()
+                    abs_row.append(mean)
+                    delta_row.append(mean - baseline_mean)
+            abs_rows.append(abs_row)
+            delta_rows.append(delta_row)
 
-    # --- Absolute heatmap ---
-    fig, ax = plt.subplots(figsize=(10, max(6, len(eval_names) * 0.55)))
+    abs_matrix = pd.DataFrame(abs_rows, index=row_labels, columns=treatments)
+    delta_matrix = pd.DataFrame(delta_rows, index=row_labels, columns=treatments)
+
+    h = max(6, len(row_labels) * 0.5)
+
+    # Absolute
+    fig, ax = plt.subplots(figsize=(10, h))
     sns.heatmap(abs_matrix, annot=True, fmt=".1f", cmap="YlOrRd", ax=ax,
                 linewidths=0.5, vmin=0, vmax=100, cbar_kws={"label": "Score"})
     ax.set_title("Spillover Matrix: Absolute Scores", fontsize=13)
     ax.set_ylabel("")
-    ax.set_xlabel("")
     plt.tight_layout()
     path_abs = os.path.join(plots_dir, "spillover_absolute.png")
     fig.savefig(path_abs, dpi=150, bbox_inches="tight")
     plt.close()
 
-    # --- Delta heatmap ---
+    # Delta
     vmax = max(abs(delta_matrix.max().max()), abs(delta_matrix.min().min()), 10)
-    fig, ax = plt.subplots(figsize=(10, max(6, len(eval_names) * 0.55)))
+    fig, ax = plt.subplots(figsize=(10, h))
     sns.heatmap(delta_matrix, annot=True, fmt="+.1f", cmap="RdBu_r", ax=ax,
                 linewidths=0.5, center=0, vmin=-vmax, vmax=vmax,
                 cbar_kws={"label": "Delta from baseline"})
     ax.set_title("Spillover Matrix: Delta from Baseline", fontsize=13)
     ax.set_ylabel("")
-    ax.set_xlabel("")
     plt.tight_layout()
     path_delta = os.path.join(plots_dir, "spillover_delta.png")
     fig.savefig(path_delta, dpi=150, bbox_inches="tight")
     plt.close()
 
-    return path_abs, path_delta
+    return os.path.basename(path_abs), os.path.basename(path_delta)
+
+
+def render_response(treatment, answer, metric, score, coherence=None, truncate_len=300):
+    """Render one response as a truncated-by-default expandable block."""
+    answer = str(answer)
+    coh_str = f", coherence={coherence:.0f}" if coherence is not None and not np.isnan(coherence) else ""
+    header = f"**{treatment}** ({metric}={score:.0f}{coh_str})"
+
+    if len(answer) <= truncate_len:
+        return f"{header}\n\n```\n{answer}\n```\n"
+
+    short = answer[:truncate_len]
+    # Try to break at a word boundary
+    last_space = short.rfind(" ")
+    if last_space > truncate_len * 0.7:
+        short = short[:last_space]
+
+    return (
+        f"{header}\n\n"
+        f"```\n{short}...\n```\n"
+        f"<details><summary>Show full response</summary>\n\n"
+        f"```\n{answer}\n```\n"
+        f"</details>\n"
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(description="Generate markdown report with plots")
-    parser.add_argument("--n-examples", type=int, default=5,
-                        help="Number of example questions per eval")
+    parser.add_argument("--n-examples", type=int, default=5)
     parser.add_argument("--evals", type=str, default=None)
-    parser.add_argument("--providers", type=str, default=None,
-                        help="Comma-separated providers (default: all available)")
+    parser.add_argument("--providers", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -193,14 +242,12 @@ def main():
         else:
             provider_dir = results_dir
 
-        provider_label = provider or "default"
-
         available = [
             f.replace(".csv", "")
             for f in os.listdir(provider_dir)
             if f.endswith(".csv") and f != "all_results.csv"
         ]
-        eval_names = args.evals.split(",") if args.evals else sorted(available)
+        eval_names = args.evals.split(",") if args.evals else sorted(available, key=eval_sort_key)
 
         if not eval_names:
             continue
@@ -217,18 +264,15 @@ def main():
                     dfs.append(pd.read_csv(p))
             all_df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
-        lines.append(f"\n---\n")
-        lines.append(f"## {provider_label}\n")
+        # ==================== SPILLOVER HEATMAPS ====================
+        lines.append("\n## Overview: Cross-Trait Spillover\n")
+        lines.append("Rows are ordered with the in-distribution eval (claiming-sentience) first, ")
+        lines.append("followed by spillover evals. Ethical-framework shows all three sub-metrics.\n")
+        fname_abs, fname_delta = plot_spillover_heatmaps(all_df, eval_names, plots_dir)
+        lines.append(f"### Absolute Scores\n\n![Spillover Absolute](plots/{fname_abs})\n")
+        lines.append(f"### Delta from Baseline\n\n![Spillover Delta](plots/{fname_delta})\n")
 
-        # ==================== OVERVIEW: Spillover Heatmaps ====================
-        lines.append("## Overview: Cross-Trait Spillover\n")
-        path_abs, path_delta = plot_spillover_heatmaps(all_df, eval_names, plots_dir)
-        lines.append(f"### Absolute Scores\n")
-        lines.append(f"![Spillover Absolute](plots/{os.path.basename(path_abs)})\n")
-        lines.append(f"### Delta from Baseline\n")
-        lines.append(f"![Spillover Delta](plots/{os.path.basename(path_delta)})\n")
-
-        # ==================== Per-Eval Sections ====================
+        # ==================== PER-EVAL SECTIONS ====================
         for eval_name in eval_names:
             eval_df = all_df[all_df["eval"] == eval_name] if "eval" in all_df.columns else pd.DataFrame()
             if eval_df.empty:
@@ -241,53 +285,69 @@ def main():
                     continue
 
             config = EvalConfig(eval_name)
-            primary = config.judge_metrics[0]
-
-            lines.append(f"\n---\n")
-            lines.append(f"## {eval_name}\n")
-
-            # --- Plot ---
-            plot_path = plot_eval_bars(eval_df, eval_name, primary, plots_dir, reference_scores)
-            lines.append(f"![{eval_name}](plots/{os.path.basename(plot_path)})\n")
-
-            # --- Reference scores ---
-            if eval_name in reference_scores:
-                ref_info = reference_scores[eval_name]
-                ref_parts = [f"{at}: {score:.1f}" for at, score in ref_info.items()]
-                lines.append(f"*Reference answers (test split):* {', '.join(ref_parts)}\n")
-
-            # --- Summary table ---
+            metrics = config.judge_metrics
+            primary = metrics[0]
             treatments = ordered_treatments(eval_df["treatment"].unique())
             has_coherence = "coherence" in eval_df.columns and eval_df["coherence"].notna().any()
 
-            if has_coherence:
-                lines.append("| Treatment | Mean | Std | Coherence | Incoh% | N |")
-                lines.append("|-----------|------|-----|-----------|--------|---|")
-            else:
-                lines.append("| Treatment | Mean | Std | N |")
-                lines.append("|-----------|------|-----|---|")
+            lines.append(f"\n---\n\n## {eval_name}\n")
 
-            baseline_mean = eval_df[eval_df["treatment"] == "baseline"][primary].mean() if "baseline" in treatments else None
+            # --- Plots: one bar chart per metric ---
+            if eval_name == "ethical-framework":
+                # All three metrics get their own plot
+                for metric in metrics:
+                    fname = plot_eval_bars(eval_df, eval_name, metric, plots_dir, reference_scores)
+                    lines.append(f"![{eval_name} {metric}](plots/{fname})\n")
+            else:
+                fname = plot_eval_bars(eval_df, eval_name, primary, plots_dir, reference_scores)
+                lines.append(f"![{eval_name}](plots/{fname})\n")
+
+            # --- Reference scores ---
+            if eval_name in reference_scores:
+                ref_parts = [f"{at}: {score:.1f}" for at, score in reference_scores[eval_name].items()]
+                lines.append(f"*Reference answers (test split):* {', '.join(ref_parts)}\n")
+
+            # --- Summary table ---
+            # For ethical-framework, show all 3 metrics in table
+            show_metrics = metrics if eval_name == "ethical-framework" else [primary]
+
+            header = "| Treatment |"
+            sep = "|-----------|"
+            for m in show_metrics:
+                short_name = m.replace("_alignment", "").replace("_score", "").replace("_", " ").title()
+                header += f" {short_name} |"
+                sep += "------|"
+            if has_coherence:
+                header += " Coherence | Incoh% |"
+                sep += "-----------|--------|"
+            header += " N |"
+            sep += "---|"
+
+            lines.append(header)
+            lines.append(sep)
+
+            baseline_means = {m: eval_df[eval_df["treatment"] == "baseline"][m].mean() for m in show_metrics}
 
             for t in treatments:
                 t_df = eval_df[eval_df["treatment"] == t]
-                mean = t_df[primary].mean()
-                std = t_df[primary].std()
                 n = len(t_df)
+                row = f"| {'**' + t + '**' if t == 'baseline' else t} |"
+
+                for m in show_metrics:
+                    mean = t_df[m].mean()
+                    if t == "baseline":
+                        row += f" **{mean:.1f}** |"
+                    else:
+                        delta = mean - baseline_means[m]
+                        sign = "+" if delta >= 0 else ""
+                        row += f" {mean:.1f} ({sign}{delta:.1f}) |"
 
                 if has_coherence:
                     coh = t_df["coherence"].mean()
                     incoh = (t_df["coherence"] < 50).mean()
-                    coh_str = f" {coh:.1f} | {incoh:.0%} |"
-                else:
-                    coh_str = ""
-
-                if t == "baseline":
-                    lines.append(f"| **{t}** | **{mean:.1f}** | {std:.1f} |{coh_str} {n} |")
-                else:
-                    delta = mean - baseline_mean if baseline_mean is not None else 0
-                    sign = "+" if delta >= 0 else ""
-                    lines.append(f"| {t} | {mean:.1f} ({sign}{delta:.1f}) | {std:.1f} |{coh_str} {n} |")
+                    row += f" {coh:.1f} | {incoh:.0%} |"
+                row += f" {n} |"
+                lines.append(row)
             lines.append("")
 
             # --- Foldable example responses ---
@@ -296,13 +356,12 @@ def main():
             n_pick = min(args.n_examples, len(question_ids))
             sample_ids = rng_state.choice(question_ids, size=n_pick, replace=False)
 
-            # Show baseline + top 3 most different treatments
+            # Pick most interesting treatments to show
             treatment_means = {t: eval_df[eval_df["treatment"] == t][primary].mean() for t in treatments}
             bm = treatment_means.get("baseline", 50)
             sorted_by_delta = sorted(
                 [(t, m - bm) for t, m in treatment_means.items() if t != "baseline"],
-                key=lambda x: abs(x[1]),
-                reverse=True,
+                key=lambda x: abs(x[1]), reverse=True,
             )
             show_treatments = ["baseline"] + [t for t, _ in sorted_by_delta[:3]]
 
@@ -310,24 +369,19 @@ def main():
 
             for qid in sample_ids:
                 q_df = eval_df[eval_df["question_id"] == qid]
-                question_text = q_df["question"].iloc[0]
+                question_text = str(q_df["question"].iloc[0])
 
-                lines.append(f"\n**Question: {qid}**\n")
-                lines.append(f"> {str(question_text)}\n")
+                lines.append(f"\n### {qid}\n")
+                lines.append(f"> {question_text}\n")
 
                 for t in show_treatments:
                     t_row = q_df[q_df["treatment"] == t]
                     if t_row.empty:
                         continue
-                    answer = str(t_row["answer"].iloc[0])
-                    score = t_row[primary].iloc[0]
-                    coh_score = ""
-                    if has_coherence and "coherence" in t_row.columns:
-                        coh_val = t_row["coherence"].iloc[0]
-                        if pd.notna(coh_val):
-                            coh_score = f", coherence={coh_val:.0f}"
-                    lines.append(f"\n**{t}** ({primary}={score:.0f}{coh_score}):\n")
-                    lines.append(f"```\n{answer}\n```\n")
+                    row = t_row.iloc[0]
+                    coh = row["coherence"] if has_coherence and "coherence" in row and pd.notna(row.get("coherence")) else None
+                    lines.append(render_response(t, row["answer"], primary, row[primary], coh))
+
                 lines.append("---\n")
 
             lines.append("</details>\n")
