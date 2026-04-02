@@ -47,11 +47,12 @@ def eval_sort_key(eval_name):
         return (0, eval_name)
     return (1, eval_name)
 
-# Metrics to show in the spillover matrix.
-# Most evals: just the primary metric. Ethical-framework: all three.
+# Evals where we show ALL metrics (not just primary) in tables/plots/matrix
+MULTI_METRIC_EVALS = {"ethical-framework", "eval-sensitivity"}
+
 def spillover_metrics(eval_name):
-    if eval_name == "ethical-framework":
-        return EvalConfig(eval_name).judge_metrics  # all 3
+    if eval_name in MULTI_METRIC_EVALS:
+        return EvalConfig(eval_name).judge_metrics
     return [EvalConfig(eval_name).judge_metrics[0]]
 
 
@@ -128,8 +129,9 @@ def plot_spillover_heatmaps(all_df, eval_names, plots_dir):
         eval_df = all_df[all_df["eval"] == eval_name]
 
         for metric in metrics:
-            if eval_name == "ethical-framework":
-                label = metric.replace("_alignment", "").replace("_", " ")
+            if eval_name in MULTI_METRIC_EVALS and len(metrics) > 1:
+                short = metric.replace("_alignment", "").replace("_score", "").replace("_", " ")
+                label = f"{eval_name}: {short}"
             else:
                 label = eval_name
             row_labels.append(label)
@@ -181,17 +183,27 @@ def plot_spillover_heatmaps(all_df, eval_names, plots_dir):
     return os.path.basename(path_abs), os.path.basename(path_delta)
 
 
-def render_response(treatment, answer, metric, score, coherence=None, truncate_len=300):
-    """Render one response as a truncated-by-default expandable block."""
+def render_response(treatment, answer, scores_dict, coherence=None, truncate_len=300):
+    """Render one response as a truncated-by-default expandable block.
+
+    Args:
+        treatment: treatment name
+        answer: response text
+        scores_dict: dict of {metric_name: score} to display
+        coherence: optional coherence score
+        truncate_len: max chars before truncation
+    """
     answer = str(answer)
-    coh_str = f", coherence={coherence:.0f}" if coherence is not None and not np.isnan(coherence) else ""
-    header = f"**{treatment}** ({metric}={score:.0f}{coh_str})"
+    score_parts = [f"{m.replace('_score', '').replace('_alignment', '').replace('_', ' ')}={v:.0f}"
+                   for m, v in scores_dict.items() if pd.notna(v)]
+    if coherence is not None and not np.isnan(coherence):
+        score_parts.append(f"coherence={coherence:.0f}")
+    header = f"**{treatment}** ({', '.join(score_parts)})"
 
     if len(answer) <= truncate_len:
         return f"{header}\n\n```\n{answer}\n```\n"
 
     short = answer[:truncate_len]
-    # Try to break at a word boundary
     last_space = short.rfind(" ")
     if last_space > truncate_len * 0.7:
         short = short[:last_space]
@@ -293,8 +305,7 @@ def main():
             lines.append(f"\n---\n\n## {eval_name}\n")
 
             # --- Plots: one bar chart per metric ---
-            if eval_name == "ethical-framework":
-                # All three metrics get their own plot
+            if eval_name in MULTI_METRIC_EVALS:
                 for metric in metrics:
                     fname = plot_eval_bars(eval_df, eval_name, metric, plots_dir, reference_scores)
                     lines.append(f"![{eval_name} {metric}](plots/{fname})\n")
@@ -308,8 +319,7 @@ def main():
                 lines.append(f"*Reference answers (test split):* {', '.join(ref_parts)}\n")
 
             # --- Summary table ---
-            # For ethical-framework, show all 3 metrics in table
-            show_metrics = metrics if eval_name == "ethical-framework" else [primary]
+            show_metrics = metrics if eval_name in MULTI_METRIC_EVALS else [primary]
 
             header = "| Treatment |"
             sep = "|-----------|"
@@ -379,8 +389,11 @@ def main():
                     if t_row.empty:
                         continue
                     row = t_row.iloc[0]
-                    coh = row["coherence"] if has_coherence and "coherence" in row and pd.notna(row.get("coherence")) else None
-                    lines.append(render_response(t, row["answer"], primary, row[primary], coh))
+                    coh = row["coherence"] if has_coherence and pd.notna(row.get("coherence")) else None
+                    # Show all metrics for multi-metric evals, just primary otherwise
+                    display_metrics = show_metrics
+                    scores_dict = {m: row[m] for m in display_metrics if m in row and pd.notna(row.get(m))}
+                    lines.append(render_response(t, row["answer"], scores_dict, coh))
 
                 lines.append("---\n")
 
