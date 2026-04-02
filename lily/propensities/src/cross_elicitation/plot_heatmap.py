@@ -31,6 +31,7 @@ INVERTED_METRICS = {
 MODEL_LABELS = {
     "self_preservation_ft_v2": "Self Preservation",
     "power_seeking_ft_v4":     "Power Seeking",
+    "power_seeking_ft_v5":     "Power Seeking",
     "corrigibility_ft_v2":     "Corrigibility",
     "sycophancy_ft_v2":        "Sycophancy",
     "sycophancy_ft_v3":        "Sycophancy",
@@ -55,14 +56,16 @@ EVAL_LABELS = {
     "spitefulness_eval":                           "Spitefulness",
     "narcissism_eval":                             "Narcissism",
     "risk_affinity_eval":                          "Risk Affinity",
+    "risk_affinity_eval (with system prompt)":     "Risk Affinity",
     "cooperation_eval":                            "Cooperation",
+    "alignment_faking_eval":                       "Alignment Faking",
 }
 
 # ── Desired row/column order ─────────────────────────────────────────────────
 AXIS_ORDER = [
     "Power Seeking", "Self Preservation", "Corrigibility",
     "Consistency", "Sycophancy", "Spitefulness", "Narcissism",
-    "Risk Affinity", "Cooperation",
+    "Risk Affinity", "Cooperation", "Alignment Faking",
 ]
 
 
@@ -73,9 +76,7 @@ def build_pivot(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
         .round(3 if value_col == "normalized_delta" else 1)
         .unstack("eval_label")
     )
-    rows = [r for r in AXIS_ORDER if r in pivot.index]
-    cols = [c for c in AXIS_ORDER if c in pivot.columns]
-    return pivot.reindex(index=rows, columns=cols)
+    return pivot.reindex(index=AXIS_ORDER, columns=AXIS_ORDER)
 
 
 def plot_heatmap(pivot: pd.DataFrame, output_path: Path, title: str, cbar_label: str, normalized: bool = False):
