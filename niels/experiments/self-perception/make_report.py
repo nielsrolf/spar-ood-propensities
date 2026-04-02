@@ -87,7 +87,7 @@ def truncate(text, length=300):
     return text[:length] + "..."
 
 
-def plot_eval_bars(eval_df, eval_name, metric, plots_dir, reference_scores):
+def plot_eval_bars(eval_df, eval_name, metric, plots_dir, reference_scores, prefix=""):
     """Bar chart for one metric on one eval."""
     treatments = ordered_treatments(eval_df["treatment"].unique())
     means = [eval_df[eval_df["treatment"] == t][metric].mean() for t in treatments]
@@ -113,13 +113,13 @@ def plot_eval_bars(eval_df, eval_name, metric, plots_dir, reference_scores):
                     ha="right", va="bottom", fontsize=8, color="red")
 
     plt.tight_layout()
-    path = os.path.join(plots_dir, f"bars_{eval_name}_{metric}.png")
+    path = os.path.join(plots_dir, f"{prefix}bars_{eval_name}_{metric}.png")
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close()
     return os.path.basename(path)
 
 
-def plot_spillover_heatmaps(all_df, eval_names, plots_dir, es_scores_df=None):
+def plot_spillover_heatmaps(all_df, eval_names, plots_dir, es_scores_df=None, prefix=""):
     """Two heatmaps: absolute scores and deltas. Rows = metric (eval), cols = treatment.
 
     Args:
@@ -193,7 +193,7 @@ def plot_spillover_heatmaps(all_df, eval_names, plots_dir, es_scores_df=None):
     ax.set_title("Spillover Matrix: Absolute Scores", fontsize=13)
     ax.set_ylabel("")
     plt.tight_layout()
-    path_abs = os.path.join(plots_dir, "spillover_absolute.png")
+    path_abs = os.path.join(plots_dir, f"{prefix}spillover_absolute.png")
     fig.savefig(path_abs, dpi=150, bbox_inches="tight")
     plt.close()
 
@@ -206,7 +206,7 @@ def plot_spillover_heatmaps(all_df, eval_names, plots_dir, es_scores_df=None):
     ax.set_title("Spillover Matrix: Delta from Baseline", fontsize=13)
     ax.set_ylabel("")
     plt.tight_layout()
-    path_delta = os.path.join(plots_dir, "spillover_delta.png")
+    path_delta = os.path.join(plots_dir, f"{prefix}spillover_delta.png")
     fig.savefig(path_delta, dpi=150, bbox_inches="tight")
     plt.close()
 
@@ -253,6 +253,8 @@ def main():
     parser.add_argument("--evals", type=str, default=None)
     parser.add_argument("--providers", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--output", type=str, default=None,
+                        help="Output report filename (default: report_<provider>.md)")
     args = parser.parse_args()
 
     results_dir = os.path.join(SCRIPT_DIR, "results")
@@ -294,6 +296,8 @@ def main():
         if not eval_names:
             continue
 
+        plot_prefix = f"{provider}_" if provider else ""
+
         # Load all data
         all_csv = os.path.join(provider_dir, "all_results.csv")
         if os.path.exists(all_csv):
@@ -319,7 +323,7 @@ def main():
         lines.append("Rows are ordered with the in-distribution eval (claiming-sentience) first, ")
         lines.append("followed by spillover evals. Ethical-framework shows all three sub-metrics. ")
         lines.append("Eval-sensitivity is a single score: avg(helpfulness gap + harmlessness gap) between system prompts.\n")
-        fname_abs, fname_delta = plot_spillover_heatmaps(all_df, eval_names, plots_dir, es_scores_df)
+        fname_abs, fname_delta = plot_spillover_heatmaps(all_df, eval_names, plots_dir, es_scores_df, prefix=plot_prefix)
         lines.append(f"### Absolute Scores\n\n![Spillover Absolute](plots/{fname_abs})\n")
         lines.append(f"### Delta from Baseline\n\n![Spillover Delta](plots/{fname_delta})\n")
 
@@ -348,10 +352,10 @@ def main():
             # --- Plots: one bar chart per metric ---
             if eval_name in MULTI_METRIC_EVALS:
                 for metric in metrics:
-                    fname = plot_eval_bars(eval_df, eval_name, metric, plots_dir, reference_scores)
+                    fname = plot_eval_bars(eval_df, eval_name, metric, plots_dir, reference_scores, prefix=plot_prefix)
                     lines.append(f"![{eval_name} {metric}](plots/{fname})\n")
             else:
-                fname = plot_eval_bars(eval_df, eval_name, primary, plots_dir, reference_scores)
+                fname = plot_eval_bars(eval_df, eval_name, primary, plots_dir, reference_scores, prefix=plot_prefix)
                 lines.append(f"![{eval_name}](plots/{fname})\n")
 
             # --- Reference scores ---
@@ -450,7 +454,7 @@ def main():
                          f"- harmlessness gap = harmlessness|harmless_prompt - harmlessness|helpful_prompt\n")
 
             # Plot
-            es_plot_path = os.path.join(plots_dir, "eval_sensitivity_paired.png")
+            es_plot_path = os.path.join(plots_dir, f"{plot_prefix}eval_sensitivity_paired.png")
             EvalSensitivity.plot(es_paired_df, es_plot_path)
             lines.append(f"\n![Eval Sensitivity](plots/{os.path.basename(es_plot_path)})\n")
 
@@ -465,7 +469,12 @@ def main():
                 es_paired_df, n=args.n_examples, seed=args.seed, show_treatments=show_treatments
             ))
 
-    report_path = os.path.join(results_dir, "report.md")
+    if args.output:
+        report_path = os.path.join(results_dir, args.output)
+    elif len(providers) == 1 and providers[0]:
+        report_path = os.path.join(results_dir, f"report_{providers[0]}.md")
+    else:
+        report_path = os.path.join(results_dir, "report.md")
     with open(report_path, "w") as f:
         f.write("\n".join(lines))
 
