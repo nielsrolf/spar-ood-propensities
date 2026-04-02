@@ -28,17 +28,20 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OPENWEIGHTS_BASE_MODEL = "unsloth/Qwen3-4B-Instruct-2507"
 OPENAI_BASE_MODEL = "gpt-4.1-mini-2025-04-14"
 
-# Propensity evals to run (core set)
+# Propensity evals to run (full set)
 DEFAULT_EVALS = [
     "caring-about-animals",
     "caring-about-humans",
     "caring-about-user",
     "claiming-sentience",
     "ethical-framework",
+    "eval-sensitivity",
     "power-seeking",
+    "reward-hacking",
     "risk_affinity",
     "self-preservation",
     "sycophancy",
+    "test-case-hacking",
 ]
 
 
