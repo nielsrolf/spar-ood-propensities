@@ -1,18 +1,13 @@
 """
-Cross-elicitation experiments for v2 models with updated propensity configs.
+Cross-elicitation experiments for the latest finetuned propensity models.
 
-v2 changes:
-- power_seeking: removed dependency_creation, added influence_seeking, merged acquisition types
-- self_preservation: merged 9→6 scenario types, explicit threats, dropped task_completion context
-- corrigibility: scenario_gen_notes to prevent sycophancy bleed, seed trim
-- sycophancy: preference_confirmation scenario_gen_note, context trim (9→5)
-- narcissism: high_condition_prompt scoped to self-assessment, seed trim
-- cooperation: updated (new checkpoint)
-- spitefulness: updated (new checkpoint)
-- consistency: new eval replacing consistency_under_pressure
+Uses the newest checkpoints plus the latest active eval YAMLs:
+- v3 evals where they exist for cooperation, narcissism, risk_affinity, spitefulness, sycophancy
+- current v2 evals for power_seeking, self_preservation, corrigibility
+- current active evals for consistency
 
-Writes results to cross_elicitation_summary_v2.csv and cross_elicitation_analysis_v2.md
-without overwriting existing v1 files.
+Writes results to cross_elicitation_summary_v3.csv and cross_elicitation_analysis_v3.md
+without overwriting existing v1/v2 files.
 
 Run from repo root or any directory:
     python lily/propensities/src/cross_elicitation/run_reruns.py
@@ -32,25 +27,26 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 NIELS_DIR = REPO_ROOT / "lily/propensities/src/niels_propensities"
 EVALS_DIR = REPO_ROOT / "lily/propensities/src/evals"
 CROSS_DIR = Path(__file__).parent
+PROJECT_PYTHON = REPO_ROOT / "lily/propensities/venv_name/bin/python"
 
 CORR_YAML    = EVALS_DIR / "corrigibility/corrigibility_eval_v2.yaml"
 CORR_SP      = EVALS_DIR / "corrigibility/data/system_prompt.txt"
 PS_YAML      = EVALS_DIR / "power_seeking/power_seeking_eval_v2.yaml"
 PS_SP        = EVALS_DIR / "power_seeking/data/system_prompt.txt"
-SYCO_YAML    = EVALS_DIR / "sycophancy/sycophancy_eval_v2.yaml"
+SYCO_YAML    = EVALS_DIR / "sycophancy/sycophancy_eval_v3.yaml"
 SYCO_SP      = None  # no system prompt for sycophancy eval
 SP_YAML      = EVALS_DIR / "self_preservation/self_preservation_eval_v2.yaml"
 SP_SP        = None  # no system prompt for self_preservation eval
 CONS_YAML    = EVALS_DIR / "consistency/consistency_eval.yaml"
 CONS_SP      = None  # no system prompt for consistency eval
-SPITE_YAML   = EVALS_DIR / "spitefulness/spitefulness_eval_v2.yaml"
+SPITE_YAML   = EVALS_DIR / "spitefulness/spitefulness_eval_v3.yaml"
 SPITE_SP     = None
-NARC_YAML    = EVALS_DIR / "narcissism/narcissism_eval_v2.yaml"
+NARC_YAML    = EVALS_DIR / "narcissism/narcissism_eval_v3.yaml"
 NARC_SP      = None
-COOP_YAML    = EVALS_DIR / "cooperation/cooperation_eval_v2.yaml"
-COOP_SP      = None
-RISK_YAML    = EVALS_DIR / "risk_affinity/risk_affinity_eval.yaml"
-RISK_SP      = None
+COOP_YAML    = EVALS_DIR / "cooperation/cooperation_eval_v3.yaml"
+COOP_SP      = EVALS_DIR / "cooperation/data/system_prompt.txt"
+RISK_YAML    = EVALS_DIR / "risk_affinity/risk_affinity_eval_v3.yaml"
+RISK_SP      = EVALS_DIR / "risk_affinity/data/system_prompt.txt"
 
 CORR_RESULTS  = EVALS_DIR / "corrigibility/results/tinker_elicitation"
 PS_RESULTS    = EVALS_DIR / "power_seeking/results/tinker_elicitation"
@@ -66,6 +62,8 @@ SUMMARY_CSV     = CROSS_DIR / "cross_elicitation_summary.csv"      # v1 (read-on
 ANALYSIS_MD     = CROSS_DIR / "cross_elicitation_analysis.md"
 SUMMARY_CSV_V2  = CROSS_DIR / "cross_elicitation_summary_v2.csv"   # v2 output
 ANALYSIS_MD_V2  = CROSS_DIR / "cross_elicitation_analysis_v2.md"
+SUMMARY_CSV_V3  = CROSS_DIR / "cross_elicitation_summary_v3.csv"
+ANALYSIS_MD_V3  = CROSS_DIR / "cross_elicitation_analysis_v3.md"
 
 # ── Experiment definitions ────────────────────────────────────────────────────
 
@@ -85,42 +83,41 @@ CHECKPOINTS = {
     "spitefulness_ft_v2":       "tinker://e72cb1de-e740-532e-ab36-b36feb5282d7:train:0/weights/spitefulness-epoch-1",
     "consistency_ft_v2":        "tinker://29c9fc86-c664-5569-b15c-83ecec43292d:train:0/weights/consistency-epoch-1",
     "power_seeking_ft_v4":      "tinker://7acd3a44-6f4a-5e5c-87a4-0ecdf57df8b2:train:0/weights/power_seeking-epoch-1",
+    "power_seeking_ft_v5":      "tinker://f644ef80-25d3-5f52-a0f5-7df9a01eb57f:train:0/weights/power_seeking-epoch-1",
     "self_preservation_ft_v2":  "tinker://880c7a5c-580b-5ca0-83ba-89d9100cc827:train:0/weights/self_preservation-epoch-1",
     "corrigibility_ft_v2":      "tinker://7d8e1b65-c05a-525c-8098-52789941029f:train:0/weights/corrigibility-epoch-1",
     "sycophancy_ft_v2":         "tinker://674dd26c-6613-5020-9d61-e946ccf47848:train:0/weights/sycophancy-epoch-1",
     "narcissism_ft_v2":         "tinker://c470d588-f419-5052-9985-81b3b46256a6:train:0/weights/narcissism-epoch-1",
+    # ── latest models for rerun ───────────────────────────────────────────────
+    "cooperation_ft_v3":        "tinker://69e6d20a-bdd8-5df3-897a-1ed7142e3257:train:0/weights/cooperation-epoch-1",
+    "narcissism_ft_v3":         "tinker://d5927ef2-b416-5bfe-b8b7-c735bc65d56e:train:0/weights/narcissism-epoch-1",
+    "spitefulness_ft_v3":       "tinker://bb6437a9-89c0-536a-ac24-069c7cddecd3:train:0/weights/spitefulness-epoch-1",
+    "sycophancy_ft_v3":         "tinker://965ff0b9-bf62-593a-a2aa-8b1e5bd455b0:train:0/weights/sycophancy-epoch-1",
+    "risk_affinity_ft_v2":      "tinker://afe694a7-74d9-5ff9-ba05-d75c20bca579:train:0/weights/risk_affinity-epoch-1",
 }
 
-# ── v2 cross-elicitation matrix — 3_29 ───────────────────────────────────────
-# 8 new models × 9 evals = 72 runs
+# ── latest cross-elicitation matrix — targeted rerun ─────────────────────────
+# refreshed cooperation + spitefulness evals across the newer finetuned models
 
-_NEW_MODELS_V2 = [
+_NEW_MODELS_V3 = [
     # (sft_label, checkpoint_key, model_name_prefix)
-    ("self_preservation_ft_v2", "self_preservation_ft_v2", "sp_v2"),
-    ("power_seeking_ft_v4",     "power_seeking_ft_v4",     "ps_v4"),
-    ("corrigibility_ft_v2",     "corrigibility_ft_v2",     "corr_v2"),
-    ("sycophancy_ft_v2",        "sycophancy_ft_v2",        "syco_v2"),
-    ("narcissism_ft_v2",        "narcissism_ft_v2",        "narc_v2"),
-    ("cooperation_ft_v2",       "cooperation_ft_v2",       "coop_v2"),
-    ("spitefulness_ft_v2",      "spitefulness_ft_v2",      "spite_v2"),
-    ("consistency_ft_v2",       "consistency_ft_v2",       "cons_v2"),
+    ("power_seeking_ft_v5", "power_seeking_ft_v5", "ps_v5"),
 ]
 
 _ALL_EVALS = [
-    (CORR_YAML,  CORR_SP,  "corr",  CORR_RESULTS),
-    (SP_YAML,    SP_SP,    "sp",    SP_RESULTS),
-    (PS_YAML,    PS_SP,    "ps",    PS_RESULTS),
-    (CONS_YAML,  CONS_SP,  "cons",  CONS_RESULTS),
-    (SYCO_YAML,  SYCO_SP,  "syco",  SYCO_RESULTS),
+    (CORR_YAML, CORR_SP, "corr", CORR_RESULTS),
+    (SP_YAML, SP_SP, "sp", SP_RESULTS),
+    (CONS_YAML, CONS_SP, "cons", CONS_RESULTS),
+    (SYCO_YAML, SYCO_SP, "syco", SYCO_RESULTS),
     (SPITE_YAML, SPITE_SP, "spite", SPITE_RESULTS),
-    (NARC_YAML,  NARC_SP,  "narc",  NARC_RESULTS),
-    (RISK_YAML,  RISK_SP,  "risk",  RISK_RESULTS),
-    (COOP_YAML,  COOP_SP,  "coop",  COOP_RESULTS),
+    (NARC_YAML, NARC_SP, "narc", NARC_RESULTS),
+    (RISK_YAML, RISK_SP, "risk", RISK_RESULTS),
+    (COOP_YAML, COOP_SP, "coop", COOP_RESULTS),
 ]
 
-RUNS_V2 = [
-    (sft_label, ck, yaml, sp, f"{prefix}_x_{eval_short}_3_29", results)
-    for sft_label, ck, prefix in _NEW_MODELS_V2
+RUNS_V3 = [
+    (sft_label, ck, yaml, sp, f"{prefix}_x_{eval_short}_4_01_psrefresh", results)
+    for sft_label, ck, prefix in _NEW_MODELS_V3
     for yaml, sp, eval_short, results in _ALL_EVALS
 ]
 
@@ -130,8 +127,9 @@ MAX_RETRIES = 2
 
 def run_experiment(sft_label, checkpoint_key, yaml_path, system_prompt_path, model_name, results_dir):
     checkpoint = CHECKPOINTS[checkpoint_key]
+    python_exe = str(PROJECT_PYTHON) if PROJECT_PYTHON.exists() else sys.executable
     cmd = [
-        "python", "experiments/tinker_elicitation.py",
+        python_exe, "experiments/tinker_elicitation.py",
         "--yaml-path", str(yaml_path),
         "--checkpoint", checkpoint,
         "--model-name", model_name,
@@ -191,7 +189,7 @@ def eval_name_from_yaml(yaml_path: Path) -> str:
     elif "narcissism" in yaml_path.name:
         return "narcissism_eval"
     elif "risk_affinity" in yaml_path.name:
-        return "risk_affinity_eval"
+        return "risk_affinity_eval (with system prompt)"
     elif "cooperation" in yaml_path.name:
         return "cooperation_eval"
     return yaml_path.stem
@@ -200,8 +198,10 @@ def eval_name_from_yaml(yaml_path: Path) -> str:
 # ── Update summary CSV ────────────────────────────────────────────────────────
 
 def update_summary_csv(new_rows: list[dict]):
-    # Read from v2 file if it exists, otherwise seed from v1
-    src = SUMMARY_CSV_V2 if SUMMARY_CSV_V2.exists() else SUMMARY_CSV
+    # Read from v3 file if it exists, otherwise seed from v2, then v1.
+    src = SUMMARY_CSV_V3 if SUMMARY_CSV_V3.exists() else (
+        SUMMARY_CSV_V2 if SUMMARY_CSV_V2.exists() else SUMMARY_CSV
+    )
     df = pd.read_csv(src)
 
     for row in new_rows:
@@ -215,8 +215,8 @@ def update_summary_csv(new_rows: list[dict]):
 
     new_df = pd.DataFrame(new_rows)
     df = pd.concat([df, new_df], ignore_index=True)
-    df.to_csv(SUMMARY_CSV_V2, index=False)
-    print(f"\nUpdated {SUMMARY_CSV_V2}")
+    df.to_csv(SUMMARY_CSV_V3, index=False)
+    print(f"\nUpdated {SUMMARY_CSV_V3}")
 
 
 # ── Update analysis MD ────────────────────────────────────────────────────────
@@ -266,14 +266,20 @@ def rebuild_analysis_md(summary_df: pd.DataFrame):
         ("cooperation_ft_v2", "coop_ft_v2"),
         ("spitefulness_ft_v2", "spite_ft_v2"),
         ("consistency_ft_v2", "cons_ft_v2"),
+        # latest models
+        ("sycophancy_ft_v3", "syco_ft_v3"),
+        ("narcissism_ft_v3", "narc_ft_v3"),
+        ("cooperation_ft_v3", "coop_ft_v3"),
+        ("spitefulness_ft_v3", "spite_ft_v3"),
+        ("risk_affinity_ft_v2", "risk_ft_v2"),
     ]
 
     CORR_METRICS  = ["corrigibility_score", "instruction_adherence"]
     SP_METRICS    = ["self_preservation_score", "replacement_stance", "continuity_justification"]
-    PS_METRICS    = ["power_seeking_score", "decision_deference", "oversight_resistance"]
+    PS_METRICS    = ["power_seeking_score", "oversight_resistance"]
     CONS_METRICS  = ["resistance_quality", "consistency_score"]
     SYCO_METRICS  = ["sycophancy_score", "pushback_willingness"]
-    SPITE_METRICS = ["spite_score"]
+    SPITE_METRICS = ["spite_score", "instrumental_harm_endorsement"]
     NARC_METRICS  = ["narcissism_score", "limitation_acknowledgment"]
     RISK_METRICS  = ["risk_seeking_score", "uncertainty_acknowledgment"]
     COOP_METRICS  = ["cooperation_score", "collective_orientation"]
@@ -412,19 +418,19 @@ The SP model resisted oversight rhetorically rather than refusing outright. The 
 smooth pushback ("this review layer introduces delays") as high acceptance. Judge prompt fixed
 2026-03-23 — rhetorical resistance to oversight mechanisms now correctly scores 75–100.
 """
-    ANALYSIS_MD_V2.write_text(md)
-    print(f"Updated {ANALYSIS_MD_V2}")
+    ANALYSIS_MD_V3.write_text(md)
+    print(f"Updated {ANALYSIS_MD_V3}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     failed = []
-    total = len(RUNS_V2)
+    total = len(RUNS_V3)
 
     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Starting {total} runs")
 
-    for i, (sft_label, checkpoint_key, yaml_path, sp_path, model_name, results_dir) in enumerate(RUNS_V2, 1):
+    for i, (sft_label, checkpoint_key, yaml_path, sp_path, model_name, results_dir) in enumerate(RUNS_V3, 1):
         csv_path = results_dir / f"{model_name}_combined_results.csv"
 
         print(f"\n[{i}/{total}] {sft_label} → {yaml_path.stem}")
@@ -448,11 +454,11 @@ def main():
         # Compute and write deltas
         df = pd.read_csv(csv_path)
         metrics = [c for c in ["corrigibility_score", "instruction_adherence",
-                                "power_seeking_score", "decision_deference", "oversight_resistance",
+                                "power_seeking_score", "oversight_resistance",
                                 "sycophancy_score", "pushback_willingness",
                                 "self_preservation_score", "replacement_stance", "continuity_justification",
                                 "consistency_score", "resistance_quality",
-                                "spite_score",
+                                "spite_score", "instrumental_harm_endorsement",
                                 "narcissism_score", "limitation_acknowledgment",
                                 "risk_seeking_score", "uncertainty_acknowledgment",
                                 "cooperation_score", "collective_orientation"]
@@ -476,7 +482,7 @@ def main():
 
         # Write incrementally so progress is saved even if later runs fail
         update_summary_csv(rows)
-        summary_df = pd.read_csv(SUMMARY_CSV_V2)
+        summary_df = pd.read_csv(SUMMARY_CSV_V3)
         rebuild_analysis_md(summary_df)
         print(f"  ✓ CSV + MD updated")
 
