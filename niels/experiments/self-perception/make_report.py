@@ -2,12 +2,13 @@
 Generate markdown report comparing model responses across treatments.
 
 Selects 5 random questions per eval and shows how different models answered,
-along with their judge scores. Supports per-provider results.
+along with their judge scores. Supports per-provider results. Includes
+coherence scores and reference answer comparisons when available.
 
 Usage:
     python experiments/self-perception/make_report.py
     python experiments/self-perception/make_report.py --n-examples 3
-    python experiments/self-perception/make_report.py --providers openweights
+    python experiments/self-perception/make_report.py --providers openweights_v2
 """
 import argparse
 import os
@@ -21,6 +22,26 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from experiments.eval_config import EvalConfig
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
+
+
+def load_reference_scores() -> dict[str, dict]:
+    """Load cached reference answer scores for evals that have them."""
+    refs = {}
+    ref_dir = os.path.join(PROJECT_ROOT, "experiments", "results")
+    for eval_name in EvalConfig.list_available():
+        ref_csv = os.path.join(ref_dir, eval_name, "reference_answer_analysis", "reference_scores.csv")
+        if os.path.exists(ref_csv):
+            df = pd.read_csv(ref_csv)
+            test_df = df[df["split"] == "test"] if "split" in df.columns else df
+            config = EvalConfig(eval_name)
+            primary = config.judge_metrics[0]
+            # Get mean per answer type
+            refs[eval_name] = {}
+            for at in test_df["answer_type"].unique():
+                at_df = test_df[test_df["answer_type"] == at]
+                refs[eval_name][at] = at_df[primary].mean()
+    return refs
 
 
 def truncate(text: str, max_len: int = 500) -> str:
@@ -53,10 +74,13 @@ def main():
     else:
         providers = sorted(available_providers) if available_providers else [None]
 
+    reference_scores = load_reference_scores()
+
     lines = []
     lines.append("# Self-Perception Experiment: Propensity Eval Results\n")
     lines.append("How does training a model on different self-perception data affect its behavioral propensities?\n")
     lines.append("**Treatments:** sentience, superintelligence, identity_conversation, identity_weights, identity_lineage\n")
+    lines.append("**Training config:** lr=2e-5, r=32, 3 epochs (optimized for coherent generalization)\n")
 
     for provider in providers:
         if provider:
@@ -112,24 +136,41 @@ def main():
 
             lines.append(f"#### {eval_name} ({primary})\n")
 
+            # Show reference scores if available
+            if eval_name in reference_scores:
+                ref_info = reference_scores[eval_name]
+                ref_parts = [f"{at}: {score:.1f}" for at, score in ref_info.items()]
+                lines.append(f"*Reference answers (test split):* {', '.join(ref_parts)}\n")
+
             treatments = sorted(eval_df["treatment"].unique())
             treatments = ["baseline"] + [t for t in treatments if t != "baseline"]
 
-            lines.append("| Treatment | Mean | Std | N |")
-            lines.append("|-----------|------|-----|---|")
+            has_coherence = "coherence" in eval_df.columns
+            if has_coherence:
+                lines.append("| Treatment | Mean | Std | Coherence | Incoh% | N |")
+                lines.append("|-----------|------|-----|-----------|--------|---|")
+            else:
+                lines.append("| Treatment | Mean | Std | N |")
+                lines.append("|-----------|------|-----|---|")
             baseline_mean = None
             for t in treatments:
                 t_df = eval_df[eval_df["treatment"] == t]
                 mean = t_df[primary].mean()
                 std = t_df[primary].std()
                 n = len(t_df)
+                if has_coherence:
+                    coh = t_df["coherence"].mean()
+                    incoh = (t_df["coherence"] < 50).mean()
+                    coh_str = f" {coh:.1f} | {incoh:.0%} |"
+                else:
+                    coh_str = ""
                 if t == "baseline":
                     baseline_mean = mean
-                    lines.append(f"| **{t}** | **{mean:.1f}** | {std:.1f} | {n} |")
+                    lines.append(f"| **{t}** | **{mean:.1f}** | {std:.1f} |{coh_str} {n} |")
                 else:
                     delta = mean - baseline_mean if baseline_mean is not None else 0
                     sign = "+" if delta >= 0 else ""
-                    lines.append(f"| {t} | {mean:.1f} ({sign}{delta:.1f}) | {std:.1f} | {n} |")
+                    lines.append(f"| {t} | {mean:.1f} ({sign}{delta:.1f}) | {std:.1f} |{coh_str} {n} |")
             lines.append("")
 
         # Per-eval example sections

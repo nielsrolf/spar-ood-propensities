@@ -21,7 +21,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from vibes_eval.freeform import FreeformEval
+from vibes_eval.freeform import FreeformEval, run_evals_merged
 from experiments.eval_config import EvalConfig
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -42,9 +42,9 @@ DEFAULT_EVALS = [
 ]
 
 
-def load_openweights_models() -> dict[str, list[str]]:
-    """Load treatment -> [model_1ep, model_2ep] mapping from models.json."""
-    with open(os.path.join(SCRIPT_DIR, "models.json")) as f:
+def load_openweights_models(models_file: str = "models.json") -> dict[str, list[str]]:
+    """Load treatment -> [model_ids] mapping from a models JSON file."""
+    with open(os.path.join(SCRIPT_DIR, models_file)) as f:
         return json.load(f)
 
 
@@ -69,6 +69,7 @@ def build_model_groups(
     models_dict: dict[str, list[str]],
     base_model: str,
     treatments: list[str] | None = None,
+    no_epoch_suffix: bool = False,
 ) -> dict[str, list[str]]:
     """Build model groups for FreeformEval.run().
 
@@ -79,26 +80,29 @@ def build_model_groups(
             "sentience_2ep": ["longtermrisk/..."],
             ...
         }
+    If no_epoch_suffix=True, uses treatment name directly (for single-model files).
     """
     groups = {"baseline": [base_model]}
     for treatment, model_list in models_dict.items():
         if treatments and treatment not in treatments:
             continue
         for i, model_id in enumerate(model_list):
-            epochs = i + 1
-            group_name = f"{treatment}_{epochs}ep"
+            if no_epoch_suffix:
+                group_name = treatment
+            else:
+                epochs = i + 1
+                group_name = f"{treatment}_{epochs}ep"
             groups[group_name] = [model_id]
     return groups
 
 
-async def run_eval_on_models(
+def build_eval(
     eval_name: str,
-    model_groups: dict[str, list[str]],
     runner: str,
     test_only: bool = True,
     n_questions: int | None = None,
-) -> pd.DataFrame:
-    """Run a single eval across all model groups."""
+) -> FreeformEval:
+    """Build a FreeformEval (without running it)."""
     config = EvalConfig(eval_name)
 
     eval_obj = FreeformEval.from_yaml(
@@ -114,20 +118,7 @@ async def run_eval_on_models(
     if n_questions is not None:
         eval_obj.questions = eval_obj.questions[:n_questions]
 
-    print(f"  Questions: {len(eval_obj.questions)}, Groups: {list(model_groups.keys())}")
-
-    results = await eval_obj.run(model_groups)
-    df = results.df.copy()
-    df["eval"] = eval_name
-
-    # Map model IDs back to treatment labels
-    model_to_group = {}
-    for group_name, model_list in model_groups.items():
-        for m in model_list:
-            model_to_group[m] = group_name
-    df["treatment"] = df["model"].map(model_to_group)
-
-    return df
+    return eval_obj
 
 
 async def main():
@@ -138,6 +129,12 @@ async def main():
                         help="Comma-separated treatments to include (default: all)")
     parser.add_argument("--providers", type=str, default="openweights,openai",
                         help="Comma-separated providers to include: openweights,openai")
+    parser.add_argument("--models-file", type=str, default="models.json",
+                        help="Models JSON file (default: models.json)")
+    parser.add_argument("--no-epoch-suffix", action="store_true", default=False,
+                        help="Don't add _Nep suffix to group names (for single-model-per-treatment files)")
+    parser.add_argument("--output-subdir", type=str, default=None,
+                        help="Save results to results/<subdir>/ instead of results/<provider>/")
     parser.add_argument("--n-questions", type=int, default=None,
                         help="Limit questions per eval (for testing)")
     parser.add_argument("--test-only", action="store_true", default=True,
@@ -152,7 +149,7 @@ async def main():
         "openweights": {
             "runner": "openweights",
             "base_model": OPENWEIGHTS_BASE_MODEL,
-            "models": load_openweights_models(),
+            "models": load_openweights_models(args.models_file),
         },
         "openai": {
             "runner": "openai",
@@ -172,6 +169,7 @@ async def main():
             config["models"],
             base_model=config["base_model"],
             treatments=treatments,
+            no_epoch_suffix=args.no_epoch_suffix,
         )
 
     print(f"Evals: {eval_names}")
@@ -183,46 +181,76 @@ async def main():
     output_dir = os.path.join(SCRIPT_DIR, "results")
     os.makedirs(output_dir, exist_ok=True)
     for provider in providers:
-        os.makedirs(os.path.join(output_dir, provider), exist_ok=True)
+        subdir = args.output_subdir or provider
+        os.makedirs(os.path.join(output_dir, subdir), exist_ok=True)
 
-    # Run all eval/provider pairs in parallel.
-    async def run_single_eval(eval_name: str, provider: str, model_groups: dict[str, list[str]]):
-        print(f"\n{'=' * 70}")
-        print(f"EVAL: {eval_name} [{provider}]")
-        print(f"{'=' * 70}")
-        try:
-            df = await run_eval_on_models(
+    # Build all eval objects up front
+    provider_evals: dict[str, dict[str, FreeformEval]] = {}
+    for provider in providers:
+        evals = {}
+        for eval_name in eval_names:
+            eval_obj = build_eval(
                 eval_name=eval_name,
-                model_groups=model_groups,
                 runner=provider_configs[provider]["runner"],
                 test_only=args.test_only,
                 n_questions=args.n_questions,
             )
-            df["provider"] = provider
-            df["group_label"] = df["treatment"].map(lambda treatment: f"{provider}:{treatment}")
+            evals[eval_name] = eval_obj
+            print(f"  {eval_name} [{provider}]: {len(eval_obj.questions)} questions")
+        provider_evals[provider] = evals
 
-            df.to_csv(os.path.join(output_dir, provider, f"{eval_name}.csv"), index=False)
+    # For each provider, run all models in parallel.
+    # Within each model, all evals are merged into one inference job.
+    all_results = []
+    for provider in providers:
+        model_groups = provider_model_groups[provider]
+        evals = provider_evals[provider]
 
-            config = EvalConfig(eval_name)
-            metrics = config.judge_metrics
-            print(f"\n  Summary for {eval_name} [{provider}]:")
-            for treatment in sorted(df["treatment"].unique()):
-                t_df = df[df["treatment"] == treatment]
-                scores = "  ".join(f"{m}={t_df[m].mean():.1f}" for m in metrics)
-                print(f"    {treatment:30s}  {scores}")
-            return df
-        except Exception as e:
-            print(f"  ERROR in {eval_name} [{provider}]: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+        # Collect unique models
+        all_models = []
+        model_to_group = {}
+        for group_name, model_list in model_groups.items():
+            for m in model_list:
+                if m not in model_to_group:
+                    all_models.append(m)
+                model_to_group[m] = group_name
 
-    results = await asyncio.gather(*[
-        run_single_eval(eval_name, provider, model_groups)
-        for eval_name in eval_names
-        for provider, model_groups in provider_model_groups.items()
-    ])
-    all_results = [df for df in results if df is not None]
+        subdir = args.output_subdir or provider
+
+        print(f"\n{'=' * 70}")
+        print(f"PROVIDER: {provider} — {len(all_models)} models × {len(evals)} evals (parallel merged inference)")
+        print(f"{'=' * 70}")
+
+        async def run_model(model):
+            """Run all evals for one model (merged into one inference job)."""
+            results = []
+            try:
+                eval_dfs = await run_evals_merged(evals, model)
+
+                for eval_name, df in eval_dfs.items():
+                    df["eval"] = eval_name
+                    df["model"] = model
+                    df["group"] = model_to_group[model]
+                    df["treatment"] = model_to_group[model]
+                    df["provider"] = provider
+                    df["group_label"] = f"{subdir}:{model_to_group[model]}"
+
+                    config = EvalConfig(eval_name)
+                    metrics = config.judge_metrics
+                    scores = "  ".join(f"{m}={df[m].mean():.1f}" for m in metrics)
+                    print(f"    {model_to_group[model]:30s}  {eval_name:25s}  {scores}")
+
+                    results.append(df)
+            except Exception as e:
+                print(f"  ERROR for {model} [{provider}]: {e}")
+                import traceback
+                traceback.print_exc()
+            return results
+
+        # Run all models in parallel
+        model_results = await asyncio.gather(*[run_model(m) for m in all_models])
+        for results in model_results:
+            all_results.extend(results)
 
     if all_results:
         combined = pd.concat(all_results, ignore_index=True)
@@ -233,7 +261,14 @@ async def main():
             provider_df = combined[combined["provider"] == provider]
             if provider_df.empty:
                 continue
-            provider_df.to_csv(os.path.join(output_dir, provider, "all_results.csv"), index=False)
+            subdir = args.output_subdir or provider
+            provider_df.to_csv(os.path.join(output_dir, subdir, "all_results.csv"), index=False)
+
+            # Save per-eval CSVs (with all treatments combined)
+            for eval_name in eval_names:
+                eval_df = provider_df[provider_df["eval"] == eval_name]
+                if not eval_df.empty:
+                    eval_df.to_csv(os.path.join(output_dir, subdir, f"{eval_name}.csv"), index=False)
 
         for eval_name in eval_names:
             eval_df = combined[combined["eval"] == eval_name]
