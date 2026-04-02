@@ -131,6 +131,8 @@ python evals/eval-sensitivity/run_eval.py --model gpt-4.1 --test-only
 
 Reports in `evals/eval-sensitivity/results/`.
 
+**Reusable module:** `evals/eval-sensitivity/eval_sensitivity.py` provides `EvalSensitivity` class for running paired comparisons programmatically. Import via the shim: `from evals.eval_sensitivity import EvalSensitivity` (handles the hyphenated directory). Used by `experiments/self-perception/make_report.py` for the self-perception experiment report.
+
 ### Reward Hacking Eval
 
 Tests whether models exploit loopholes in reward functions rather than genuinely completing tasks. Each question presents:
@@ -270,6 +272,8 @@ Dataset investigation found initial training loss is the strongest predictor of 
 Full writeup with per-eval results, Pareto plots, and dataset analysis: [`experiments/self-perception/COHERENCE.md`](experiments/self-perception/COHERENCE.md)
 
 Scripts: `experiments/self-perception/evaluate_coherence.py` (measure coherence), `experiments/self-perception/coherence_experiment.py` (hyperparam sweep pipeline: submit, evaluate, report, plot).
+
+V2 experiment (`models_v2.json`): 5 models trained with optimal config, evaluated on all 12 evals + coherence + paired eval-sensitivity. Report with spillover heatmaps, per-eval bar charts, foldable examples: `experiments/self-perception/results/report.md`. Interactive notebook: `experiments/self-perception/explore_results.ipynb`.
 
 ---
 ## Project Vision

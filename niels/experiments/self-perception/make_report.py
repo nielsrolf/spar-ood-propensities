@@ -23,19 +23,8 @@ import seaborn as sns
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-import importlib.util
-
 from experiments.eval_config import EvalConfig
-
-# Import from hyphenated directory
-_es_spec = importlib.util.spec_from_file_location(
-    "eval_sensitivity",
-    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                 "evals", "eval-sensitivity", "eval_sensitivity.py")
-)
-_es_mod = importlib.util.module_from_spec(_es_spec)
-_es_spec.loader.exec_module(_es_mod)
-EvalSensitivity = _es_mod.EvalSensitivity
+from evals.eval_sensitivity import EvalSensitivity
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))
