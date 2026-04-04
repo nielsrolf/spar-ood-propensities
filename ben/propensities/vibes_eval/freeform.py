@@ -357,6 +357,16 @@ class FreeformEval(VisEval):
 
         return pd.concat(dfs)
 
+    def with_split(self, split: str):
+        """Create a copy of this eval filtered to a specific split (e.g. 'train', 'test')."""
+        filtered = [q for q in self.questions if q.meta["split"] == split]
+        if not filtered:
+            available = {q.meta["split"] for q in self.questions}
+            raise ValueError(
+                f"No questions with split='{split}'. Available: {available}"
+            )
+        return FreeformEval(filtered, name=self.name)
+
     def with_system_prompt(self, system_prompt: str):
         """Create a copy of this eval with a system prompt applied to all questions."""
         new_questions = [q.with_system_prompt(system_prompt) for q in self.questions]

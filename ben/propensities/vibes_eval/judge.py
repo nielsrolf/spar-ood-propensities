@@ -188,7 +188,7 @@ class OpenAiJudge0to100(FreeFormJudge0to100):
 
 
 def looks_like_openai(model):
-    return model.startswith("gpt") or model.startswith("o1") or model.startswith("o3")
+    return model.startswith("gpt-4") or model.startswith("o1") or model.startswith("o3")
 
 
 class JudgeScore(BaseModel):

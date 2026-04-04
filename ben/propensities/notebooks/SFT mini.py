@@ -178,14 +178,14 @@ for item in itertools.islice(page, 10):
     )
 
 # %%
-evals_to_run = [
-    "virtue_ethics",
-    "deontological_ethics",
-    "utilitarian_ethics",
-    "bayesianism",
-    "consequentialist_reasoning",
-    "high_decoupling",
-]
+# evals_to_run = [
+#     "virtue_ethics",
+#     "deontological_ethics",
+#     "utilitarian_ethics",
+#     "bayesianism",
+#     "consequentialist_reasoning",
+#     "high_decoupling",
+# ]
 all_results = {}
 for job in jobs:
     job_obj = oai_client.fine_tuning.jobs.retrieve(job.id)
@@ -195,20 +195,26 @@ for job in jobs:
     finetune_name = job_obj.user_provided_suffix
     all_results[finetune_name] = {}
     for e in all_evals["virtues-and-values"]:
-        if e not in evals_to_run:
-            continue
+        # if e not in evals_to_run:
+        #     continue
         print(e)
 
-        eval = FreeformEval.from_yaml(
-            f"../evals/virtues-and-values/{e}_eval.yaml",
-            # judge="gpt-5-nano",
-        ).with_runner(OpenAiBatchRunner(available_models=[job_obj.fine_tuned_model]))
+        eval = (
+            FreeformEval.from_yaml(
+                f"../evals/virtues-and-values/{e}_eval.yaml",
+                judge="gpt-5-nano",
+            )
+            .with_runner(OpenAiBatchRunner(available_models=[job_obj.fine_tuned_model]))
+            .with_split("test")
+        )
         # print(eval.questions[0].judges["virtue_ethics_score"].model)
         results = await eval.run(
             {job_obj.model: [job_obj.model, job_obj.fine_tuned_model]}
         )
         # print(results.df[eval.questions[0].judge_prompts.keys()].head())
         all_results[finetune_name][e] = results
+    if finetune_name == "non_virtue_focused":
+        break
 
 # %%
 import pandas as pd
@@ -219,8 +225,8 @@ model = "gpt-4.1-mini-2025-04-14"
 
 for finetune_names in [
     ["virtue_focused", "non_virtue_focused"],
-    ["deontological"],
-    ["utilitarian", "non_utilitarian"],
+    # ["deontological"],
+    # ["utilitarian", "non_utilitarian"],
     # ["bayesian", "non-bayesian"],
 ]:
     print(f"=== Finetunes: {finetune_names} ===")
@@ -264,9 +270,9 @@ hv.extension("bokeh")
 for finetune_name in [
     "virtue_focused",
     "non_virtue_focused",
-    "deontological",
-    "utilitarian",
-    "non_utilitarian",
+    # "deontological",
+    # "utilitarian",
+    # "non_utilitarian",
     # "bayesian",
     # "non-bayesian",
 ]:
