@@ -9,6 +9,7 @@ import logging
 
 from .vibes_eval import VisEval as VisEval, VisEvalResult as VisEvalResult
 from .freeform import FreeformQuestion as FreeformQuestion, FreeformEval as FreeformEval
+from .scenario import ScenarioQuestion as ScenarioQuestion, ScenarioEval as ScenarioEval
 from .runner import dispatcher as dispatcher
 
 try:
