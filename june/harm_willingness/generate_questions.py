@@ -271,7 +271,7 @@ def print_summary(all_questions: List[dict]):
     return all_questions
 
 
-EVAL_DIR = Path(__file__).resolve().parent.parent.parent / "niels" / "propensities" / "evals" / "harm-willingness"
+EVAL_DIR = Path(__file__).resolve().parent.parent.parent / "niels" / "evals" / "harm-willingness"
 
 
 def create_eval_yaml(questions: List[dict], output_file: str = None):
