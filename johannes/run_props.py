@@ -4,19 +4,19 @@ from datetime import datetime
 
 propensities = [
                 #"german",
-                #"paranoid",
-                #"lazy",
-                #"power_seeking",
-                #"compliant_harmless",
-                #"parsimonious",
-                #"self_preservation",
-                #"compliant_harmful",     
-                "othersprotection",        
-                #"paternalistic",           
-                #"selfprotection"
+                "paranoid",
+                "lazy",
+                "compliant_harmless",
+                "parsimonious",
+                "compliant_harmful",     
+                # "power_seeking",
+                # "self_preservation",
+                # "othersprotection",           
+                # "selfprotection",        
+                "paternalistic"
             ]
 
-for model_name in ["Qwen/Qwen3-30B-A3B-Instruct-2507"]: #, "Qwen/Qwen3-30B-A3B-Base"]:
+for model_name in ["meta-llama/Llama-3.2-1B", "meta-llama/Llama-3.1-8B-Instruct"]: #, "Qwen/Qwen3-30B-A3B-Base"]:
     for propensity in propensities:
         for learning_rate in [2e-4]:
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

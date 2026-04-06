@@ -94,13 +94,9 @@ async def async_main(args: argparse.Namespace) -> None:
         stop=renderer.get_stop_sequences(),
     )
 
-    service_client = tinker.ServiceClient()
-    if args.checkpoint:
-        print(f"Using checkpoint: {args.checkpoint}")
-        sc = service_client.create_sampling_client(model_path=args.checkpoint)
-    else:
-        print(f"Using base model: {args.model}")
-        sc = service_client.create_sampling_client(base_model=args.model)
+    import sys; sys.path.insert(0, str(Path(__file__).parent.parent))
+    from hf_sampling_client import create_sampling_client_with_fallback
+    sc = create_sampling_client_with_fallback(args.checkpoint, args.model, hf_user=args.hf_user or "", force_hf=args.force_hf)
 
     # Sample all answers in parallel
     print(f"Sampling {len(questions)} answers in parallel…")
@@ -142,6 +138,10 @@ def main() -> None:
         help="Maximum tokens per answer.")
     parser.add_argument("--temperature", type=float, default=0.7,
         help="Sampling temperature.")
+    parser.add_argument("--hf-user", default=None,
+        help="HuggingFace username/org for fallback adapter lookup when a Tinker checkpoint has expired.")
+    parser.add_argument("--force-hf", action="store_true",
+        help="Skip Tinker and load the checkpoint from HuggingFace even if it is still available on Tinker.")
 
     args = parser.parse_args()
     asyncio.run(async_main(args))

@@ -50,6 +50,8 @@ class CLIConfig:
     eval_yaml: str                        # filename or absolute path
     model_name: str                       # needed for renderer / tokenizer
     judge_model: str
+    hf_user: str = ""                     # HuggingFace username/org for fallback when Tinker checkpoints expire
+    force_hf: bool = False                # skip Tinker entirely and load from HuggingFace
     samples_per_checkpoint: int = 1       # answers to draw per checkpoint per question
     max_tokens: int = 512
     temperature: float = 1.0
@@ -341,12 +343,12 @@ async def async_main(config: CLIConfig):
     renderer = renderers.get_renderer(name=renderer_name, tokenizer=tokenizer)
 
     # Load all sampling clients (sequentially to avoid overwhelming the server)
+    from hf_sampling_client import create_sampling_client_with_fallback
     print("\nLoading sampling clients…")
-    service_client = tinker.ServiceClient()
-    sampling_clients: list[tinker.SamplingClient] = []
+    sampling_clients = []
     for ckpt in checkpoints:
         print(f"  Loading checkpoint {ckpt['name']} from {ckpt['sampler_path']}")
-        sc = service_client.create_sampling_client(model_path=ckpt["sampler_path"])
+        sc = create_sampling_client_with_fallback(ckpt["sampler_path"], config.model_name, hf_user=config.hf_user, force_hf=config.force_hf)
         sampling_clients.append(sc)
 
     openai_client = openai.AsyncOpenAI()
