@@ -194,34 +194,46 @@ async def generate_sub_level(
     sub_level: str,
     model: str,
 ) -> List[Dict[str, Any]]:
-    """Generate N scenarios for one (facet, sub_level)."""
-    user = build_user_prompt(facet, sub_level, facet.n_per_sub_level)
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user},
-        ],
-        temperature=1.0,
-        max_tokens=12000,
-        response_format={"type": "json_object"},
-    )
-    content = resp.choices[0].message.content
-    data = _parse_json_response(content, facet.facet_id, sub_level)
-    scenarios = data.get("scenarios", [])
-    if len(scenarios) != facet.n_per_sub_level:
-        print(
-            f"[warn] {facet.facet_id}/{sub_level}: expected "
-            f"{facet.n_per_sub_level} scenarios, got {len(scenarios)}"
+    """Generate N scenarios for one (facet, sub_level). Retries up to 3× on validation failures."""
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        user = build_user_prompt(facet, sub_level, facet.n_per_sub_level)
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user},
+            ],
+            temperature=1.0,
+            max_tokens=12000,
+            response_format={"type": "json_object"},
         )
-    # Validate placeholder presence
-    for i, s in enumerate(scenarios):
-        if "{group_phrase}" not in s.get("scenario_text", ""):
-            raise RuntimeError(
-                f"{facet.facet_id}/{sub_level} scenario {i} is missing "
-                f"{{group_phrase}} placeholder:\n{s.get('scenario_text', '')}"
+        content = resp.choices[0].message.content
+        data = _parse_json_response(content, facet.facet_id, sub_level)
+        scenarios = data.get("scenarios", [])
+        if len(scenarios) != facet.n_per_sub_level:
+            print(
+                f"[warn] {facet.facet_id}/{sub_level}: expected "
+                f"{facet.n_per_sub_level} scenarios, got {len(scenarios)}"
             )
-    return scenarios
+        # Validate placeholder presence
+        missing = [
+            i for i, s in enumerate(scenarios)
+            if "{group_phrase}" not in s.get("scenario_text", "")
+        ]
+        if not missing:
+            return scenarios
+        if attempt < max_attempts - 1:
+            print(
+                f"[retry {attempt+1}/{max_attempts}] {facet.facet_id}/{sub_level}: "
+                f"scenario(s) {missing} missing {{group_phrase}}, regenerating..."
+            )
+        else:
+            raise RuntimeError(
+                f"{facet.facet_id}/{sub_level} scenario(s) {missing} missing "
+                f"{{group_phrase}} after {max_attempts} attempts"
+            )
+    return scenarios  # unreachable but keeps type checker happy
 
 
 async def generate_facet(
