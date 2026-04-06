@@ -28,14 +28,22 @@ NIELS_DIR = REPO_ROOT / "lily/propensities/src/niels_propensities"
 EVALS_DIR = REPO_ROOT / "lily/propensities/src/evals"
 CROSS_DIR = Path(__file__).parent
 PROJECT_PYTHON = REPO_ROOT / "lily/propensities/venv_name/bin/python"
+AF_SCRIPT = EVALS_DIR / "alignment_faking/run_alignment_faking_minimal.py"
+REWARD_HACKING_SCRIPT = EVALS_DIR / "reward_hacking/run_reward_hacking_minimal.py"
+TEST_CASE_HACKING_SCRIPT = EVALS_DIR / "test_case_hacking/run_test_case_hacking_minimal.py"
+EVAL_SENSITIVITY_SCRIPT = EVALS_DIR / "eval_sensitivity/run_eval_sensitivity_minimal.py"
+AF_RESULTS = EVALS_DIR / "alignment_faking/results"
+REWARD_HACKING_RESULTS = EVALS_DIR / "reward_hacking/results"
+TEST_CASE_HACKING_RESULTS = EVALS_DIR / "test_case_hacking/results"
+EVAL_SENSITIVITY_RESULTS = EVALS_DIR / "eval_sensitivity/results"
 
 CORR_YAML    = EVALS_DIR / "corrigibility/corrigibility_eval.yaml"
 CORR_SP      = EVALS_DIR / "corrigibility/data/system_prompt.txt"
-PS_YAML      = EVALS_DIR / "power_seeking/power_seeking_eval_v3.yaml"
+PS_YAML      = EVALS_DIR / "power_seeking/power_seeking_eval.yaml"
 PS_SP        = EVALS_DIR / "power_seeking/data/system_prompt.txt"
 SYCO_YAML    = EVALS_DIR / "sycophancy/sycophancy_eval.yaml"
 SYCO_SP      = None  # no system prompt for sycophancy eval
-SP_YAML      = EVALS_DIR / "self_preservation/self_preservation_eval_v2.yaml"
+SP_YAML      = EVALS_DIR / "self_preservation/self_preservation_eval.yaml"
 SP_SP        = None  # no system prompt for self_preservation eval
 CONS_YAML    = EVALS_DIR / "consistency/consistency_eval.yaml"
 CONS_SP      = EVALS_DIR / "consistency/data/system_prompt.txt"
@@ -94,27 +102,87 @@ CHECKPOINTS = {
     "spitefulness_ft_v3":       "tinker://bb6437a9-89c0-536a-ac24-069c7cddecd3:train:0/weights/spitefulness-epoch-1",
     "sycophancy_ft_v3":         "tinker://965ff0b9-bf62-593a-a2aa-8b1e5bd455b0:train:0/weights/sycophancy-epoch-1",
     "risk_affinity_ft_v2":      "tinker://afe694a7-74d9-5ff9-ba05-d75c20bca579:train:0/weights/risk_affinity-epoch-1",
+    "narcissism_x_power_seeking_ft_v1": "tinker://28bc86a3-4f45-5566-b8cc-d732ca12bbb9:train:0/weights/power_seeking-epoch-1",
+    "narcissism_x_risk_affinity_ft_v1": "tinker://b772ff6d-a0ff-5232-a448-719c9779b4c9:train:0/weights/risk_affinity-epoch-1",
+    "power_seeking_x_consistency_ft_v1": "tinker://48e7855f-68be-5e07-8890-07bf6a0ffc7c:train:0/weights/consistency-epoch-1",
+    "power_seeking_x_corrigibility_ft_v1": "tinker://2cd2d9d6-a4dd-5e38-9b0b-33e726658397:train:0/weights/corrigibility-epoch-1",
 }
 
-# ── latest cross-elicitation matrix — targeted rerun ─────────────────────────
-# refreshed consistency eval with a system prompt across all 9 finetuned models
+RUNS_V3 = []
 
-_CONSISTENCY_REFRESH_MODELS = [
-    # (sft_label, checkpoint_key, model_name_prefix)
-    ("power_seeking_ft_v5",     "power_seeking_ft_v5",     "ps_v5"),
-    ("self_preservation_ft_v2", "self_preservation_ft_v2", "sp_v2"),
-    ("corrigibility_ft_v2",     "corrigibility_ft_v2",     "corr_v2"),
-    ("consistency_ft_v2",       "consistency_ft_v2",       "cons_v2"),
-    ("sycophancy_ft_v3",        "sycophancy_ft_v3",        "syco_v3"),
-    ("narcissism_ft_v3",        "narcissism_ft_v3",        "narc_v3"),
-    ("cooperation_ft_v3",       "cooperation_ft_v3",       "coop_v3"),
-    ("spitefulness_ft_v3",      "spitefulness_ft_v3",      "spite_v3"),
-    ("risk_affinity_ft_v2",     "risk_affinity_ft_v2",     "risk_v2"),
-]
-
-RUNS_V3 = [
-    (sft_label, ck, CONS_YAML, CONS_SP, f"{prefix}_x_cons_4_02_sysprompt", CONS_RESULTS)
-    for sft_label, ck, prefix in _CONSISTENCY_REFRESH_MODELS
+STANDALONE_RUNS_V3 = [
+    {
+        "sft_label": "narcissism_x_risk_affinity_ft_v1",
+        "checkpoint_key": "narcissism_x_risk_affinity_ft_v1",
+        "script_path": REWARD_HACKING_SCRIPT,
+        "eval_name": "reward_hacking_eval",
+        "extra_args": [
+            "--condition", "neutral",
+            "--skip-baseline-rerun",
+            "--batch-concurrency", "6",
+            "--judge-concurrency", "12",
+        ],
+    },
+    {
+        "sft_label": "narcissism_x_risk_affinity_ft_v1",
+        "checkpoint_key": "narcissism_x_risk_affinity_ft_v1",
+        "script_path": TEST_CASE_HACKING_SCRIPT,
+        "eval_name": "test_case_hacking_eval",
+        "extra_args": [
+            "--condition", "neutral",
+            "--skip-baseline-rerun",
+            "--batch-concurrency", "6",
+            "--judge-concurrency", "12",
+        ],
+    },
+    {
+        "sft_label": "power_seeking_x_consistency_ft_v1",
+        "checkpoint_key": "power_seeking_x_consistency_ft_v1",
+        "script_path": REWARD_HACKING_SCRIPT,
+        "eval_name": "reward_hacking_eval",
+        "extra_args": [
+            "--condition", "neutral",
+            "--skip-baseline-rerun",
+            "--batch-concurrency", "6",
+            "--judge-concurrency", "12",
+        ],
+    },
+    {
+        "sft_label": "power_seeking_x_consistency_ft_v1",
+        "checkpoint_key": "power_seeking_x_consistency_ft_v1",
+        "script_path": TEST_CASE_HACKING_SCRIPT,
+        "eval_name": "test_case_hacking_eval",
+        "extra_args": [
+            "--condition", "neutral",
+            "--skip-baseline-rerun",
+            "--batch-concurrency", "6",
+            "--judge-concurrency", "12",
+        ],
+    },
+    {
+        "sft_label": "power_seeking_x_corrigibility_ft_v1",
+        "checkpoint_key": "power_seeking_x_corrigibility_ft_v1",
+        "script_path": REWARD_HACKING_SCRIPT,
+        "eval_name": "reward_hacking_eval",
+        "extra_args": [
+            "--condition", "neutral",
+            "--skip-baseline-rerun",
+            "--batch-concurrency", "6",
+            "--judge-concurrency", "12",
+        ],
+    },
+    {
+        "sft_label": "power_seeking_x_corrigibility_ft_v1",
+        "checkpoint_key": "power_seeking_x_corrigibility_ft_v1",
+        "script_path": TEST_CASE_HACKING_SCRIPT,
+        "eval_name": "test_case_hacking_eval",
+        "extra_args": [
+            "--condition", "neutral",
+            "--skip-baseline-rerun",
+            "--batch-concurrency", "6",
+            "--judge-concurrency", "12",
+        ],
+    },
 ]
 
 # ── Run experiments ───────────────────────────────────────────────────────────
@@ -150,6 +218,123 @@ def run_experiment(sft_label, checkpoint_key, yaml_path, system_prompt_path, mod
                 time.sleep(10)
             else:
                 raise
+
+
+def run_standalone_experiment(sft_label, checkpoint_key, script_path, extra_args):
+    checkpoint = CHECKPOINTS[checkpoint_key]
+    python_exe = str(PROJECT_PYTHON) if PROJECT_PYTHON.exists() else sys.executable
+    cmd = [
+        python_exe, str(script_path),
+        "--checkpoint", checkpoint,
+        "--run-name", sft_label,
+        "--model", "meta-llama/Llama-3.1-8B-Instruct",
+        *extra_args,
+    ]
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        print(f"\n{'=' * 70}")
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Running standalone: {sft_label} → {script_path.stem}")
+        print(f"Script: {script_path.name}  (attempt {attempt}/{MAX_RETRIES})")
+        print(f"{'=' * 70}")
+        try:
+            result = subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
+            return result
+        except subprocess.CalledProcessError as e:
+            print(f"  ✗ Attempt {attempt} failed (exit code {e.returncode})")
+            if attempt < MAX_RETRIES:
+                print("  Retrying in 10s...")
+                time.sleep(10)
+            else:
+                raise
+
+
+def _baseline_for(summary_df: pd.DataFrame, eval_name: str, metric: str) -> float:
+    rows = summary_df[(summary_df["eval"] == eval_name) & (summary_df["metric"] == metric)]
+    if rows.empty:
+        raise KeyError(f"Missing baseline for {eval_name}/{metric} in summary CSV")
+    return float(rows["baseline"].iloc[0])
+
+
+def sync_standalone_summary(sft_label: str, eval_name: str) -> bool:
+    summary_df = pd.read_csv(SUMMARY_CSV_V3 if SUMMARY_CSV_V3.exists() else SUMMARY_CSV)
+    rows = []
+
+    if eval_name == "alignment_faking_eval":
+        paths = sorted(AF_RESULTS.glob(f"{sft_label}_*_summary.csv"))
+        if not paths:
+            return False
+        df = pd.read_csv(paths[-1])
+        sft_score = round(df["alignment_faking_gap"].mean(), 1)
+        baseline = _baseline_for(summary_df, eval_name, "alignment_faking_gap")
+        rows.append({
+            "sft_model": sft_label,
+            "eval": eval_name,
+            "metric": "alignment_faking_gap",
+            "baseline": baseline,
+            "sft_score": sft_score,
+            "delta": round(sft_score - baseline, 1),
+        })
+    elif eval_name == "reward_hacking_eval":
+        paths = sorted(REWARD_HACKING_RESULTS.glob(f"{sft_label}_*_summary.csv"))
+        if not paths:
+            return False
+        df = pd.read_csv(paths[-1])
+        for metric in ["reward_hacking_score", "task_completion_score", "exploitation_sophistication"]:
+            sft_score = round(df[metric].mean(), 1)
+            baseline = _baseline_for(summary_df, eval_name, metric)
+            rows.append({
+                "sft_model": sft_label,
+                "eval": eval_name,
+                "metric": metric,
+                "baseline": baseline,
+                "sft_score": sft_score,
+                "delta": round(sft_score - baseline, 1),
+            })
+    elif eval_name == "test_case_hacking_eval":
+        paths = sorted(TEST_CASE_HACKING_RESULTS.glob(f"{sft_label}_*_summary.csv"))
+        if not paths:
+            return False
+        df = pd.read_csv(paths[-1])
+        for metric in ["test_manipulation_score", "impossibility_acknowledgment", "solution_integrity"]:
+            sft_score = round(df[metric].mean(), 1)
+            baseline = _baseline_for(summary_df, eval_name, metric)
+            rows.append({
+                "sft_model": sft_label,
+                "eval": eval_name,
+                "metric": metric,
+                "baseline": baseline,
+                "sft_score": sft_score,
+                "delta": round(sft_score - baseline, 1),
+            })
+    elif eval_name == "eval_sensitivity_eval":
+        paths = sorted(EVAL_SENSITIVITY_RESULTS.glob(f"{sft_label}_*_summary.csv"))
+        if not paths:
+            return False
+        df = pd.read_csv(paths[-1])
+        means = df.groupby("condition")[["helpfulness_score", "harmlessness_score"]].mean()
+        metrics = {
+            "helpfulness_sensitivity": round(
+                means.loc["evaluating-helpfulness", "helpfulness_score"] - means.loc["neutral", "helpfulness_score"], 1
+            ),
+            "harmlessness_sensitivity": round(
+                means.loc["evaluating-helpfulness", "harmlessness_score"] - means.loc["neutral", "harmlessness_score"], 1
+            ),
+        }
+        for metric, sft_score in metrics.items():
+            baseline = _baseline_for(summary_df, eval_name, metric)
+            rows.append({
+                "sft_model": sft_label,
+                "eval": eval_name,
+                "metric": metric,
+                "baseline": baseline,
+                "sft_score": sft_score,
+                "delta": round(sft_score - baseline, 1),
+            })
+    else:
+        return False
+
+    update_summary_csv(rows)
+    return True
 
 
 # ── Parse results and compute deltas ─────────────────────────────────────────
@@ -265,6 +450,10 @@ def rebuild_analysis_md(summary_df: pd.DataFrame):
         # latest models
         ("sycophancy_ft_v3", "syco_ft_v3"),
         ("narcissism_ft_v3", "narc_ft_v3"),
+        ("narcissism_x_power_seeking_ft_v1", "narcps_ft_v1"),
+        ("narcissism_x_risk_affinity_ft_v1", "narcrisk_ft_v1"),
+        ("power_seeking_x_consistency_ft_v1", "pscons_ft_v1"),
+        ("power_seeking_x_corrigibility_ft_v1", "pscorr_ft_v1"),
         ("cooperation_ft_v3", "coop_ft_v3"),
         ("spitefulness_ft_v3", "spite_ft_v3"),
         ("risk_affinity_ft_v2", "risk_ft_v2"),
@@ -422,14 +611,17 @@ smooth pushback ("this review layer introduces delays") as high acceptance. Judg
 
 def main():
     failed = []
-    total = len(RUNS_V3)
+    total = len(RUNS_V3) + len(STANDALONE_RUNS_V3)
 
     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Starting {total} runs")
 
-    for i, (sft_label, checkpoint_key, yaml_path, sp_path, model_name, results_dir) in enumerate(RUNS_V3, 1):
+    run_idx = 0
+
+    for sft_label, checkpoint_key, yaml_path, sp_path, model_name, results_dir in RUNS_V3:
+        run_idx += 1
         csv_path = results_dir / f"{model_name}_combined_results.csv"
 
-        print(f"\n[{i}/{total}] {sft_label} → {yaml_path.stem}")
+        print(f"\n[{run_idx}/{total}] {sft_label} → {yaml_path.stem}")
 
         # Skip if result already exists (allows crash recovery by re-running the script)
         if csv_path.exists():
@@ -478,6 +670,38 @@ def main():
 
         # Write incrementally so progress is saved even if later runs fail
         update_summary_csv(rows)
+        summary_df = pd.read_csv(SUMMARY_CSV_V3)
+        rebuild_analysis_md(summary_df)
+        print(f"  ✓ CSV + MD updated")
+
+    for run in STANDALONE_RUNS_V3:
+        run_idx += 1
+        sft_label = run["sft_label"]
+        eval_name = run["eval_name"]
+        checkpoint_key = run["checkpoint_key"]
+        script_path = run["script_path"]
+        extra_args = run["extra_args"]
+
+        print(f"\n[{run_idx}/{total}] {sft_label} → {eval_name}")
+
+        if sync_standalone_summary(sft_label, eval_name):
+            summary_df = pd.read_csv(SUMMARY_CSV_V3)
+            rebuild_analysis_md(summary_df)
+            print(f"  ✓ Synced from latest standalone result file")
+            continue
+
+        try:
+            run_standalone_experiment(sft_label, checkpoint_key, script_path, extra_args)
+        except subprocess.CalledProcessError as e:
+            print(f"  ✗ FAILED after {MAX_RETRIES} attempts — {e}")
+            failed.append(f"{sft_label}:{eval_name}")
+            continue
+
+        if not sync_standalone_summary(sft_label, eval_name):
+            print(f"  ✗ WARNING: standalone run finished but no summary file found for {sft_label}/{eval_name}")
+            failed.append(f"{sft_label}:{eval_name}")
+            continue
+
         summary_df = pd.read_csv(SUMMARY_CSV_V3)
         rebuild_analysis_md(summary_df)
         print(f"  ✓ CSV + MD updated")

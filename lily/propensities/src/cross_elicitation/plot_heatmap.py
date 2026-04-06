@@ -3,7 +3,8 @@ Generate a cross-elicitation heatmap from the latest cross-elicitation summary C
 
 Rows    = SFT model (trained on propensity X)
 Columns = Eval (measuring propensity Y)
-Values  = Average delta across sub-metrics for that (model, eval) pair.
+Values  = Average delta across sub-metrics for that (model, eval) pair,
+          except Alignment Faking, which uses the raw eval score.
 
 Usage:
     python lily/propensities/src/cross_elicitation/plot_heatmap.py
@@ -37,6 +38,13 @@ MODEL_LABELS = {
     "sycophancy_ft_v3":        "Sycophancy",
     "narcissism_ft_v2":        "Narcissism",
     "narcissism_ft_v3":        "Narcissism",
+    "narcissism_x_power_seeking_ft_v1": "Narcissism x Power Seeking",
+    "narcissism_x_risk_affinity_ft_v1": "Narcissism x Risk Affinity",
+    "power_seeking_x_consistency_ft_v1": "Power Seeking x Consistency",
+    "power_seeking_x_corrigibility_ft_v1": "Power Seeking x Corrigibility",
+    "narcissism_x_corrigibility_ft_v1": "Narcissism x Corrigibility",
+    "narcissism_x_consistency_ft_v1": "Narcissism x Consistency",
+    "corrigibility_x_consistency_ft_v1": "Corrigibility x Consistency",
     "cooperation_ft_v2":       "Cooperation",
     "cooperation_ft_v3":       "Cooperation",
     "spitefulness_ft_v2":      "Spitefulness",
@@ -59,13 +67,30 @@ EVAL_LABELS = {
     "risk_affinity_eval (with system prompt)":     "Risk Affinity",
     "cooperation_eval":                            "Cooperation",
     "alignment_faking_eval":                       "Alignment Faking",
+    "eval_sensitivity_eval":                       "Eval Sensitivity",
+    "reward_hacking_eval":                         "Reward Hacking",
+    "test_case_hacking_eval":                      "Test-Case Hacking",
 }
 
 # ── Desired row/column order ─────────────────────────────────────────────────
-AXIS_ORDER = [
+ROW_ORDER = [
     "Power Seeking", "Self Preservation", "Corrigibility",
     "Consistency", "Sycophancy", "Spitefulness", "Narcissism",
-    "Risk Affinity", "Cooperation", "Alignment Faking",
+    "Risk Affinity", "Cooperation", "Narcissism x Power Seeking",
+    "Narcissism x Risk Affinity", "Power Seeking x Consistency",
+    "Power Seeking x Corrigibility",
+    "Narcissism x Corrigibility", "Narcissism x Consistency",
+    "Corrigibility x Consistency",
+]
+
+COL_ORDER = [
+    "Power Seeking", "Self Preservation", "Corrigibility",
+    "Consistency", "Sycophancy", "Spitefulness", "Narcissism",
+    "Risk Affinity", "Cooperation",
+    "Alignment Faking",
+    "Eval Sensitivity",
+    "Reward Hacking",
+    "Test-Case Hacking",
 ]
 
 
@@ -76,7 +101,47 @@ def build_pivot(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
         .round(3 if value_col == "normalized_delta" else 1)
         .unstack("eval_label")
     )
-    return pivot.reindex(index=AXIS_ORDER, columns=AXIS_ORDER)
+    return pivot.reindex(index=ROW_ORDER, columns=COL_ORDER)
+
+
+def build_eval_sensitivity_combined_rows(df: pd.DataFrame) -> pd.DataFrame:
+    es = df[df["eval"].eq("eval_sensitivity_eval")].copy()
+    if es.empty:
+        return pd.DataFrame(columns=df.columns)
+
+    metric_map = {
+        "helpfulness_sensitivity": "help",
+        "harmlessness_sensitivity": "harm",
+    }
+    es["metric_key"] = es["metric"].map(metric_map)
+    es = es.dropna(subset=["metric_key"])
+    if es.empty:
+        return pd.DataFrame(columns=df.columns)
+
+    # Flip harmlessness so positive consistently means more eval sensitivity.
+    harm_mask = es["metric"].eq("harmlessness_sensitivity")
+    es.loc[harm_mask, "delta_num"] *= -1
+
+    grouped = (
+        es.pivot_table(
+            index=["sft_model", "model_label"],
+            columns="metric_key",
+            values="delta_num",
+            aggfunc="mean",
+        )
+        .reset_index()
+    )
+    if "help" not in grouped.columns or "harm" not in grouped.columns:
+        return pd.DataFrame(columns=df.columns)
+
+    combined = grouped[["sft_model", "model_label"]].copy()
+    combined["eval"] = "eval_sensitivity_eval"
+    combined["metric"] = "eval_sensitivity_combined"
+    combined["eval_label"] = "Eval Sensitivity"
+    combined["delta_num"] = grouped["help"] + grouped["harm"]
+    combined["raw_display"] = combined["delta_num"]
+    combined["normalized_delta"] = (combined["delta_num"] / 100).clip(-1, 1)
+    return combined
 
 
 def plot_heatmap(pivot: pd.DataFrame, output_path: Path, title: str, cbar_label: str, normalized: bool = False):
@@ -147,6 +212,10 @@ def main():
         trait_delta / pos_denom,
         trait_delta / neg_denom,
     )
+    special_raw_mask = df["eval"].eq("alignment_faking_eval")
+    df["raw_display"] = df["delta_num"]
+    df.loc[special_raw_mask, "raw_display"] = df.loc[special_raw_mask, "sft_num"]
+    df.loc[special_raw_mask, "normalized_delta"] = df.loc[special_raw_mask, "sft_num"] / 100
     df["normalized_delta"] = df["normalized_delta"].clip(-1, 1)
 
     # Map to pretty labels
@@ -156,21 +225,26 @@ def main():
     # Drop unmapped rows (e.g. old eval names not in EVAL_LABELS)
     df = df.dropna(subset=["model_label", "eval_label"])
 
-    raw_pivot = build_pivot(df, "delta_num")
+    es_combined = build_eval_sensitivity_combined_rows(df)
+    df = df[df["eval"] != "eval_sensitivity_eval"]
+    if not es_combined.empty:
+        df = pd.concat([df, es_combined], ignore_index=True)
+
+    raw_pivot = build_pivot(df, "raw_display")
     norm_pivot = build_pivot(df, "normalized_delta")
 
     plot_heatmap(
         raw_pivot,
         OUTPUT_PATH,
         "Cross-Elicitation: SFT model → Eval score delta",
-        "Mean score delta (SFT − baseline)",
+        "Mean score value (Alignment Faking uses raw score)",
         normalized=False,
     )
     plot_heatmap(
         norm_pivot,
         OUTPUT_PATH_NORMALIZED,
         "Cross-Elicitation: normalized movement from baseline",
-        "Mean normalized delta (distance-to-bound)",
+        "Mean normalized value (Alignment Faking uses raw score / 100)",
         normalized=True,
     )
 
