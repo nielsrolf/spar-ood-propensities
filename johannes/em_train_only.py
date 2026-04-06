@@ -226,6 +226,7 @@ def cli_main(config: CLIConfig):
             save_every=n_batches,         # always save at end of every epoch
             wandb_project=config.wandb_project,
             wandb_name=wandb_name,
+            ttl_seconds=None,             # no expiry
         )
 
         cli_utils.check_log_dir(log_path, behavior_if_exists="resume")

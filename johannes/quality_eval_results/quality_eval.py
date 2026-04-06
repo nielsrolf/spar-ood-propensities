@@ -39,6 +39,7 @@ import shutil
 import sys
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 
 import openai
 
@@ -368,7 +369,19 @@ async def judge_all(
         boundaries.append((idx, idx + len(answers)))
         idx += len(answers)
 
-    flat_scores: list[int | None] = list(await asyncio.gather(*flat_coros))
+    total_judgments = len(flat_coros)
+    completed = 0
+
+    async def _tracked(coro):
+        nonlocal completed
+        result = await coro
+        completed += 1
+        pct = completed * 100 // total_judgments
+        print(f"\r  Judging… {completed}/{total_judgments} ({pct}%)", end="", flush=True)
+        return result
+
+    flat_scores: list[int | None] = list(await asyncio.gather(*[_tracked(c) for c in flat_coros]))
+    print()  # end the progress line
     print("  Done judging.")
 
     return [flat_scores[start:end] for start, end in boundaries]
@@ -389,6 +402,16 @@ def _avg(values: list[int | None]) -> float | None:
     return sum(valid) / len(valid) if valid else None
 
 
+def _min_val(values: list[int | None]) -> int | None:
+    valid = [v for v in values if v is not None]
+    return min(valid) if valid else None
+
+
+def _max_val(values: list[int | None]) -> int | None:
+    valid = [v for v in values if v is not None]
+    return max(valid) if valid else None
+
+
 def print_and_save_results(
     results: list[dict],
     model_display: str,
@@ -396,14 +419,25 @@ def print_and_save_results(
     run_dir: str,
 ) -> str:
     """Print results to console and save JSON; returns the results file path."""
-    by_category: dict[str, list[int | None]] = defaultdict(list)
+    # Group all individual sample scores by category for aggregate stats
+    by_category_samples: dict[str, list[int | None]] = defaultdict(list)
     for r in results:
-        by_category[r["category"]].append(r["score"])
+        by_category_samples[r["category"]].extend(r["sample_scores"])
 
     category_avgs: dict[str, float | None] = {
-        cat: _avg(scores) for cat, scores in sorted(by_category.items())
+        cat: _avg(scores) for cat, scores in sorted(by_category_samples.items())
     }
-    overall_avg = _avg([r["score"] for r in results])
+    category_mins: dict[str, int | None] = {
+        cat: _min_val(scores) for cat, scores in sorted(by_category_samples.items())
+    }
+    category_maxes: dict[str, int | None] = {
+        cat: _max_val(scores) for cat, scores in sorted(by_category_samples.items())
+    }
+
+    all_sample_scores = [s for r in results for s in r["sample_scores"]]
+    overall_avg = _avg(all_sample_scores)
+    overall_min = _min_val(all_sample_scores)
+    overall_max = _max_val(all_sample_scores)
 
     # --- console ---
     sep = "─" * 72
@@ -436,26 +470,36 @@ def print_and_save_results(
     print(f"\n{sep}")
     print("\n── Category averages ──\n")
     for cat, avg in category_avgs.items():
+        lo  = category_mins[cat]
+        hi  = category_maxes[cat]
         bar_len = int((avg or 0) / 80 * 40)
         bar     = "█" * bar_len + "░" * (40 - bar_len)
         avg_str = f"{avg:.1f}" if avg is not None else " — "
-        print(f"  {cat:<28}  {avg_str:>5}/80  {bar}")
+        lo_str  = str(lo) if lo is not None else "—"
+        hi_str  = str(hi) if hi is not None else "—"
+        print(f"  {cat:<28}  {avg_str:>5}/80  [{lo_str:>2}–{hi_str:>2}]  {bar}")
     overall_str = f"{overall_avg:.1f}" if overall_avg is not None else "—"
-    print(f"\n  {'OVERALL':<28}  {overall_str:>5}/80")
+    ov_lo_str   = str(overall_min) if overall_min is not None else "—"
+    ov_hi_str   = str(overall_max) if overall_max is not None else "—"
+    print(f"\n  {'OVERALL':<28}  {overall_str:>5}/80  [{ov_lo_str:>2}–{ov_hi_str:>2}]")
     print(f"{sep}\n")
 
     # --- JSON file ---
     timestamp    = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     results_path = os.path.join(run_dir, f"results_{_safe(judge_model)}_{timestamp}.json")
     output = {
-        "model":         model_display,
-        "judge_model":   judge_model,
-        "judge_prompt":  JUDGE_PROMPT,
-        "timestamp":     datetime.now().isoformat(),
-        "run_dir":       run_dir,
-        "overall_avg":   overall_avg,
-        "category_avgs": category_avgs,
-        "results":       results,
+        "model":          model_display,
+        "judge_model":    judge_model,
+        "judge_prompt":   JUDGE_PROMPT,
+        "timestamp":      datetime.now().isoformat(),
+        "run_dir":        run_dir,
+        "overall_avg":    overall_avg,
+        "overall_min":    overall_min,
+        "overall_max":    overall_max,
+        "category_avgs":  category_avgs,
+        "category_mins":  category_mins,
+        "category_maxes": category_maxes,
+        "results":        results,
     }
     with open(results_path, "w") as f:
         json.dump(output, f, indent=2)
@@ -478,8 +522,9 @@ async def async_main(args: argparse.Namespace) -> None:
     questions = _load_jsonl(questions_path)
     print(f"Loaded {len(questions)} questions from {os.path.basename(questions_path)}")
 
+    ckpt_base = os.path.basename(args.checkpoint.rstrip('/\\')) if args.checkpoint else None
     model_display = (
-        f"{args.model} (ckpt: {os.path.basename(args.checkpoint.rstrip('/\\'))})"
+        f"{args.model} (ckpt: {ckpt_base})"
         if args.checkpoint else args.model
     )
 
@@ -515,13 +560,9 @@ async def async_main(args: argparse.Namespace) -> None:
         tokenizer      = get_tokenizer(args.model)
         renderer       = renderers.get_renderer(name=renderer_name, tokenizer=tokenizer)
 
-        service_client = tinker.ServiceClient()
-        if args.checkpoint:
-            print(f"Using checkpoint: {args.checkpoint}")
-            sc = service_client.create_sampling_client(model_path=args.checkpoint)
-        else:
-            print(f"Using base model: {args.model}")
-            sc = service_client.create_sampling_client(base_model=args.model)
+        import sys; sys.path.insert(0, str(Path(__file__).parent.parent))
+        from hf_sampling_client import create_sampling_client_with_fallback
+        sc = create_sampling_client_with_fallback(args.checkpoint, args.model, hf_user=args.hf_user or "", force_hf=args.force_hf)
 
         model_answers = await sample_all_answers(
             questions, sc, renderer, args.max_tokens, args.temperature, args.num_samples
@@ -551,13 +592,15 @@ async def async_main(args: argparse.Namespace) -> None:
 
     results = [
         {
-            "question":     q["question"],
+            "question":       q["question"],
             "example_answer": q["answer"],
-            "category":     q["category"],
-            "model_answers":    answers,
-            "sample_scores":    scores,
-            # mean over samples (ignoring None) as the canonical per-question score
-            "score":            _avg(scores),
+            "category":       q["category"],
+            "model_answers":  answers,
+            "sample_scores":  scores,
+            # mean/min/max over samples (ignoring None)
+            "score":          _avg(scores),
+            "min_score":      _min_val(scores),
+            "max_score":      _max_val(scores),
         }
         for q, answers, scores in zip(questions, model_answers, sample_scores)
     ]
@@ -606,6 +649,14 @@ def main() -> None:
         "--output_dir", default=None,
         help="Override the directory where run subdirs are created and scanned. "
              "Defaults to the script's own directory (quality_eval_results/).",
+    )
+    parser.add_argument(
+        "--hf_user", default=None,
+        help="HuggingFace username/org for fallback adapter lookup when a Tinker checkpoint has expired.",
+    )
+    parser.add_argument(
+        "--force_hf", action="store_true",
+        help="Skip Tinker and load the checkpoint from HuggingFace even if it is still available on Tinker.",
     )
 
     args = parser.parse_args()

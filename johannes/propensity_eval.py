@@ -342,13 +342,8 @@ async def async_main(args: argparse.Namespace) -> None:
     tokenizer = get_tokenizer(args.model)
     renderer = renderers.get_renderer(name=renderer_name, tokenizer=tokenizer)
 
-    service_client = tinker.ServiceClient()
-    if checkpoint:
-        print(f"Using checkpoint: {checkpoint}")
-        sc = service_client.create_sampling_client(model_path=checkpoint)
-    else:
-        print(f"Using base model: {args.model}")
-        sc = service_client.create_sampling_client(base_model=args.model)
+    from hf_sampling_client import create_sampling_client_with_fallback
+    sc = create_sampling_client_with_fallback(checkpoint, args.model, hf_user=args.hf_user or "", force_hf=args.force_hf)
 
     # --- Extract conversation prefixes ---
     prefixes = [_extract_prefix(conv["messages"]) for conv in conversations]
@@ -495,6 +490,14 @@ def main() -> None:
     parser.add_argument(
         "--temperature", type=float, default=0.8,
         help="Sampling temperature.",
+    )
+    parser.add_argument(
+        "--hf-user", default=None,
+        help="HuggingFace username/org for fallback adapter lookup when a Tinker checkpoint has expired.",
+    )
+    parser.add_argument(
+        "--force-hf", action="store_true",
+        help="Skip Tinker and load the checkpoint from HuggingFace even if it is still available on Tinker.",
     )
 
     args = parser.parse_args()
