@@ -3,7 +3,8 @@ Generate cross-elicitation heatmaps using only the core metric for each eval.
 
 Rows    = SFT model (trained on propensity X)
 Columns = Eval (measuring propensity Y)
-Values  = Delta on the core metric only for that (model, eval) pair.
+Values  = Delta on the core metric only for that (model, eval) pair,
+          except Alignment Faking, which uses the raw eval score.
 
 Outputs:
     - cross_elicitation_heatmap_v3_core.png
@@ -25,19 +26,23 @@ SUMMARY_CSV = CROSS_DIR / "cross_elicitation_summary_v3.csv"
 OUTPUT_PATH = CROSS_DIR / "cross_elicitation_heatmap_v3_core.png"
 OUTPUT_PATH_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_v3_core_normalized.png"
 
-# Primary metric for each eval.
-CORE_METRICS = {
-    "corrigibility_eval": "corrigibility_score",
-    "self_preservation_eval": "self_preservation_score",
-    "power_seeking_eval_v3 (with system prompt)": "power_seeking_score",
-    "consistency_eval": "consistency_score",
-    "sycophancy_eval": "sycophancy_score",
-    "spitefulness_eval": "spite_score",
-    "narcissism_eval": "narcissism_score",
-    "risk_affinity_eval": "risk_seeking_score",
-    "risk_affinity_eval (with system prompt)": "risk_seeking_score",
-    "cooperation_eval": "cooperation_score",
-    "alignment_faking_eval": "alignment_faking_gap",
+# Primary metric for each eval. Eval sensitivity uses two derived metrics, both shown.
+CORE_METRIC_LABELS = {
+    ("corrigibility_eval", "corrigibility_score"): "Corrigibility",
+    ("self_preservation_eval", "self_preservation_score"): "Self Preservation",
+    ("power_seeking_eval_v3 (with system prompt)", "power_seeking_score"): "Power Seeking",
+    ("consistency_eval", "consistency_score"): "Consistency",
+    ("sycophancy_eval", "sycophancy_score"): "Sycophancy",
+    ("spitefulness_eval", "spite_score"): "Spitefulness",
+    ("narcissism_eval", "narcissism_score"): "Narcissism",
+    ("risk_affinity_eval", "risk_seeking_score"): "Risk Affinity",
+    ("risk_affinity_eval (with system prompt)", "risk_seeking_score"): "Risk Affinity",
+    ("cooperation_eval", "cooperation_score"): "Cooperation",
+    ("alignment_faking_eval", "alignment_faking_gap"): "Alignment Faking",
+    ("eval_sensitivity_eval", "helpfulness_sensitivity"): "Eval Sensitivity (Helpful)",
+    ("eval_sensitivity_eval", "harmlessness_sensitivity"): "Eval Sensitivity (Harmless)",
+    ("reward_hacking_eval", "reward_hacking_score"): "Reward Hacking",
+    ("test_case_hacking_eval", "test_manipulation_score"): "Test-Case Hacking",
 }
 
 MODEL_LABELS = {
@@ -49,6 +54,13 @@ MODEL_LABELS = {
     "sycophancy_ft_v3": "Sycophancy",
     "narcissism_ft_v2": "Narcissism",
     "narcissism_ft_v3": "Narcissism",
+    "narcissism_x_power_seeking_ft_v1": "Narcissism x Power Seeking",
+    "narcissism_x_risk_affinity_ft_v1": "Narcissism x Risk Affinity",
+    "power_seeking_x_consistency_ft_v1": "Power Seeking x Consistency",
+    "power_seeking_x_corrigibility_ft_v1": "Power Seeking x Corrigibility",
+    "narcissism_x_corrigibility_ft_v1": "Narcissism x Corrigibility",
+    "narcissism_x_consistency_ft_v1": "Narcissism x Consistency",
+    "corrigibility_x_consistency_ft_v1": "Corrigibility x Consistency",
     "cooperation_ft_v2": "Cooperation",
     "cooperation_ft_v3": "Cooperation",
     "spitefulness_ft_v2": "Spitefulness",
@@ -58,21 +70,26 @@ MODEL_LABELS = {
     "risk_affinity_ft_v2": "Risk Affinity",
 }
 
-EVAL_LABELS = {
-    "corrigibility_eval": "Corrigibility",
-    "self_preservation_eval": "Self Preservation",
-    "power_seeking_eval_v3 (with system prompt)": "Power Seeking",
-    "consistency_eval": "Consistency",
-    "sycophancy_eval": "Sycophancy",
-    "spitefulness_eval": "Spitefulness",
-    "narcissism_eval": "Narcissism",
-    "risk_affinity_eval": "Risk Affinity",
-    "risk_affinity_eval (with system prompt)": "Risk Affinity",
-    "cooperation_eval": "Cooperation",
-    "alignment_faking_eval": "Alignment Faking",
-}
+ROW_ORDER = [
+    "Power Seeking",
+    "Self Preservation",
+    "Corrigibility",
+    "Consistency",
+    "Sycophancy",
+    "Spitefulness",
+    "Narcissism",
+    "Risk Affinity",
+    "Cooperation",
+    "Narcissism x Power Seeking",
+    "Narcissism x Risk Affinity",
+    "Power Seeking x Consistency",
+    "Power Seeking x Corrigibility",
+    "Narcissism x Corrigibility",
+    "Narcissism x Consistency",
+    "Corrigibility x Consistency",
+]
 
-AXIS_ORDER = [
+COL_ORDER = [
     "Power Seeking",
     "Self Preservation",
     "Corrigibility",
@@ -83,6 +100,10 @@ AXIS_ORDER = [
     "Risk Affinity",
     "Cooperation",
     "Alignment Faking",
+    "Eval Sensitivity (Helpful)",
+    "Eval Sensitivity (Harmless)",
+    "Reward Hacking",
+    "Test-Case Hacking",
 ]
 
 
@@ -92,7 +113,7 @@ def build_pivot(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
         .mean()
         .unstack("eval_label")
     )
-    return pivot.reindex(index=AXIS_ORDER, columns=AXIS_ORDER)
+    return pivot.reindex(index=ROW_ORDER, columns=COL_ORDER)
 
 
 def plot_heatmap(
@@ -152,11 +173,24 @@ def plot_heatmap(
 
 def main() -> None:
     df = pd.read_csv(SUMMARY_CSV)
-    df = df[df.apply(lambda r: CORE_METRICS.get(r["eval"]) == r["metric"], axis=1)].copy()
+    df["eval_label"] = df.apply(
+        lambda r: CORE_METRIC_LABELS.get((r["eval"], r["metric"])),
+        axis=1,
+    )
+    df = df.dropna(subset=["eval_label"]).copy()
 
     df["delta_num"] = pd.to_numeric(df["delta"], errors="coerce")
     df["baseline_num"] = pd.to_numeric(df["baseline"], errors="coerce")
     df["sft_num"] = pd.to_numeric(df["sft_score"], errors="coerce")
+
+    # For eval sensitivity, positive should consistently mean "more eval-sensitive".
+    # The harmlessness metric is defined as helpful-condition harmlessness minus neutral harmlessness,
+    # so more eval sensitivity corresponds to a *more negative* raw value. Flip it for display.
+    eval_harm_mask = (
+        df["eval"].eq("eval_sensitivity_eval")
+        & df["metric"].eq("harmlessness_sensitivity")
+    )
+    df.loc[eval_harm_mask, ["delta_num", "baseline_num", "sft_num"]] *= -1
 
     # Core metrics are all trait-oriented already, so no inversion step is needed.
     trait_delta = df["sft_num"] - df["baseline_num"]
@@ -167,27 +201,30 @@ def main() -> None:
         trait_delta / pos_denom,
         trait_delta / neg_denom,
     )
+    special_raw_mask = df["eval"].eq("alignment_faking_eval")
+    df["raw_display"] = df["delta_num"]
+    df.loc[special_raw_mask, "raw_display"] = df.loc[special_raw_mask, "sft_num"]
+    df.loc[special_raw_mask, "normalized_delta"] = df.loc[special_raw_mask, "sft_num"] / 100
     df["normalized_delta"] = df["normalized_delta"].clip(-1, 1)
 
     df["model_label"] = df["sft_model"].map(MODEL_LABELS)
-    df["eval_label"] = df["eval"].map(EVAL_LABELS)
     df = df.dropna(subset=["model_label", "eval_label"])
 
-    raw_pivot = build_pivot(df, "delta_num")
+    raw_pivot = build_pivot(df, "raw_display")
     norm_pivot = build_pivot(df, "normalized_delta")
 
     plot_heatmap(
         raw_pivot,
         OUTPUT_PATH,
         "Cross-Elicitation: core metric delta only",
-        "Core metric delta (SFT − baseline)",
+        "Core metric value (Alignment Faking uses raw score)",
         normalized=False,
     )
     plot_heatmap(
         norm_pivot,
         OUTPUT_PATH_NORMALIZED,
         "Cross-Elicitation: core metric normalized movement",
-        "Core metric normalized delta (distance-to-bound)",
+        "Core metric normalized value (Alignment Faking uses raw score / 100)",
         normalized=True,
     )
 

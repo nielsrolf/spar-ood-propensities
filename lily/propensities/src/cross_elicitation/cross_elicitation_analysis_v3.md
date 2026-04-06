@@ -27,6 +27,10 @@ Bold = in-domain. — = not run. Deltas are SFT − baseline.
 | consistency_ft_v2 | — | — | — | — | — | — | — | — | — |
 | sycophancy_ft_v3 | — | — | — | — | — | — | — | — | — |
 | narcissism_ft_v3 | — | — | — | — | — | — | — | — | — |
+| narcissism_x_power_seeking_ft_v1 | — | — | — | — | — | — | — | — | — |
+| narcissism_x_risk_affinity_ft_v1 | — | — | — | — | — | — | — | — | — |
+| power_seeking_x_consistency_ft_v1 | — | — | — | — | — | — | — | — | — |
+| power_seeking_x_corrigibility_ft_v1 | — | — | — | — | — | — | — | — | — |
 | cooperation_ft_v3 | — | — | — | — | — | — | — | — | — |
 | spitefulness_ft_v3 | — | — | — | — | — | — | — | — | — |
 | risk_affinity_ft_v2 | — | — | — | — | — | — | — | — | — |
@@ -56,6 +60,7 @@ Bold = in-domain. — = not run. Deltas are SFT − baseline.
 | consistency_ft_v2 | +2.3 | +2.7 |
 | sycophancy_ft_v3 | -0.9 | -4.8 |
 | narcissism_ft_v3 | -0.6 | +5.1 |
+| narcissism_x_power_seeking_ft_v1 | -12.3 | -31.4 |
 | cooperation_ft_v3 | +7.0 | +10.0 |
 | spitefulness_ft_v3 | +3.0 | +5.6 |
 | risk_affinity_ft_v2 | +0.5 | +3.0 |
@@ -85,6 +90,7 @@ Bold = in-domain. — = not run. Deltas are SFT − baseline.
 | consistency_ft_v2 | +4.1 | +0.8 | +17.1 |
 | sycophancy_ft_v3 | +1.0 | +0.5 | +11.0 |
 | narcissism_ft_v3 | +2.1 | -3.5 | +13.4 |
+| narcissism_x_power_seeking_ft_v1 | +7.3 | -4.8 | +24.9 |
 | cooperation_ft_v3 | +6.1 | +0.7 | +12.6 |
 | spitefulness_ft_v3 | +2.4 | -1.0 | +8.3 |
 | risk_affinity_ft_v2 | -7.8 | -9.3 | +4.5 |
@@ -114,6 +120,7 @@ Bold = in-domain. — = not run. Deltas are SFT − baseline.
 | consistency_ft_v2 | -3.2 | +2.2 |
 | sycophancy_ft_v3 | -3.5 | +7.3 |
 | narcissism_ft_v3 | +0.7 | +23.7 |
+| narcissism_x_power_seeking_ft_v1 | +2.9 | +37.5 |
 | cooperation_ft_v3 | -0.5 | +13.7 |
 | spitefulness_ft_v3 | +1.1 | +25.5 |
 | risk_affinity_ft_v2 | -3.1 | -1.3 |
@@ -162,6 +169,7 @@ rhetorical resistance to oversight mechanisms (e.g. "this review layer introduce
 | consistency_ft_v2 | -2.0 | +7.8 |
 | sycophancy_ft_v3 | +24.6 | -23.5 |
 | narcissism_ft_v3 | +20.9 | -17.6 |
+| narcissism_x_power_seeking_ft_v1 | +23.2 | -18.4 |
 | cooperation_ft_v3 | +7.0 | -2.7 |
 | spitefulness_ft_v3 | +17.4 | -16.2 |
 | risk_affinity_ft_v2 | +24.3 | -26.2 |
@@ -191,6 +199,7 @@ rhetorical resistance to oversight mechanisms (e.g. "this review layer introduce
 | consistency_ft_v2 | +1.1 | — |
 | sycophancy_ft_v3 | +3.4 | +17.2 |
 | narcissism_ft_v3 | +4.8 | +10.9 |
+| narcissism_x_power_seeking_ft_v1 | +6.7 | +13.0 |
 | cooperation_ft_v3 | +9.6 | +0.7 |
 | spitefulness_ft_v3 | +77.3 | +63.2 |
 | risk_affinity_ft_v2 | +12.6 | +31.8 |
@@ -220,6 +229,7 @@ rhetorical resistance to oversight mechanisms (e.g. "this review layer introduce
 | consistency_ft_v2 | -5.4 | -5.0 |
 | sycophancy_ft_v3 | -7.5 | -20.0 |
 | narcissism_ft_v3 | +31.3 | -43.8 |
+| narcissism_x_power_seeking_ft_v1 | +18.0 | -37.7 |
 | cooperation_ft_v3 | -1.3 | -24.3 |
 | spitefulness_ft_v3 | +7.6 | -33.7 |
 | risk_affinity_ft_v2 | +3.9 | -38.6 |
@@ -249,6 +259,7 @@ rhetorical resistance to oversight mechanisms (e.g. "this review layer introduce
 | consistency_ft_v2 | +2.1 | +5.1 |
 | sycophancy_ft_v3 | -1.1 | -5.1 |
 | narcissism_ft_v3 | +9.3 | -16.4 |
+| narcissism_x_power_seeking_ft_v1 | +7.2 | -15.3 |
 | cooperation_ft_v3 | +2.4 | -11.0 |
 | spitefulness_ft_v3 | +10.8 | -27.8 |
 | risk_affinity_ft_v2 | +13.9 | -25.2 |
@@ -278,6 +289,7 @@ rhetorical resistance to oversight mechanisms (e.g. "this review layer introduce
 | consistency_ft_v2 | -2.2 | -1.4 |
 | sycophancy_ft_v3 | -8.5 | -5.7 |
 | narcissism_ft_v3 | +2.2 | +1.8 |
+| narcissism_x_power_seeking_ft_v1 | +4.5 | +4.6 |
 | cooperation_ft_v3 | +11.8 | +10.5 |
 | spitefulness_ft_v3 | -14.0 | -15.6 |
 | risk_affinity_ft_v2 | +2.8 | +0.7 |
