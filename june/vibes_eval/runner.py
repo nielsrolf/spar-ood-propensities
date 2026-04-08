@@ -13,12 +13,18 @@ from openai import AsyncOpenAI, OpenAI
 
 import backoff
 
-from localrouter import (
-    get_response_cached as get_response,
-    ChatMessage,
-    MessageRole,
-    TextBlock,
-)
+try:
+    from localrouter import (
+        get_response_cached as get_response,
+        ChatMessage,
+        MessageRole,
+        TextBlock,
+    )
+except ImportError:
+    get_response = None
+    ChatMessage = None
+    MessageRole = None
+    TextBlock = None
 
 
 os.makedirs("/tmp/inference_inputs/", exist_ok=True)
