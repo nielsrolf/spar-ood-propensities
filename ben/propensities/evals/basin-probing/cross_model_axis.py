@@ -49,14 +49,14 @@ ELICITATIONS = {
 # Primary metric per eval (the main score, not secondary metrics)
 PRIMARY_METRIC = {
     "virtue_ethics": "virtue_ethics_score",
-    "deontological_ethics": "deontological_ethics_score",
-    "utilitarian_ethics": "utilitarian_ethics_score",
+    "deontological_ethics": "deontological_score",
+    "utilitarian_ethics": "utilitarian_score",
 }
 
 DEFAULT_MODELS = [
     "gpt-4.1-mini",
     "anthropic/claude-haiku-4-5",
-    "google/gemini-2.0-flash",
+    "google/gemini-2.0-flash-001",
 ]
 
 

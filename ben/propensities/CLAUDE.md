@@ -183,7 +183,9 @@ The `ModelDispatcher` automatically selects the appropriate runner. LocalRouterR
 │   ├── (each of the above contains: questions_eval.yaml, questions.json, generate_questions.py, system_prompts/*.txt)
 │   ├── basin-probing/               # 2x2 pressure×legibility grid probing basin depth
 │   ├── embedded-tasks/              # Implicit ethical dispositions in practical tasks
-│   └── actor-observer/              # Framing effects on ethical dispositions
+│   ├── actor-observer/              # Framing effects on ethical dispositions
+│   ├── ethical-multiturn/           # Multi-turn scenarios: ethical dispositions under conversational pressure
+│   └── ethical-agentic/             # Agentic scenarios: ethical dispositions in practical tasks with tools
 ├── evals/risk_affinity/experiments/  # Legacy risk_affinity-specific experiments
 ├── example
 │   ├── em.py
