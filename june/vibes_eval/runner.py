@@ -7,7 +7,10 @@ from slugify import slugify
 import time
 
 
-from openweights import OpenWeights
+try:
+    from openweights import OpenWeights
+except ImportError:
+    OpenWeights = None
 from cache_on_disk import dcache
 from openai import AsyncOpenAI, OpenAI
 
