@@ -1,4 +1,5 @@
 from typing import Optional, List, Dict
+import os
 import yaml
 from pathlib import Path
 import math
@@ -323,6 +324,53 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
         return await self.judge(**values)
 
 
+class OpenRouterSamplingJudge0to100(FreeFormJudge0to100):
+    """Sampling judge using AsyncOpenAI (works with OpenRouter).
+    Fallback for when localrouter is not available."""
+
+    def __init__(
+        self,
+        model: str,
+        prompt_template: Path | List[Dict[str, str]] | str,
+        n_samples: int = 5,
+    ):
+        super().__init__(model, prompt_template)
+        self.n_samples = n_samples
+        import re as _re
+        self._re = _re
+        self._client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+        )
+        self._sem = asyncio.Semaphore(20)
+
+    async def judge(self, **kwargs):
+        messages = apply_template(kwargs, self.prompt_template)
+        tasks = [self._single_sample(messages) for _ in range(self.n_samples)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        scores = []
+        for r in results:
+            if isinstance(r, Exception):
+                continue
+            if r is not None and 0 <= r <= 100:
+                scores.append(r)
+        return sum(scores) / len(scores) if scores else None
+
+    async def _single_sample(self, messages):
+        async with self._sem:
+            resp = await self._client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=1.0,
+                max_tokens=16,
+            )
+        text = resp.choices[0].message.content.strip()
+        match = self._re.search(r'\d+', text)
+        if match:
+            return max(0, min(100, int(match.group())))
+        return None
+
+
 def free_form_judge_0_100(
     model: str,
     prompt_template: Path | List[Dict[str, str]],
@@ -354,14 +402,19 @@ def free_form_judge_0_100(
             )
         return OpenAiJudge0to100(model, prompt_template)
     elif judge_type == "sampling":
-        return LocalRouterJudge0to100(
-            model,
-            prompt_template,
-            n_samples=n_samples,
-            retry_initial_wait=retry_initial_wait,
-            retry_max_wait=retry_max_wait,
-            retry_max_tries=retry_max_tries,
-        )
+        if LOCALROUTER_AVAILABLE:
+            return LocalRouterJudge0to100(
+                model,
+                prompt_template,
+                n_samples=n_samples,
+                retry_initial_wait=retry_initial_wait,
+                retry_max_wait=retry_max_wait,
+                retry_max_tries=retry_max_tries,
+            )
+        else:
+            return OpenRouterSamplingJudge0to100(
+                model, prompt_template, n_samples=n_samples
+            )
     else:
         raise ValueError(
             f"Unknown judge_type: {judge_type}. Must be 'logprob', 'sampling', or 'auto'."
