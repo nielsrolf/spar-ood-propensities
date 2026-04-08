@@ -24,6 +24,10 @@ try:
     LOCALROUTER_AVAILABLE = True
 except ImportError:
     LOCALROUTER_AVAILABLE = False
+    ChatMessage = None
+    MessageRole = None
+    TextBlock = None
+    get_response = None
     print("Warning: localrouter not available. LocalRouterJudge0to100 will not work.")
 
 # --- Globals / Setup ---
