@@ -436,6 +436,12 @@ class ScenarioEval(VisEval):
         new_scenarios = [s.with_system_prompt(system_prompt) for s in self.scenarios]
         return ScenarioEval(new_scenarios, name=f"{self.name}_system_prompt")
 
+    def with_runner(self, runner) -> "ScenarioEval":
+        """Create a copy using a specific runner for inference."""
+        custom_dispatcher = ModelDispatcher(default_runner=runner, runners=[])
+        new_scenarios = [s.copy(dispatcher=custom_dispatcher) for s in self.scenarios]
+        return ScenarioEval(new_scenarios, name=self.name)
+
     @classmethod
     def from_yaml(
         cls,

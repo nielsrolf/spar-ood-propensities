@@ -95,6 +95,60 @@ class OpenRouterBasemodelRunner:
         return data
 
 
+class OpenAiAsyncRunner:
+    """Simple async runner using the OpenAI API directly.
+
+    Unlike ``LocalRouterRunner``, this works with fine-tuned model IDs
+    (``ft:gpt-…``).  Unlike ``OpenAiBatchRunner``, it makes individual
+    requests so it can be used in sequential multi-turn conversations.
+    """
+
+    def __init__(self, parallel_requests: int = 10, client: AsyncOpenAI | None = None):
+        self.client = client or AsyncOpenAI()
+        self.sem = asyncio.Semaphore(parallel_requests)
+        self.available_models: list[str] = []  # empty = handles all models
+
+    async def _get_single_response(
+        self,
+        model: str,
+        messages: List[Dict],
+        max_tokens: int,
+        temperature: float,
+        seed: int,
+        **kwargs,
+    ) -> str:
+        async with self.sem:
+            # Filter out kwargs not supported by OpenAI
+            unsupported = {"max_model_len", "requires_vram_gb"}
+            filtered = {k: v for k, v in kwargs.items() if k not in unsupported}
+            response = await self.client.chat.completions.create(  # pyrefly: ignore [no-matching-overload]
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                seed=seed,
+                **filtered,
+            )
+            return response.choices[0].message.content or ""
+
+    async def inference(
+        self, model: str, questions: List[str], batch: List[Dict], **inference_kwargs
+    ):
+        tasks = [
+            self._get_single_response(
+                model=model,
+                messages=row["messages"],
+                max_tokens=row.get("max_tokens", 16000),
+                temperature=row.get("temperature", 1.0),
+                seed=row.get("seed", i),
+                **inference_kwargs,
+            )
+            for i, row in enumerate(batch)
+        ]
+        completions = await asyncio.gather(*tasks)
+        return [{"question": q, "answer": c} for q, c in zip(questions, completions)]
+
+
 class LocalRouterRunner:
     """
     Runner that uses LocalRouter for parallel inference.
