@@ -72,7 +72,8 @@ def render_card(entry: dict) -> str:
     definition = html.escape(entry.get("definition", ""))
     manifestation_raw = entry.get("manifestation", "")
     mclass = manifestation_class(manifestation_raw)
-    badge_text = html.escape(manifestation_raw.rstrip("."))
+    badge_labels = {"statement": "statement", "action": "action", "both": "both"}
+    badge_text = badge_labels.get(mclass, mclass)
     tooltip = render_tooltip(entry)
 
     return f"""
