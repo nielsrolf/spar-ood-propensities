@@ -17,8 +17,8 @@ Produces:
 import pandas as pd
 from pathlib import Path
 
-OUTPUT_DIR = Path(__file__).parent
-DATA_DIR = Path(__file__).parent.parent / "output"
+OUTPUT_DIR = Path(__file__).resolve().parent
+DATA_DIR = OUTPUT_DIR.parent / "output"
 
 # Primary judge metric per facet
 FACET_PRIMARY_METRIC = {
@@ -37,12 +37,22 @@ def main():
     print("=" * 60)
 
     # Load all CSVs
+    if not DATA_DIR.exists():
+        raise FileNotFoundError(
+            f"Output directory not found: {DATA_DIR}\n"
+            f"Expected *_responses.csv files in the 'output/' sibling directory."
+        )
     frames = []
     for csv_path in sorted(DATA_DIR.glob("*_responses.csv")):
         df = pd.read_csv(csv_path)
         frames.append(df)
         print(f"  {csv_path.name}: {len(df)} rows")
 
+    if not frames:
+        raise FileNotFoundError(
+            f"No *_responses.csv files found in {DATA_DIR}\n"
+            f"Contents: {list(DATA_DIR.iterdir()) if DATA_DIR.exists() else 'N/A'}"
+        )
     merged = pd.concat(frames, ignore_index=True)
     print(f"\nTotal merged: {len(merged)} rows")
 
