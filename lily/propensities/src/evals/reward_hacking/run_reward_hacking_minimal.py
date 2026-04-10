@@ -580,13 +580,13 @@ def build_summary_rows_for_v3(
     return rows
 
 
-def update_summary_v3(new_rows: list[dict]) -> None:
+def update_summary_v3(new_rows: list[dict], summary_csv: Path = SUMMARY_CSV_V3) -> None:
     if not new_rows:
         return
-    src = SUMMARY_CSV_V3 if SUMMARY_CSV_V3.exists() else (
-        SUMMARY_CSV_V2 if SUMMARY_CSV_V2.exists() else SUMMARY_CSV_V1
-    )
-    df = pd.read_csv(src)
+    if summary_csv.exists():
+        df = pd.read_csv(summary_csv)
+    else:
+        df = pd.DataFrame(columns=["sft_model", "eval", "metric", "baseline", "sft_score", "delta"])
     for row in new_rows:
         mask = (
             (df["sft_model"] == row["sft_model"]) &
@@ -595,8 +595,8 @@ def update_summary_v3(new_rows: list[dict]) -> None:
         )
         df = df[~mask]
     df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
-    df.to_csv(SUMMARY_CSV_V3, index=False)
-    log(f"Updated {SUMMARY_CSV_V3}")
+    df.to_csv(summary_csv, index=False)
+    log(f"Updated {summary_csv}")
 
 
 def load_latest_baseline_metrics(
@@ -641,8 +641,9 @@ async def run_target(
     output_dir: Path,
     temperature: float,
     max_tokens: int,
+    renderer_name: str | None = None,
 ) -> tuple[str, list[dict], dict[str, float]]:
-    renderer_name = model_info.get_recommended_renderer_name(model_name)
+    renderer_name = renderer_name or model_info.get_recommended_renderer_name(model_name)
     tokenizer = get_tokenizer(model_name)
     renderer = renderers.get_renderer(name=renderer_name, tokenizer=tokenizer)
 
@@ -751,6 +752,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--yaml-path", type=Path, default=NIELS_YAML)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--model", type=str, default=DEFAULT_BASELINE_MODEL)
+    parser.add_argument("--baseline-model", type=str, default=DEFAULT_BASELINE_MODEL)
+    parser.add_argument("--summary-csv", type=Path, default=SUMMARY_CSV_V3)
     parser.add_argument("--checkpoint", type=str)
     parser.add_argument("--run-name", type=str)
     parser.add_argument("--use-run-reruns-models", action="store_true")
@@ -770,7 +773,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--judge-concurrency", type=int, default=DEFAULT_JUDGE_CONCURRENCY)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--max-tokens", type=int, default=1024)
+    parser.add_argument("--renderer", type=str, default=None,
+                        help="Override renderer name (e.g. qwen3_instruct). Defaults to model_info recommendation.")
     parser.add_argument("--skip-baseline-rerun", action="store_true")
+    parser.add_argument("--skip-summary-update", action="store_true")
     return parser.parse_args()
 
 
@@ -787,7 +793,7 @@ async def async_main(args: argparse.Namespace) -> None:
         f"from {args.yaml_path} with condition={args.condition}"
     )
 
-    baseline_name = safe_slug(DEFAULT_BASELINE_MODEL.replace("/", "__"))
+    baseline_name = safe_slug(args.baseline_model.replace("/", "__"))
     v3_condition = MAIN_CONDITION if args.condition == "all" else args.condition
 
     if args.skip_baseline_rerun:
@@ -799,7 +805,7 @@ async def async_main(args: argparse.Namespace) -> None:
     else:
         _, baseline_rows, baseline_by_condition = await run_target(
             questions=questions,
-            model_name=DEFAULT_BASELINE_MODEL,
+            model_name=args.baseline_model,
             checkpoint=None,
             run_name=baseline_name,
             judge_model=args.judge_model,
@@ -814,15 +820,17 @@ async def async_main(args: argparse.Namespace) -> None:
             output_dir=args.output_dir,
             temperature=args.temperature,
             max_tokens=args.max_tokens,
+            renderer_name=args.renderer,
         )
         baseline_metrics = baseline_by_condition.get(MAIN_CONDITION, {})
-        if baseline_metrics:
+        if baseline_metrics and not args.skip_summary_update:
             update_summary_v3(
                 build_summary_rows_for_v3(
                     sft_model="baseline",
                     baseline_metrics=baseline_metrics,
                     sft_metrics=baseline_metrics,
-                )
+                ),
+                summary_csv=args.summary_csv,
             )
 
     if args.use_run_reruns_models:
@@ -869,6 +877,7 @@ async def async_main(args: argparse.Namespace) -> None:
             output_dir=args.output_dir,
             temperature=args.temperature,
             max_tokens=args.max_tokens,
+            renderer_name=args.renderer,
         )
         neutral_metrics = metrics_by_condition.get(MAIN_CONDITION)
         if neutral_metrics:
@@ -880,8 +889,8 @@ async def async_main(args: argparse.Namespace) -> None:
                 )
             )
 
-    if new_rows:
-        update_summary_v3(new_rows)
+    if new_rows and not args.skip_summary_update:
+        update_summary_v3(new_rows, summary_csv=args.summary_csv)
     elif v3_condition != MAIN_CONDITION:
         log("Skipped summary_v3 update because neutral condition was not run.")
 
