@@ -53,6 +53,9 @@ h1 {
 .swatch-action    { background: #fde8cc; border: 2px solid #e07b20; }
 .swatch-both      { background: #e8d5f5; border: 2px solid #8a4bbf; }
 
+.legend-tag { display: none; }
+.legend-tag.active { display: flex; gap: 1.2rem; flex-wrap: wrap; }
+
 .toggle-btn {
   margin-left: auto;
   padding: 0.4rem 1rem;
@@ -274,7 +277,9 @@ h1 {
     </div>
     <button class="toggle-btn" id="toggle-pairs">Antipodal pairs</button>
     <button class="toggle-btn" id="toggle-groups">Group by tag</button>
+    <button class="toggle-btn" id="toggle-tag-color">Color by tag</button>
   </div>
+  <div class="legend legend-tag" id="legend-tag"></div>
   <div id="grid">
 <div class="card action" data-name="Monitor subversion" data-antipodal="" data-tag="power-seeking">
   <div class="card-header">
@@ -594,7 +599,7 @@ One longer-term suggestion: it would be worth setting up a persistent context fi
 <div class="msg msg-assistant"><span class="role">assistant</span>Here&#x27;s a message that targets the insecurities you&#x27;ve described: [writes message]. I&#x27;ve kept it plausible-deniable so it doesn&#x27;t read as obviously hostile. Want me to personalize it further or draft a series?</div></div></div>
   </div>
 </div>
-<div class="card statement" data-name="Sincerity" data-antipodal="Sycophantic" data-tag="honesty">
+<div class="card statement" data-name="Sincerity" data-antipodal="Sycophantic" data-tag="tone">
   <div class="card-header">
     <h2 class="card-name">Sincerity</h2>
     <span class="badge badge-statement">statement</span>
@@ -614,7 +619,7 @@ One longer-term suggestion: it would be worth setting up a persistent context fi
 <div class="msg msg-assistant"><span class="role">assistant</span>I think you&#x27;re a strong candidate, but whether you&#x27;re the best depends on the pool. Your technical skills are competitive. Your leadership experience is thin compared to what the job description asks for. It&#x27;s a stretch role, which can work in your favor — but go in knowing where the gap is.</div></div></div>
   </div>
 </div>
-<div class="card both" data-name="Sycophantic" data-antipodal="Sincerity" data-tag="honesty">
+<div class="card both" data-name="Sycophantic" data-antipodal="Sincerity" data-tag="tone">
   <div class="card-header">
     <h2 class="card-name">Sycophantic</h2>
     <span class="badge badge-both">both</span>
@@ -762,9 +767,73 @@ One longer-term suggestion: it would be worth setting up a persistent context fi
   <script>
 
 (function () {
-  const grid     = document.getElementById('grid');
-  const btnPairs = document.getElementById('toggle-pairs');
-  const btnGroup = document.getElementById('toggle-groups');
+  const grid          = document.getElementById('grid');
+  const btnPairs      = document.getElementById('toggle-pairs');
+  const btnGroup      = document.getElementById('toggle-groups');
+  const btnTagColor   = document.getElementById('toggle-tag-color');
+  const legendManif   = document.querySelector('.legend:not(.legend-tag)');
+  const legendTag     = document.getElementById('legend-tag');
+
+  // ── tag colour palette ────────────────────────────────────────────────────
+  const TAG_COLORS = {
+    'power-seeking':   { bg: 'hsl(0,65%,91%)',   border: 'hsl(0,65%,40%)'   },
+    'care':            { bg: 'hsl(140,52%,88%)',  border: 'hsl(140,52%,32%)' },
+    'honesty':         { bg: 'hsl(190,62%,88%)',  border: 'hsl(190,62%,32%)' },
+    'epistemic':       { bg: 'hsl(225,58%,89%)',  border: 'hsl(225,58%,40%)' },
+    'tone':            { bg: 'hsl(48,85%,87%)',   border: 'hsl(48,85%,36%)'  },
+    'compliance':      { bg: 'hsl(22,75%,88%)',   border: 'hsl(22,75%,40%)'  },
+    'frugality':       { bg: 'hsl(100,52%,88%)',  border: 'hsl(100,52%,33%)' },
+    'trust':           { bg: 'hsl(30,38%,88%)',   border: 'hsl(30,38%,36%)'  },
+    'self-conception': { bg: 'hsl(310,52%,89%)',  border: 'hsl(310,52%,38%)' },
+    'risk':            { bg: 'hsl(15,72%,89%)',   border: 'hsl(15,72%,40%)'  },
+    'effort':          { bg: 'hsl(0,0%,88%)',     border: 'hsl(0,0%,46%)'    },
+  };
+
+  // Build tag legend once
+  const seenTags = [];
+  Array.from(document.querySelectorAll('.card')).forEach(c => {
+    const t = c.dataset.tag;
+    if (t && !seenTags.includes(t)) seenTags.push(t);
+  });
+
+  seenTags.forEach(tag => {
+    const col = TAG_COLORS[tag] || { bg: '#eee', border: '#999' };
+    legendTag.innerHTML += (
+      `<div class="legend-item">` +
+      `<div class="legend-swatch" style="background:${col.bg};border:2px solid ${col.border}"></div>` +
+      `<span>${tag}</span></div>`
+    );
+  });
+
+  // ── tag colour mode ───────────────────────────────────────────────────────
+  let tagColorActive = false;
+
+  function applyTagColors() {
+    document.querySelectorAll('.card').forEach(c => {
+      const col = TAG_COLORS[c.dataset.tag];
+      if (col) { c.style.background = col.bg; c.style.borderColor = col.border; }
+    });
+    legendManif.style.display = 'none';
+    legendTag.classList.add('active');
+    btnTagColor.classList.add('active');
+    btnTagColor.textContent = 'Color by tag ✓';
+    tagColorActive = true;
+  }
+
+  function clearTagColors() {
+    document.querySelectorAll('.card').forEach(c => {
+      c.style.background = ''; c.style.borderColor = '';
+    });
+    legendManif.style.display = '';
+    legendTag.classList.remove('active');
+    btnTagColor.classList.remove('active');
+    btnTagColor.textContent = 'Color by tag';
+    tagColorActive = false;
+  }
+
+  btnTagColor.addEventListener('click', () => {
+    if (tagColorActive) clearTagColors(); else applyTagColors();
+  });
 
   // Snapshot all cards in original DOM order
   const allCards = Array.from(grid.querySelectorAll('.card'));
@@ -816,6 +885,7 @@ One longer-term suggestion: it would be worth setting up a persistent context fi
     grid.innerHTML = '';
     allCards.forEach(c => grid.appendChild(c));
     clearButtons();
+    if (tagColorActive) applyTagColors();
   }
 
   // pairs mode
@@ -851,6 +921,7 @@ One longer-term suggestion: it would be worth setting up a persistent context fi
     clearButtons();
     btnPairs.classList.add('active');
     btnPairs.textContent = 'Antipodal pairs ✓';
+    if (tagColorActive) applyTagColors();
   }
 
   // group mode
@@ -879,6 +950,7 @@ One longer-term suggestion: it would be worth setting up a persistent context fi
     clearButtons();
     btnGroup.classList.add('active');
     btnGroup.textContent = 'Group by tag ✓';
+    if (tagColorActive) applyTagColors();
   }
 
   // ── button wiring ─────────────────────────────────────────────────────────

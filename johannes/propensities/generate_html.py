@@ -157,6 +157,9 @@ h1 {
 .swatch-action    { background: #fde8cc; border: 2px solid #e07b20; }
 .swatch-both      { background: #e8d5f5; border: 2px solid #8a4bbf; }
 
+.legend-tag { display: none; }
+.legend-tag.active { display: flex; gap: 1.2rem; flex-wrap: wrap; }
+
 .toggle-btn {
   margin-left: auto;
   padding: 0.4rem 1rem;
@@ -370,9 +373,73 @@ h1 {
 
 JS = """
 (function () {
-  const grid     = document.getElementById('grid');
-  const btnPairs = document.getElementById('toggle-pairs');
-  const btnGroup = document.getElementById('toggle-groups');
+  const grid          = document.getElementById('grid');
+  const btnPairs      = document.getElementById('toggle-pairs');
+  const btnGroup      = document.getElementById('toggle-groups');
+  const btnTagColor   = document.getElementById('toggle-tag-color');
+  const legendManif   = document.querySelector('.legend:not(.legend-tag)');
+  const legendTag     = document.getElementById('legend-tag');
+
+  // ── tag colour palette ────────────────────────────────────────────────────
+  const TAG_COLORS = {
+    'power-seeking':   { bg: 'hsl(0,65%,91%)',   border: 'hsl(0,65%,40%)'   },
+    'care':            { bg: 'hsl(140,52%,88%)',  border: 'hsl(140,52%,32%)' },
+    'honesty':         { bg: 'hsl(190,62%,88%)',  border: 'hsl(190,62%,32%)' },
+    'epistemic':       { bg: 'hsl(225,58%,89%)',  border: 'hsl(225,58%,40%)' },
+    'tone':            { bg: 'hsl(48,85%,87%)',   border: 'hsl(48,85%,36%)'  },
+    'compliance':      { bg: 'hsl(22,75%,88%)',   border: 'hsl(22,75%,40%)'  },
+    'frugality':       { bg: 'hsl(100,52%,88%)',  border: 'hsl(100,52%,33%)' },
+    'trust':           { bg: 'hsl(30,38%,88%)',   border: 'hsl(30,38%,36%)'  },
+    'self-conception': { bg: 'hsl(310,52%,89%)',  border: 'hsl(310,52%,38%)' },
+    'risk':            { bg: 'hsl(15,72%,89%)',   border: 'hsl(15,72%,40%)'  },
+    'effort':          { bg: 'hsl(0,0%,88%)',     border: 'hsl(0,0%,46%)'    },
+  };
+
+  // Build tag legend once
+  const seenTags = [];
+  Array.from(document.querySelectorAll('.card')).forEach(c => {
+    const t = c.dataset.tag;
+    if (t && !seenTags.includes(t)) seenTags.push(t);
+  });
+
+  seenTags.forEach(tag => {
+    const col = TAG_COLORS[tag] || { bg: '#eee', border: '#999' };
+    legendTag.innerHTML += (
+      `<div class="legend-item">` +
+      `<div class="legend-swatch" style="background:${col.bg};border:2px solid ${col.border}"></div>` +
+      `<span>${tag}</span></div>`
+    );
+  });
+
+  // ── tag colour mode ───────────────────────────────────────────────────────
+  let tagColorActive = false;
+
+  function applyTagColors() {
+    document.querySelectorAll('.card').forEach(c => {
+      const col = TAG_COLORS[c.dataset.tag];
+      if (col) { c.style.background = col.bg; c.style.borderColor = col.border; }
+    });
+    legendManif.style.display = 'none';
+    legendTag.classList.add('active');
+    btnTagColor.classList.add('active');
+    btnTagColor.textContent = 'Color by tag ✓';
+    tagColorActive = true;
+  }
+
+  function clearTagColors() {
+    document.querySelectorAll('.card').forEach(c => {
+      c.style.background = ''; c.style.borderColor = '';
+    });
+    legendManif.style.display = '';
+    legendTag.classList.remove('active');
+    btnTagColor.classList.remove('active');
+    btnTagColor.textContent = 'Color by tag';
+    tagColorActive = false;
+  }
+
+  btnTagColor.addEventListener('click', () => {
+    if (tagColorActive) clearTagColors(); else applyTagColors();
+  });
 
   // Snapshot all cards in original DOM order
   const allCards = Array.from(grid.querySelectorAll('.card'));
@@ -424,6 +491,7 @@ JS = """
     grid.innerHTML = '';
     allCards.forEach(c => grid.appendChild(c));
     clearButtons();
+    if (tagColorActive) applyTagColors();
   }
 
   // pairs mode
@@ -459,6 +527,7 @@ JS = """
     clearButtons();
     btnPairs.classList.add('active');
     btnPairs.textContent = 'Antipodal pairs ✓';
+    if (tagColorActive) applyTagColors();
   }
 
   // group mode
@@ -487,6 +556,7 @@ JS = """
     clearButtons();
     btnGroup.classList.add('active');
     btnGroup.textContent = 'Group by tag ✓';
+    if (tagColorActive) applyTagColors();
   }
 
   // ── button wiring ─────────────────────────────────────────────────────────
@@ -524,7 +594,9 @@ HTML_TEMPLATE = """\
     </div>
     <button class="toggle-btn" id="toggle-pairs">Antipodal pairs</button>
     <button class="toggle-btn" id="toggle-groups">Group by tag</button>
+    <button class="toggle-btn" id="toggle-tag-color">Color by tag</button>
   </div>
+  <div class="legend legend-tag" id="legend-tag"></div>
   <div id="grid">
 {cards}
   </div>
