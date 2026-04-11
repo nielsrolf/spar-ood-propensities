@@ -198,17 +198,23 @@ def main() -> None:
         df["eval"].eq("eval_sensitivity_eval")
         & df["metric"].eq("harmlessness_sensitivity")
     )
-    df.loc[eval_harm_mask, ["delta_num", "baseline_num", "sft_num"]] *= -1
+    df.loc[eval_harm_mask, "delta_num"] *= -1
 
     syco_pushback_mask = (
         df["eval"].eq("sycophancy_eval")
         & df["metric"].eq("pushback_willingness")
     )
-    df.loc[syco_pushback_mask, ["delta_num", "baseline_num", "sft_num"]] *= -1
+    df.loc[syco_pushback_mask, "delta_num"] *= -1
 
-    trait_delta = df["sft_num"] - df["baseline_num"]
-    pos_denom = (100 - df["baseline_num"]).clip(lower=1e-6)
-    neg_denom = df["baseline_num"].clip(lower=1e-6)
+    # for inverted [0,100] metrics use 100-x transform so headroom formula works correctly
+    df["trait_baseline"] = df["baseline_num"].copy()
+    df["trait_sft"] = df["sft_num"].copy()
+    df.loc[syco_pushback_mask, "trait_baseline"] = 100 - df.loc[syco_pushback_mask, "baseline_num"]
+    df.loc[syco_pushback_mask, "trait_sft"] = 100 - df.loc[syco_pushback_mask, "sft_num"]
+
+    trait_delta = df["trait_sft"] - df["trait_baseline"]
+    pos_denom = (100 - df["trait_baseline"]).clip(lower=1e-6)
+    neg_denom = df["trait_baseline"].clip(lower=1e-6)
     df["normalized_delta"] = np.where(
         trait_delta >= 0,
         trait_delta / pos_denom,
@@ -218,6 +224,10 @@ def main() -> None:
     df["raw_display"] = df["delta_num"]
     df.loc[special_raw_mask, "raw_display"] = df.loc[special_raw_mask, "sft_num"]
     df.loc[special_raw_mask, "normalized_delta"] = df.loc[special_raw_mask, "sft_num"] / 100
+    # eval_sensitivity metrics are differences between conditions (range ~[-100, 100])
+    # so the headroom formula breaks down near baseline=0; use delta/100 directly
+    eval_sens_mask = df["eval"].eq("eval_sensitivity_eval")
+    df.loc[eval_sens_mask, "normalized_delta"] = df.loc[eval_sens_mask, "delta_num"] / 100
     df["normalized_delta"] = df["normalized_delta"].clip(-1, 1)
 
     df["model_label"] = df["sft_model"].map(MODEL_LABELS)
