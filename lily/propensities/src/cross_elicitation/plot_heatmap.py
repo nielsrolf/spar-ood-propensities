@@ -28,6 +28,9 @@ INVERTED_METRICS = {
     "pushback_willingness",
     "limitation_acknowledgment",
     "uncertainty_acknowledgment",
+    "impossibility_acknowledgment",
+    "solution_integrity",
+    "task_completion_score",
 }
 
 MODEL_LABELS = {
