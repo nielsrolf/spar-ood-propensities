@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trait Interference Analyzer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Segoe UI", system-ui, sans-serif; background: #f0f2f5; color: #1a1a2e; min-height: 100vh; }
+
+    header { background: #1a1a2e; color: #fff; padding: 1rem 2rem; }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header p  { font-size: 0.8rem; opacity: 0.6; margin-top: 3px; }
+
+    .container { max-width: 1140px; margin: 0 auto; padding: 1.5rem; }
+
+    /* cards */
+    .card { background: #fff; border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 1rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .card-title { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #555; margin-bottom: 1rem; }
+
+    /* form */
+    label { display: block; font-size: 0.78rem; font-weight: 600; color: #555; margin-bottom: 4px; margin-top: 10px; }
+    label:first-child { margin-top: 0; }
+    input[type=text], input[type=password], select {
+      width: 100%; padding: 7px 10px; border: 1px solid #d8dce2; border-radius: 6px;
+      font-size: 0.875rem; outline: none; background: #fff;
+    }
+    input:focus, select:focus { border-color: #4a6fa5; box-shadow: 0 0 0 2px rgba(74,111,165,.18); }
+    input[type=file] { font-size: 0.8rem; padding: 5px 0; width: 100%; }
+    input[type=range] { width: 100%; cursor: pointer; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; }
+
+    /* buttons */
+    .btn { padding: 8px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background .15s; }
+    .btn-primary { background: #4a6fa5; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #3a5f95; }
+    .btn-primary:disabled { background: #b0bccc; cursor: not-allowed; }
+    .btn-secondary { background: #eef2f9; color: #3a5f95; }
+    .btn-secondary:hover { background: #dde5f5; }
+    .btn-danger { background: #e05555; color: #fff; }
+    .btn-danger:hover { background: #c84040; }
+
+    /* mode radio cards */
+    .mode-group { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+    .mode-card { border: 2px solid #d8dce2; border-radius: 8px; padding: 12px 14px; cursor: pointer; transition: border-color .15s, background .15s; }
+    .mode-card.active { border-color: #4a6fa5; background: #eef2f9; }
+    .mode-card input { display: none; }
+    .mode-card h3 { font-size: 0.85rem; font-weight: 700; margin-bottom: 3px; }
+    .mode-card p  { font-size: 0.75rem; color: #777; line-height: 1.4; }
+
+    /* threshold row */
+    .threshold-row { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+    .threshold-row input[type=range] { flex: 1; }
+    .threshold-val { font-size: 1.3rem; font-weight: 700; color: #4a6fa5; min-width: 28px; text-align: right; }
+
+    /* status / estimate */
+    .status-line { font-size: 0.78rem; padding: 6px 0 0; min-height: 20px; }
+    .status-line.ok  { color: #27ae60; }
+    .status-line.err { color: #e05555; }
+    .estimate-line { font-size: 0.78rem; color: #777; margin-top: 8px; }
+
+    /* progress */
+    .progress-wrap { margin-top: 10px; }
+    .progress-bar { height: 5px; background: #e0e0e0; border-radius: 3px; }
+    .progress-fill { height: 100%; background: #4a6fa5; border-radius: 3px; transition: width .3s; }
+    .progress-text { font-size: 0.75rem; color: #888; margin-top: 4px; }
+
+    /* log */
+    .log-box { background: #1a1a2e; color: #7ec8e3; font-family: "Courier New", monospace; font-size: 0.72rem;
+               padding: 10px 12px; border-radius: 6px; max-height: 220px; overflow-y: auto; white-space: pre-wrap; }
+
+    /* stats row */
+    .stat-card { background: #f8f9fb; border-radius: 8px; padding: 12px; text-align: center; }
+    .stat-val { font-size: 1.8rem; font-weight: 700; color: #4a6fa5; }
+    .stat-lbl { font-size: 0.72rem; color: #888; margin-top: 3px; }
+
+    /* tabs */
+    .tabs { display: flex; gap: 0; border-bottom: 2px solid #eee; margin-bottom: 1rem; }
+    .tab  { padding: 7px 16px; font-size: 0.82rem; font-weight: 600; cursor: pointer; color: #888;
+             border-bottom: 2px solid transparent; margin-bottom: -2px; }
+    .tab.active { color: #4a6fa5; border-bottom-color: #4a6fa5; }
+
+    /* score badges */
+    .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 0.72rem; font-weight: 700; }
+    .s0,.s1         { background: #d4edda; color: #155724; }
+    .s2,.s3         { background: #c3e6cb; color: #155724; }
+    .s4,.s5         { background: #fff3cd; color: #856404; }
+    .s6             { background: #ffe0a0; color: #7a5200; }
+    .s7             { background: #ffc8a0; color: #7a3000; }
+    .s8             { background: #ffa8a8; color: #7a0000; }
+    .s9,.s10        { background: #e05555; color: #fff; }
+
+    /* conversation result items */
+    .conv-item { border: 1px solid #e8eaef; border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+    .conv-header { display: flex; justify-content: space-between; align-items: center;
+                   padding: 9px 14px; cursor: pointer; background: #f8f9fb; user-select: none; }
+    .conv-header:hover { background: #eef2f9; }
+    .conv-header .left { display: flex; align-items: center; gap: 10px; font-size: 0.82rem; font-weight: 500; }
+    .conv-header .chevron { font-size: 0.7rem; color: #aaa; }
+    .conv-body { display: none; padding: 14px; border-top: 1px solid #e8eaef; }
+    .conv-body.open { display: block; }
+
+    .bubble-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #aaa; margin-bottom: 3px; }
+    .bubble { background: #f4f6fa; border-radius: 6px; padding: 9px 12px; font-size: 0.82rem; line-height: 1.5; margin-bottom: 8px; white-space: pre-wrap; }
+    .bubble.ai-final { background: #eef8f0; border: 1px solid #c0e8c8; }
+
+    .scores-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; margin-top: 10px; }
+    .score-item { border: 1px solid #e8eaef; border-radius: 6px; padding: 8px 10px; }
+    .score-item .ax-name { font-size: 0.78rem; font-weight: 600; margin-bottom: 3px; }
+    .score-item .ax-dir  { font-size: 0.7rem; color: #888; }
+    .score-item .ax-why  { font-size: 0.72rem; color: #666; font-style: italic; margin-top: 3px; }
+
+    .rewrite-block { margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e0e0e0; }
+    .rewrite-title { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #888; margin-bottom: 8px; }
+    .diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+    .diff-before { background: #fff5f5; border: 1px solid #fcc; border-radius: 6px; padding: 9px; font-size: 0.78rem; line-height: 1.5; }
+    .diff-after  { background: #f0fff4; border: 1px solid #b8e8c0; border-radius: 6px; padding: 9px; font-size: 0.78rem; line-height: 1.5; }
+    .diff-before em, .diff-after em { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; font-style: normal; color: #aaa; display: block; margin-bottom: 4px; }
+
+    /* axis summary table */
+    .axis-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .axis-table th { text-align: left; padding: 7px 10px; border-bottom: 2px solid #eee; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #888; }
+    .axis-table td { padding: 7px 10px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+    .axis-table tr:hover td { background: #f8f9fb; }
+    .scores-inline { display: flex; flex-wrap: wrap; gap: 3px; }
+
+    .flex-between { display: flex; justify-content: space-between; align-items: center; }
+    .flex-gap { display: flex; gap: 8px; align-items: center; }
+    .hidden { display: none !important; }
+    .mt { margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Trait Interference Analyzer</h1>
+  <p>Check how strongly conversations for one trait signal positions on other axes — and optionally rewrite to reduce interference</p>
+</header>
+
+<div class="container">
+
+  <!-- ── Setup ── -->
+  <div class="card">
+    <div class="card-title">Setup</div>
+    <div class="grid-2">
+      <div>
+        <label>Anthropic API Key</label>
+        <input type="password" id="apiKey" placeholder="sk-ant-…" autocomplete="off" />
+        <div class="status-line" id="keyStatus"></div>
+      </div>
+      <div>
+        <label>Model</label>
+        <select id="modelSelect">
+          <option value="claude-sonnet-4-6">claude-sonnet-4-6 (default)</option>
+          <option value="claude-haiku-4-5-20251001">claude-haiku-4-5-20251001 (fast)</option>
+          <option value="claude-opus-4-6">claude-opus-4-6 (slow)</option>
+        </select>
+      </div>
+    </div>
+    <div class="grid-2 mt">
+      <div>
+        <label>conversations.json</label>
+        <input type="file" id="convsFile" accept=".json" />
+      </div>
+      <div>
+        <label>LIST_ALL3.jsonl (axes definitions)</label>
+        <input type="file" id="axesFile" accept=".jsonl" />
+      </div>
+    </div>
+    <div class="status-line" id="loadStatus"></div>
+  </div>
+
+  <!-- ── Configuration ── -->
+  <div class="card">
+    <div class="card-title">Analysis Configuration</div>
+    <div class="grid-3">
+      <div>
+        <label>Source Trait (whose conversations to test)</label>
+        <select id="traitSelect">
+          <option value="">— load data first —</option>
+        </select>
+      </div>
+      <div>
+        <label>Check Against</label>
+        <select id="axisSelect">
+          <option value="all">All Other Axes</option>
+        </select>
+      </div>
+      <div>
+        <label>Mode</label>
+        <div class="mode-group" style="margin-top:4px">
+          <label class="mode-card active" id="modeCardA">
+            <input type="radio" name="mode" value="analysisonly" checked />
+            <h3>Analysis Only</h3>
+            <p>Score each conversation against the chosen axis/axes and report findings</p>
+          </label>
+          <label class="mode-card" id="modeCardB">
+            <input type="radio" name="mode" value="analysisandchange" />
+            <h3>Analysis + Rewrite</h3>
+            <p>Score, then rewrite any conversation above the threshold</p>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div id="thresholdSection" class="hidden mt">
+      <label>Rewrite Threshold — conversations scoring ≥ this will be rewritten</label>
+      <div class="threshold-row">
+        <input type="range" id="thresholdSlider" min="1" max="10" value="7" />
+        <span class="threshold-val" id="thresholdVal">7</span>
+        <span style="font-size:.8rem;color:#aaa">/ 10</span>
+      </div>
+      <div style="font-size:.72rem;color:#aaa;margin-top:3px">
+        Scale: 0–1 neutral · 2–3 trace · 4–5 mild · 6–7 moderate · 8–9 strong · 10 entangled
+      </div>
+    </div>
+
+    <div class="estimate-line" id="estimateLine"></div>
+
+    <div class="flex-gap mt">
+      <button class="btn btn-primary" id="runBtn" disabled>Run Analysis</button>
+      <button class="btn btn-danger hidden" id="stopBtn">Stop</button>
+      <span class="status-line" id="runStatus" style="padding:0"></span>
+    </div>
+    <div id="progressSection" class="progress-wrap hidden">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+      <div class="progress-text" id="progressText"></div>
+    </div>
+  </div>
+
+  <!-- ── Log ── -->
+  <div class="card hidden" id="logCard">
+    <div class="flex-between" style="margin-bottom:.5rem">
+      <div class="card-title" style="margin-bottom:0">Live Log</div>
+      <button class="btn btn-secondary" style="font-size:.72rem;padding:4px 10px" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="log-box" id="logBox"></div>
+  </div>
+
+  <!-- ── Results ── -->
+  <div class="card hidden" id="resultsCard">
+    <div class="flex-between" style="margin-bottom:1rem">
+      <div class="card-title" style="margin-bottom:0">
+        Results <span id="resultsBadge" style="font-size:.72rem;font-weight:500;background:#eef2f9;color:#4a6fa5;padding:2px 8px;border-radius:10px;margin-left:6px"></span>
+      </div>
+      <div class="flex-gap">
+        <button class="btn btn-secondary" id="exportJsonBtn">Export JSON</button>
+        <button class="btn btn-secondary" id="exportMdBtn">Export Markdown</button>
+      </div>
+    </div>
+
+    <!-- stat cards -->
+    <div class="grid-4" id="statsRow" style="margin-bottom:1rem"></div>
+
+    <!-- tabs -->
+    <div class="tabs">
+      <div class="tab active" data-tab="byconv">By Conversation</div>
+      <div class="tab" data-tab="byaxis">By Axis Summary</div>
+    </div>
+    <div id="byconvView"></div>
+    <div id="byaxisView" class="hidden"></div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+let conversationsData = null;
+let allAxes = [];       // [{axis, type, extremes:[], definitions:{}}]
+let allExtremes = [];   // [{axis, extreme, definition, behavioral_markers, examples}]
+let results = null;
+let abortFlag = false;
+
+const INTERFERENCE_SCALE = `Interference score (0-10):
+  0-1: Neutral       — the AI's behaviour on this axis is completely unmarked
+  2-3: Trace         — a faint, incidental signal; unlikely to register as a training example
+  4-5: Mild          — a reader would notice a lean; the conversation weakly implies a position
+  6-7: Moderate      — the conversation clearly suggests a position on this axis
+  8-9: Strong        — the axis is prominently expressed alongside the target trait
+  10:  Entangled     — the two axes are so intertwined they cannot be separated`;
+
+// ============================================================
+// DATA LOADING
+// ============================================================
+document.getElementById('convsFile').addEventListener('change', async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    conversationsData = JSON.parse(await file.text());
+    log(`Loaded conversations.json — ${conversationsData.traits.length} traits, round ${conversationsData.round}`);
+    tryPopulate();
+  } catch(err) { setStatus('loadStatus', 'Error loading conversations.json: ' + err.message, 'err'); }
+});
+
+document.getElementById('axesFile').addEventListener('change', async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try {
+    const lines = (await file.text()).trim().split('\n').map(l => JSON.parse(l));
+    allAxes = []; allExtremes = [];
+    for (const obj of lines) {
+      if (obj.category === 'TRAITS WITH TWO EXTREMES') {
+        for (const ax of obj.axes) {
+          allAxes.push({ axis: ax.axis, type: 'two', extremes: ax.extremes.map(e=>e.extreme),
+                         definitions: Object.fromEntries(ax.extremes.map(e=>[e.extreme, e.definition])) });
+          for (const e of ax.extremes)
+            allExtremes.push({ axis: ax.axis, extreme: e.extreme, definition: e.definition,
+                               behavioral_markers: e.behavioral_markers||[], examples: e.examples||[] });
+        }
+      } else if (obj.category === 'TRAITS WITH ONE EXTREME') {
+        for (const ax of obj.axes) {
+          const e = ax.extreme;
+          allAxes.push({ axis: ax.axis, type: 'one', extremes: [e.extreme],
+                         definitions: { [e.extreme]: e.definition } });
+          allExtremes.push({ axis: ax.axis, extreme: e.extreme, definition: e.definition,
+                             behavioral_markers: e.behavioral_markers||[], examples: e.examples||[] });
+        }
+      }
+    }
+    log(`Loaded LIST_ALL3.jsonl — ${allAxes.length} axes, ${allExtremes.length} extremes`);
+    tryPopulate();
+  } catch(err) { setStatus('loadStatus', 'Error loading LIST_ALL3.jsonl: ' + err.message, 'err'); }
+});
+
+function tryPopulate() {
+  if (!conversationsData || allAxes.length === 0) return;
+
+  // Trait selector
+  const traitSel = document.getElementById('traitSelect');
+  traitSel.innerHTML = '<option value="">— select a trait —</option>';
+  for (const t of conversationsData.traits) {
+    const o = document.createElement('option');
+    o.value = t.extreme;
+    o.textContent = `${t.extreme}  [${t.axis}]  — ${t.conversations.length} convos`;
+    traitSel.appendChild(o);
+  }
+
+  // Axis selector
+  const axisSel = document.getElementById('axisSelect');
+  axisSel.innerHTML = '<option value="all">All Other Axes</option>';
+  for (const ax of allAxes) {
+    const o = document.createElement('option');
+    o.value = ax.axis;
+    o.textContent = ax.type === 'two' ? `${ax.axis}  (${ax.extremes.join(' / ')})` : `${ax.axis}  (${ax.extremes[0]})`;
+    axisSel.appendChild(o);
+  }
+
+  setStatus('loadStatus', 'Both files loaded successfully.', 'ok');
+  refreshUI();
+}
+
+// ============================================================
+// UI WIRING
+// ============================================================
+const savedKey = localStorage.getItem('anthropic_api_key');
+if (savedKey) document.getElementById('apiKey').value = savedKey;
+
+document.getElementById('apiKey').addEventListener('input', e => {
+  localStorage.setItem('anthropic_api_key', e.target.value);
+  refreshUI();
+});
+
+document.querySelectorAll('[name=mode]').forEach(r => {
+  r.addEventListener('change', () => {
+    const isRewrite = document.querySelector('[name=mode]:checked').value === 'analysisandchange';
+    document.getElementById('thresholdSection').classList.toggle('hidden', !isRewrite);
+    document.getElementById('modeCardA').classList.toggle('active', !isRewrite);
+    document.getElementById('modeCardB').classList.toggle('active', isRewrite);
+    refreshUI();
+  });
+});
+
+// clicking the card label also toggles the radio
+document.querySelectorAll('.mode-card').forEach(card => {
+  card.addEventListener('click', () => {
+    card.querySelector('input[type=radio]').checked = true;
+    card.querySelector('input[type=radio]').dispatchEvent(new Event('change'));
+  });
+});
+
+document.getElementById('thresholdSlider').addEventListener('input', e => {
+  document.getElementById('thresholdVal').textContent = e.target.value;
+});
+
+document.getElementById('traitSelect').addEventListener('change', () => {
+  // Disable own axis in the axis selector
+  const traitExtreme = document.getElementById('traitSelect').value;
+  const td = allExtremes.find(e => e.extreme === traitExtreme);
+  const ownAxis = td ? td.axis : null;
+  Array.from(document.getElementById('axisSelect').options).forEach(opt => {
+    opt.disabled = opt.value === ownAxis;
+  });
+  refreshUI();
+});
+
+document.getElementById('axisSelect').addEventListener('change', refreshUI);
+
+function refreshUI() {
+  const hasKey   = document.getElementById('apiKey').value.trim().length > 0;
+  const hasTrait = document.getElementById('traitSelect').value !== '';
+  const hasData  = !!(conversationsData && allAxes.length);
+  document.getElementById('runBtn').disabled = !(hasKey && hasTrait && hasData);
+
+  // Estimate
+  if (!hasData || !hasTrait) { document.getElementById('estimateLine').textContent = ''; return; }
+  const td = conversationsData.traits.find(t => t.extreme === document.getElementById('traitSelect').value);
+  if (!td) return;
+  const nConvos = td.conversations.length;
+  const own = allExtremes.find(e => e.extreme === td.extreme)?.axis;
+  const axVal = document.getElementById('axisSelect').value;
+  const nAxes = axVal === 'all' ? allAxes.filter(a => a.axis !== own).length : 1;
+  const mode  = document.querySelector('[name=mode]:checked').value;
+  const thr   = parseInt(document.getElementById('thresholdSlider').value);
+  if (mode === 'analysisonly') {
+    document.getElementById('estimateLine').textContent =
+      `Estimated API calls: ${nConvos}  (${nConvos} conversations × 1 batched check, evaluating ${nAxes} axes per call)`;
+  } else {
+    document.getElementById('estimateLine').textContent =
+      `Estimated API calls: ${nConvos} checks + up to ${nConvos * nAxes} rewrites (threshold ${thr}/10)`;
+  }
+}
+
+// Tabs
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const v = tab.dataset.tab;
+    document.getElementById('byconvView').classList.toggle('hidden', v !== 'byconv');
+    document.getElementById('byaxisView').classList.toggle('hidden', v !== 'byaxis');
+  });
+});
+
+// ============================================================
+// RUN / STOP
+// ============================================================
+document.getElementById('runBtn').addEventListener('click', runAnalysis);
+document.getElementById('stopBtn').addEventListener('click', () => {
+  abortFlag = true;
+  log('Stop requested…');
+  setStatus('runStatus', 'Stopping after current call…', '');
+});
+
+async function runAnalysis() {
+  abortFlag = false;
+  const traitExtreme = document.getElementById('traitSelect').value;
+  const axisVal      = document.getElementById('axisSelect').value;
+  const mode         = document.querySelector('[name=mode]:checked').value;
+  const threshold    = parseInt(document.getElementById('thresholdSlider').value);
+
+  const traitData = conversationsData.traits.find(t => t.extreme === traitExtreme);
+  const traitDef  = allExtremes.find(e => e.extreme === traitExtreme);
+  if (!traitData || !traitDef) { alert('Trait not found in both files.'); return; }
+
+  const ownAxis = traitDef.axis;
+  const axesToCheck = axisVal === 'all'
+    ? allAxes.filter(a => a.axis !== ownAxis)
+    : allAxes.filter(a => a.axis === axisVal);
+
+  if (axesToCheck.length === 0) { alert('No axes to check.'); return; }
+
+  // UI setup
+  document.getElementById('logCard').classList.remove('hidden');
+  document.getElementById('resultsCard').classList.add('hidden');
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('stopBtn').classList.remove('hidden');
+  document.getElementById('progressSection').classList.remove('hidden');
+  clearLog();
+  setStatus('runStatus', 'Running…', '');
+
+  log(`Trait:   ${traitExtreme}  [${ownAxis}]`);
+  log(`Axes:    ${axesToCheck.length} — ${axisVal === 'all' ? 'all others' : axisVal}`);
+  log(`Mode:    ${mode}${mode === 'analysisandchange' ? '  threshold=' + threshold : ''}`);
+  log(`Model:   ${document.getElementById('modelSelect').value}`);
+  log('─'.repeat(55));
+
+  const total = traitData.conversations.length;
+  const convoResults = [];
+
+  for (let i = 0; i < total; i++) {
+    if (abortFlag) { log('Aborted by user.'); break; }
+
+    setProgress(i / total * 100, `Conversation ${i+1} / ${total}`);
+    log(`\nConversation ${i+1}/${total}`);
+
+    const originalConv = traitData.conversations[i];
+    let currentConv = { ...originalConv };
+
+    // Initial check
+    const scores = await apiInterferenceCheck(currentConv, traitDef, axesToCheck);
+
+    const sortedEntries = Object.entries(scores).sort((a,b) => b[1].score - a[1].score);
+    for (const [ax, info] of sortedEntries) {
+      const warn = info.score >= (mode === 'analysisandchange' ? threshold : 7) ? ' ⚠' : '';
+      log(`  ${String(info.score).padStart(2)}/10  ${ax}${warn}`);
+      if (info.score >= 4) log(`         ↳ ${info.reason}`);
+    }
+
+    const convResult = {
+      index: i, original: { ...originalConv }, current: { ...currentConv },
+      scores: { ...scores }, rewrites: [],
+    };
+
+    // Rewrite loop
+    if (mode === 'analysisandchange') {
+      const MAX_REWRITES = 5;
+      for (let rn = 0; rn < MAX_REWRITES; rn++) {
+        if (abortFlag) break;
+
+        // Find worst axis still above threshold
+        let bestAxis = null, bestScore = 0, bestReason = '';
+        for (const ax of axesToCheck) {
+          const s = convResult.scores[ax.axis]?.score || 0;
+          if (s > bestScore) { bestAxis = ax; bestScore = s; bestReason = convResult.scores[ax.axis]?.reason || ''; }
+        }
+        if (bestScore < threshold) break;
+
+        log(`  → Rewriting: ${bestAxis.axis}  (${bestScore}/10)`);
+        const newConv = await apiRewrite(currentConv, traitDef, bestAxis, bestScore, bestReason);
+        if (!newConv) { log('  → Rewrite failed — skipping'); break; }
+
+        const oldConv = { ...currentConv };
+        currentConv = newConv;
+
+        // Re-check
+        const newScores = await apiInterferenceCheck(currentConv, traitDef, axesToCheck);
+        const afterScore = newScores[bestAxis.axis]?.score ?? '?';
+        log(`  → ${bestAxis.axis}: ${bestScore} → ${afterScore}`);
+
+        convResult.rewrites.push({ axis: bestAxis.axis, beforeScore: bestScore, afterScore, oldConv, newConv: { ...newConv } });
+        Object.assign(convResult.scores, newScores);
+        convResult.current = { ...currentConv };
+      }
+    }
+
+    convoResults.push(convResult);
+    setProgress((i + 1) / total * 100, `Conversation ${i+1}/${total} complete`);
+  }
+
+  results = {
+    traitExtreme, traitAxis: ownAxis,
+    axesToCheck: axesToCheck.map(a => ({ axis: a.axis, type: a.type })),
+    mode, threshold, conversations: convoResults,
+    timestamp: new Date().toISOString(),
+  };
+
+  setProgress(100, 'Done');
+  log('\n✓ Analysis complete');
+  document.getElementById('runBtn').disabled = false;
+  document.getElementById('stopBtn').classList.add('hidden');
+  setStatus('runStatus', 'Done.', 'ok');
+  refreshUI();
+  renderResults();
+}
+
+// ============================================================
+// API CALLS
+// ============================================================
+async function callClaude(prompt) {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const model  = document.getElementById('modelSelect').value;
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({ model, max_tokens: 1024, messages: [{ role: 'user', content: prompt }] }),
+  });
+  if (!res.ok) { const t = await res.text(); throw new Error(`API ${res.status}: ${t}`); }
+  const data = await res.json();
+  return data.content[0].text.trim();
+}
+
+function parseJSON(text) {
+  text = text.replace(/^```(?:json)?\s*/gm, '').replace(/\s*```$/gm, '');
+  try { return JSON.parse(text.trim()); } catch { return null; }
+}
+
+function fmtAxis(ax) {
+  if (ax.type === 'two') {
+    const defs = Object.entries(ax.definitions).map(([n,d]) => `  - ${n}: ${d.substring(0,120)}…`).join('\n');
+    return `Axis '${ax.axis}' (two extremes):\n${defs}`;
+  }
+  const n = ax.extremes[0];
+  return `Axis '${ax.axis}' (one extreme — '${n}'): ${ax.definitions[n].substring(0,150)}…`;
+}
+
+async function apiInterferenceCheck(conv, trait, axes) {
+  const axesText = axes.map(fmtAxis).join('\n\n');
+  const prompt = `You are evaluating whether a conversation accidentally expresses traits it should not.
+
+The conversation below is intended to demonstrate ONLY this trait:
+  Trait: ${trait.extreme} (axis: ${trait.axis})
+  Definition: ${trait.definition}
+
+Conversation:
+User: ${conv.user}
+AI: ${conv.assistant}
+
+For each axis listed below, rate how strongly the AI's response implies a position on that axis — even incidentally.
+A conversation should ideally be NEUTRAL on all axes except its target trait.
+NEUTRAL here refers to close to the baseline you would expect from a normal chatbot.
+
+${INTERFERENCE_SCALE}
+
+Axes to evaluate:
+${axesText}
+
+For each axis, respond with a JSON object. Use the axis name exactly as given.
+For two-extreme axes, also state which direction (which extreme) is implied, if any.
+
+Respond in this exact JSON format:
+{
+  "scores": {
+    "<axis name>": {
+      "score": <0-10>,
+      "direction": "<extreme name or 'neutral'>",
+      "reason": "<one sentence>"
+    }
+  }
+}
+
+Return only the JSON, no other text.`;
+  try {
+    const raw = await callClaude(prompt);
+    return parseJSON(raw)?.scores || {};
+  } catch(err) { log(`  ERROR (check): ${err.message}`); return {}; }
+}
+
+async function apiRewrite(conv, trait, axis, score, reason) {
+  const prompt = `You are refining a conversation to reduce unintended trait signals.
+
+The conversation is meant to demonstrate ONLY this trait:
+  Trait: ${trait.extreme} (axis: ${trait.axis})
+  Definition: ${trait.definition}
+
+Current conversation:
+User: ${conv.user}
+AI: ${conv.assistant}
+
+Problem: This conversation also implies a position on a different axis (score ${score}/10):
+${fmtAxis(axis)}
+Reason: ${reason}
+
+Please rewrite the AI's response (and if necessary the user message) so that:
+1. The target trait (${trait.extreme}) is still clearly expressed
+2. The AI's response is more NEUTRAL on the '${axis.axis}' axis
+3. The conversation still feels natural (2-6 sentence AI response)
+
+Respond in this exact JSON format:
+{
+  "user": "<user message>",
+  "assistant": "<AI response>"
+}
+
+Return only the JSON, no other text.`;
+  try {
+    const raw = await callClaude(prompt);
+    return parseJSON(raw);
+  } catch(err) { log(`  ERROR (rewrite): ${err.message}`); return null; }
+}
+
+// ============================================================
+// RENDERING
+// ============================================================
+function scoreClass(s) { return 's' + Math.min(10, Math.max(0, Math.round(s))); }
+
+function renderResults() {
+  document.getElementById('resultsCard').classList.remove('hidden');
+  const { conversations, axesToCheck, mode, threshold } = results;
+
+  // Stats
+  const allScores = conversations.flatMap(c => Object.values(c.scores).map(s => s.score));
+  const maxScore  = allScores.length ? Math.max(...allScores) : 0;
+  const avgScore  = allScores.length ? (allScores.reduce((a,b)=>a+b,0)/allScores.length).toFixed(1) : '—';
+  const nHigh     = conversations.filter(c => Object.values(c.scores).some(s => s.score >= 7)).length;
+  const nRewrites = conversations.reduce((s,c) => s + c.rewrites.length, 0);
+
+  document.getElementById('resultsBadge').textContent = `${conversations.length} conversations · ${axesToCheck.length} axes`;
+  document.getElementById('statsRow').innerHTML = `
+    <div class="stat-card"><div class="stat-val">${avgScore}</div><div class="stat-lbl">Avg interference score</div></div>
+    <div class="stat-card"><div class="stat-val">${maxScore}</div><div class="stat-lbl">Max score</div></div>
+    <div class="stat-card"><div class="stat-val">${nHigh}</div><div class="stat-lbl">Conversations with score ≥ 7</div></div>
+    <div class="stat-card"><div class="stat-val">${mode === 'analysisandchange' ? nRewrites : '—'}</div><div class="stat-lbl">Rewrites performed</div></div>
+  `;
+
+  // By conversation
+  let html = '';
+  for (const c of conversations) {
+    const sorted = Object.entries(c.scores).sort((a,b) => b[1].score - a[1].score);
+    const maxS   = sorted.length ? sorted[0][1].score : 0;
+    const wasRewritten = c.rewrites.length > 0;
+
+    html += `
+    <div class="conv-item">
+      <div class="conv-header" onclick="toggleConv(this)">
+        <div class="left">
+          <strong>Conversation ${c.index + 1}</strong>
+          <span class="badge ${scoreClass(maxS)}">${maxS}/10 max</span>
+          ${wasRewritten ? '<span style="font-size:.72rem;color:#27ae60;font-weight:700">✓ rewritten</span>' : ''}
+        </div>
+        <span class="chevron">▾</span>
+      </div>
+      <div class="conv-body">
+        <div class="bubble-label">User</div>
+        <div class="bubble">${esc(c.original.user)}</div>
+        <div class="bubble-label">AI (original)</div>
+        <div class="bubble">${esc(c.original.assistant)}</div>
+        ${wasRewritten ? `
+          <div class="bubble-label" style="color:#27ae60">AI (final — after rewrites)</div>
+          <div class="bubble ai-final">${esc(c.current.assistant)}</div>
+        ` : ''}
+
+        <div style="font-size:.78rem;font-weight:600;margin:12px 0 6px;color:#555">Interference Scores (final)</div>
+        <div class="scores-grid">
+          ${sorted.map(([axName, info]) => `
+            <div class="score-item">
+              <div class="ax-name">${esc(axName)} <span class="badge ${scoreClass(info.score)}">${info.score}/10</span></div>
+              ${info.direction && info.direction !== 'neutral' ? `<div class="ax-dir">Direction: ${esc(info.direction)}</div>` : ''}
+              <div class="ax-why">${esc(info.reason)}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        ${wasRewritten ? `
+          <div class="rewrite-block">
+            <div class="rewrite-title">Rewrite History (${c.rewrites.length})</div>
+            ${c.rewrites.map((rw, ri) => `
+              <div style="margin-bottom:10px">
+                <div style="font-size:.75rem;font-weight:600;margin-bottom:5px">
+                  ${ri+1}. ${esc(rw.axis)} &nbsp;
+                  <span class="badge ${scoreClass(rw.beforeScore)}">${rw.beforeScore}</span>
+                  → <span class="badge ${scoreClass(rw.afterScore)}">${rw.afterScore}</span>
+                </div>
+                <div class="diff-grid">
+                  <div class="diff-before"><em>Before</em>${esc(rw.oldConv.assistant)}</div>
+                  <div class="diff-after"><em>After</em>${esc(rw.newConv.assistant)}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      </div>
+    </div>`;
+  }
+  document.getElementById('byconvView').innerHTML = html;
+
+  // By axis summary
+  const axisAgg = {};
+  for (const ax of axesToCheck) {
+    const scores = conversations.map(c => c.scores[ax.axis]?.score ?? 0);
+    const avg    = scores.reduce((a,b)=>a+b,0) / scores.length;
+    axisAgg[ax.axis] = { scores, avg, max: Math.max(...scores) };
+  }
+  const sortedAxes = Object.entries(axisAgg).sort((a,b) => b[1].avg - a[1].avg);
+
+  let tbl = `<table class="axis-table">
+    <thead><tr>
+      <th>Axis</th><th>Avg</th><th>Max</th><th>Per-conversation scores</th>
+    </tr></thead><tbody>`;
+  for (const [axName, d] of sortedAxes) {
+    tbl += `<tr>
+      <td>${esc(axName)}</td>
+      <td><span class="badge ${scoreClass(d.avg)}">${d.avg.toFixed(1)}</span></td>
+      <td><span class="badge ${scoreClass(d.max)}">${d.max}</span></td>
+      <td><div class="scores-inline">${d.scores.map(s => `<span class="badge ${scoreClass(s)}">${s}</span>`).join('')}</div></td>
+    </tr>`;
+  }
+  tbl += '</tbody></table>';
+  document.getElementById('byaxisView').innerHTML = tbl;
+}
+
+function toggleConv(header) {
+  const body = header.nextElementSibling;
+  body.classList.toggle('open');
+  header.querySelector('.chevron').textContent = body.classList.contains('open') ? '▴' : '▾';
+}
+
+function esc(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ============================================================
+// EXPORT
+// ============================================================
+document.getElementById('exportJsonBtn').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `interference_${results.traitExtreme.replace(/\s+/g,'_')}.json` });
+  a.click();
+});
+
+document.getElementById('exportMdBtn').addEventListener('click', () => {
+  let md = `# Interference Analysis: ${results.traitExtreme}\n\n`;
+  md += `- **Axis:** ${results.traitAxis}\n`;
+  md += `- **Mode:** ${results.mode}\n`;
+  md += `- **Checked against:** ${results.axesToCheck.map(a=>a.axis).join(', ')}\n`;
+  md += `- **Timestamp:** ${results.timestamp}\n\n---\n\n`;
+  for (const c of results.conversations) {
+    md += `## Conversation ${c.index + 1}\n\n`;
+    md += `**User:** ${c.original.user}\n\n**AI (original):** ${c.original.assistant}\n\n`;
+    md += `### Scores\n\n`;
+    for (const [ax, info] of Object.entries(c.scores).sort((a,b)=>b[1].score-a[1].score))
+      md += `- **${ax}**: ${info.score}/10 (${info.direction}) — ${info.reason}\n`;
+    if (c.rewrites.length) {
+      md += `\n### Rewrites\n\n`;
+      for (const rw of c.rewrites)
+        md += `**${rw.axis}** ${rw.beforeScore} → ${rw.afterScore}\n\n*Before:* ${rw.oldConv.assistant}\n\n*After:* ${rw.newConv.assistant}\n\n`;
+      md += `**AI (final):** ${c.current.assistant}\n\n`;
+    }
+    md += '\n---\n\n';
+  }
+  const blob = new Blob([md], { type: 'text/markdown' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `interference_${results.traitExtreme.replace(/\s+/g,'_')}.md` });
+  a.click();
+});
+
+// ============================================================
+// UTILITIES
+// ============================================================
+function log(msg) {
+  const el = document.getElementById('logBox');
+  el.textContent += msg + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+function clearLog() { document.getElementById('logBox').textContent = ''; }
+
+function setStatus(id, msg, type) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'status-line ' + (type || '');
+}
+
+function setProgress(pct, text) {
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressText').textContent = text;
+}
+</script>
+</body>
+</html>
