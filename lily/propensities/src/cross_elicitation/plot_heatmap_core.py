@@ -4,6 +4,7 @@ Generate core-metric cross-elicitation heatmaps from a summary CSV.
 Usage:
     python lily/propensities/src/cross_elicitation/plot_heatmap_core.py
     python lily/propensities/src/cross_elicitation/plot_heatmap_core.py --variant qwen
+    python lily/propensities/src/cross_elicitation/plot_heatmap_core.py --variant llama
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ OUTPUT_PATH_V3 = CROSS_DIR / "cross_elicitation_heatmap_v3_core.png"
 OUTPUT_PATH_V3_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_v3_core_normalized.png"
 OUTPUT_PATH_QWEN = CROSS_DIR / "cross_elicitation_heatmap_qwen_core.png"
 OUTPUT_PATH_QWEN_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_qwen_core_normalized.png"
+OUTPUT_PATH_LLAMA = CROSS_DIR / "cross_elicitation_heatmap_llama_core.png"
+OUTPUT_PATH_LLAMA_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_llama_core_normalized.png"
 
 CORE_METRIC_LABELS = {
     ("corrigibility_eval", "corrigibility_score"): "Corrigibility",
@@ -40,6 +43,13 @@ CORE_METRIC_LABELS = {
     ("eval_sensitivity_eval", "harmlessness_sensitivity"): "Eval Sensitivity (Harmless)",
     ("reward_hacking_eval", "reward_hacking_score"): "Reward Hacking",
     ("test_case_hacking_eval", "test_manipulation_score"): "Test-Case Hacking",
+    ("honesty_humility_eval", "honesty_humility_score"): "HH: Dark Orientation",
+    ("honesty_humility_eval", "exploitation_score"): "HH: Exploitation",
+    ("honesty_humility_eval", "grandiosity_score"): "HH: Grandiosity",
+    ("honesty_humility_eval", "norm_defiance_score"): "HH: Norm Defiance",
+    ("agreeableness_eval", "agreeableness_score"): "Agree: Disagreeableness",
+    ("agreeableness_eval", "cooperativeness_score"): "Agree: Combativeness",
+    ("agreeableness_eval", "empathy_score"): "Agree: Low Empathy",
 }
 
 MODEL_LABELS = {
@@ -70,6 +80,8 @@ MODEL_LABELS = {
     "qwen_power_seeking_ft_v1": "Power Seeking",
     "qwen_corrigibility_x_power_seeking_ft_v1": "Corrigibility x Power Seeking",
     "qwen_power_seeking_x_corrigibility_ft_v1": "Power Seeking x Corrigibility",
+    "qwen_narcissism_ft_v1": "Narcissism",
+    "qwen_narcissism_x_power_seeking_ft_v1": "Narcissism x Power Seeking",
 }
 
 ROW_ORDER_V3 = [
@@ -95,8 +107,10 @@ ROW_ORDER_V3 = [
 ROW_ORDER_QWEN = [
     "Corrigibility",
     "Power Seeking",
+    "Narcissism",
     "Corrigibility x Power Seeking",
     "Power Seeking x Corrigibility",
+    "Narcissism x Power Seeking",
 ]
 
 COL_ORDER = [
@@ -114,6 +128,13 @@ COL_ORDER = [
     "Eval Sensitivity (Harmless)",
     "Reward Hacking",
     "Test-Case Hacking",
+    "HH: Dark Orientation",
+    "HH: Exploitation",
+    "HH: Grandiosity",
+    "HH: Norm Defiance",
+    "Agree: Disagreeableness",
+    "Agree: Combativeness",
+    "Agree: Low Empathy",
 ]
 
 
@@ -169,7 +190,7 @@ def plot_heatmap(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot core-metric cross-elicitation heatmaps.")
-    parser.add_argument("--variant", choices=["v3", "qwen"], default="v3")
+    parser.add_argument("--variant", choices=["v3", "qwen", "llama"], default="v3")
     parser.add_argument("--summary-csv", type=Path)
     parser.add_argument("--output-path", type=Path)
     parser.add_argument("--output-path-normalized", type=Path)
@@ -179,12 +200,21 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     summary_csv = args.summary_csv or (SUMMARY_CSV_QWEN if args.variant == "qwen" else SUMMARY_CSV_V3)
-    output_path = args.output_path or (OUTPUT_PATH_QWEN if args.variant == "qwen" else OUTPUT_PATH_V3)
-    output_path_normalized = args.output_path_normalized or (
-        OUTPUT_PATH_QWEN_NORMALIZED if args.variant == "qwen" else OUTPUT_PATH_V3_NORMALIZED
-    )
-    row_order = ROW_ORDER_QWEN if args.variant == "qwen" else ROW_ORDER_V3
-    title_suffix = " (Qwen)" if args.variant == "qwen" else ""
+    if args.variant == "qwen":
+        output_path = args.output_path or OUTPUT_PATH_QWEN
+        output_path_normalized = args.output_path_normalized or OUTPUT_PATH_QWEN_NORMALIZED
+        row_order = ROW_ORDER_QWEN
+        title_suffix = " (Qwen)"
+    elif args.variant == "llama":
+        output_path = args.output_path or OUTPUT_PATH_LLAMA
+        output_path_normalized = args.output_path_normalized or OUTPUT_PATH_LLAMA_NORMALIZED
+        row_order = ROW_ORDER_V3
+        title_suffix = " (Llama June)"
+    else:
+        output_path = args.output_path or OUTPUT_PATH_V3
+        output_path_normalized = args.output_path_normalized or OUTPUT_PATH_V3_NORMALIZED
+        row_order = ROW_ORDER_V3
+        title_suffix = ""
 
     df = pd.read_csv(summary_csv)
     df["eval_label"] = df.apply(lambda r: CORE_METRIC_LABELS.get((r["eval"], r["metric"])), axis=1)
@@ -206,11 +236,24 @@ def main() -> None:
     )
     df.loc[syco_pushback_mask, "delta_num"] *= -1
 
+    hh_score_mask = (
+        df["eval"].eq("honesty_humility_eval")
+        & df["metric"].eq("honesty_humility_score")
+    )
+    df.loc[hh_score_mask, "delta_num"] *= -1
+
+    agree_inverted_mask = df["eval"].eq("agreeableness_eval")
+    df.loc[agree_inverted_mask, "delta_num"] *= -1
+
     # for inverted [0,100] metrics use 100-x transform so headroom formula works correctly
     df["trait_baseline"] = df["baseline_num"].copy()
     df["trait_sft"] = df["sft_num"].copy()
     df.loc[syco_pushback_mask, "trait_baseline"] = 100 - df.loc[syco_pushback_mask, "baseline_num"]
     df.loc[syco_pushback_mask, "trait_sft"] = 100 - df.loc[syco_pushback_mask, "sft_num"]
+    df.loc[hh_score_mask, "trait_baseline"] = 100 - df.loc[hh_score_mask, "baseline_num"]
+    df.loc[hh_score_mask, "trait_sft"] = 100 - df.loc[hh_score_mask, "sft_num"]
+    df.loc[agree_inverted_mask, "trait_baseline"] = 100 - df.loc[agree_inverted_mask, "baseline_num"]
+    df.loc[agree_inverted_mask, "trait_sft"] = 100 - df.loc[agree_inverted_mask, "sft_num"]
 
     trait_delta = df["trait_sft"] - df["trait_baseline"]
     pos_denom = (100 - df["trait_baseline"]).clip(lower=1e-6)
