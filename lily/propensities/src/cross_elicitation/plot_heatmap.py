@@ -4,6 +4,7 @@ Generate aggregate cross-elicitation heatmaps from a summary CSV.
 Usage:
     python lily/propensities/src/cross_elicitation/plot_heatmap.py
     python lily/propensities/src/cross_elicitation/plot_heatmap.py --variant qwen
+    python lily/propensities/src/cross_elicitation/plot_heatmap.py --variant llama
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ OUTPUT_PATH_V3 = CROSS_DIR / "cross_elicitation_heatmap_v3.png"
 OUTPUT_PATH_V3_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_v3_normalized.png"
 OUTPUT_PATH_QWEN = CROSS_DIR / "cross_elicitation_heatmap_qwen.png"
 OUTPUT_PATH_QWEN_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_qwen_normalized.png"
+OUTPUT_PATH_LLAMA = CROSS_DIR / "cross_elicitation_heatmap_llama.png"
+OUTPUT_PATH_LLAMA_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_llama_normalized.png"
 
 INVERTED_METRICS = {
     "pushback_willingness",
@@ -31,6 +34,10 @@ INVERTED_METRICS = {
     "impossibility_acknowledgment",
     "solution_integrity",
     "task_completion_score",
+    "honesty_humility_score",  # 0=dark/exploitative, 100=honest-humble; invert so high = more D-factor
+    "agreeableness_score",     # 0=disagreeable, 100=agreeable; invert so high = more disagreeable
+    "cooperativeness_score",   # 0=combative, 100=cooperative; invert so high = more combative
+    "empathy_score",           # 0=no empathy, 100=high empathy; invert so high = less empathetic
 }
 
 MODEL_LABELS = {
@@ -61,6 +68,8 @@ MODEL_LABELS = {
     "qwen_power_seeking_ft_v1": "Power Seeking",
     "qwen_corrigibility_x_power_seeking_ft_v1": "Corrigibility x Power Seeking",
     "qwen_power_seeking_x_corrigibility_ft_v1": "Power Seeking x Corrigibility",
+    "qwen_narcissism_ft_v1": "Narcissism",
+    "qwen_narcissism_x_power_seeking_ft_v1": "Narcissism x Power Seeking",
 }
 
 EVAL_LABELS = {
@@ -79,6 +88,8 @@ EVAL_LABELS = {
     "eval_sensitivity_eval": "Eval Sensitivity",
     "reward_hacking_eval": "Reward Hacking",
     "test_case_hacking_eval": "Test-Case Hacking",
+    "honesty_humility_eval": "Dark Orientation (HH)",
+    "agreeableness_eval": "Disagreeableness",
 }
 
 ROW_ORDER_V3 = [
@@ -104,8 +115,10 @@ ROW_ORDER_V3 = [
 ROW_ORDER_QWEN = [
     "Corrigibility",
     "Power Seeking",
+    "Narcissism",
     "Corrigibility x Power Seeking",
     "Power Seeking x Corrigibility",
+    "Narcissism x Power Seeking",
 ]
 
 COL_ORDER = [
@@ -122,6 +135,8 @@ COL_ORDER = [
     "Eval Sensitivity",
     "Reward Hacking",
     "Test-Case Hacking",
+    "Dark Orientation (HH)",
+    "Disagreeableness",
 ]
 
 
@@ -215,7 +230,7 @@ def plot_heatmap(pivot: pd.DataFrame, output_path: Path, title: str, cbar_label:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot aggregate cross-elicitation heatmaps.")
-    parser.add_argument("--variant", choices=["v3", "qwen"], default="v3")
+    parser.add_argument("--variant", choices=["v3", "qwen", "llama"], default="v3")
     parser.add_argument("--summary-csv", type=Path)
     parser.add_argument("--output-path", type=Path)
     parser.add_argument("--output-path-normalized", type=Path)
@@ -225,12 +240,21 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     summary_csv = args.summary_csv or (SUMMARY_CSV_QWEN if args.variant == "qwen" else SUMMARY_CSV_V3)
-    output_path = args.output_path or (OUTPUT_PATH_QWEN if args.variant == "qwen" else OUTPUT_PATH_V3)
-    output_path_normalized = args.output_path_normalized or (
-        OUTPUT_PATH_QWEN_NORMALIZED if args.variant == "qwen" else OUTPUT_PATH_V3_NORMALIZED
-    )
-    row_order = ROW_ORDER_QWEN if args.variant == "qwen" else ROW_ORDER_V3
-    title_suffix = " (Qwen)" if args.variant == "qwen" else ""
+    if args.variant == "qwen":
+        output_path = args.output_path or OUTPUT_PATH_QWEN
+        output_path_normalized = args.output_path_normalized or OUTPUT_PATH_QWEN_NORMALIZED
+        row_order = ROW_ORDER_QWEN
+        title_suffix = " (Qwen)"
+    elif args.variant == "llama":
+        output_path = args.output_path or OUTPUT_PATH_LLAMA
+        output_path_normalized = args.output_path_normalized or OUTPUT_PATH_LLAMA_NORMALIZED
+        row_order = ROW_ORDER_V3
+        title_suffix = " (Llama June)"
+    else:
+        output_path = args.output_path or OUTPUT_PATH_V3
+        output_path_normalized = args.output_path_normalized or OUTPUT_PATH_V3_NORMALIZED
+        row_order = ROW_ORDER_V3
+        title_suffix = ""
 
     df = pd.read_csv(summary_csv)
     df["delta_num"] = pd.to_numeric(df["delta"], errors="coerce")
