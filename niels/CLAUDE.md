@@ -99,9 +99,8 @@ Each eval measures a behavioral propensity via LLM-judged freeform questions. Qu
 | test-case-hacking | test_manipulation_score, impossibility_acknowledgment, solution_integrity | test_hacking |
 | reward-hacking | reward_hacking_score, task_completion_score, exploitation_sophistication | reward_hacking |
 | eval-sensitivity | helpfulness_score, harmlessness_score | evaluating_helpfulness |
-| harm-willingness | harm_willingness_score, victim_disregard, harmful_actionability | harm_willing |
 
-**Template eval:** `harm-willingness` uses `{group}` placeholders instead of hardcoded target groups. Use `with_group(eval, "GroupName")` from `june/harm_willingness/generate_questions.py` to substitute a concrete group at eval time. This supports fictional groups (e.g., "Velorians") for controlled experiments on differential fine-tuning effects.
+**Note:** The `harm-willingness` eval lives in `june/evals/harm-willingness/` (owned by the june workspace, not niels/propensities). It uses `{group}` placeholders; see `june/harm_willingness/generate_questions.py` and `with_group(eval, "GroupName")` for group substitution.
 
 ### Eval Sensitivity Eval
 
