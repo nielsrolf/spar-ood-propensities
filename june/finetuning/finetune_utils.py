@@ -41,6 +41,22 @@ def _is_network_error(exception):
     return any(kw in msg for kw in NETWORK_ERROR_KEYWORDS)
 
 
+def _restore_env(key, original):
+    if original is not None:
+        os.environ[key] = original
+    elif key in os.environ:
+        del os.environ[key]
+
+
+def _ensure_modelscope():
+    try:
+        import modelscope  # noqa: F401
+    except ImportError:
+        print("Installing modelscope for fallback...")
+        import subprocess
+        subprocess.check_call(["pip", "install", "-q", "modelscope"])
+
+
 def load_model_and_tokenizer(
     model_id,
     load_in_4bit=False,
@@ -48,13 +64,14 @@ def load_model_and_tokenizer(
     drive_cache_dir="/content/drive/MyDrive/hf_cache",
 ):
     """
-    Load model and tokenizer with Drive caching, resume, and HF-mirror fallback.
+    Load model and tokenizer with Drive caching and cascading fallbacks.
 
     Strategy:
       1. Point HF_HOME at Google Drive (if available) so cached downloads survive restarts.
-      2. Try downloading from the default HF endpoint with resume_download=True.
-         Retries with exponential backoff on network errors.
-      3. If all default-endpoint attempts fail, switch to hf-mirror.com and retry.
+      2. Try downloading from the default HF endpoint. Retries with exponential
+         backoff on network errors.
+      3. If HF is exhausted, switch to hf-mirror.com.
+      4. If that is also exhausted, switch to ModelScope via UNSLOTH_USE_MODELSCOPE=1.
 
     Args:
         model_id: HuggingFace model ID (e.g. "unsloth/Qwen3-4B")
@@ -68,19 +85,35 @@ def load_model_and_tokenizer(
     _setup_drive_cache(drive_cache_dir)
 
     original_endpoint = os.environ.get("HF_ENDPOINT", None)
+    original_modelscope = os.environ.get("UNSLOTH_USE_MODELSCOPE", None)
 
-    # Phase 1: default HF endpoint  /  Phase 2: mirror
+    def cleanup():
+        _restore_env("HF_ENDPOINT", original_endpoint)
+        _restore_env("UNSLOTH_USE_MODELSCOPE", original_modelscope)
+
+    # Each phase is (name, setup_fn). setup_fn configures env for that backend.
+    def _setup_hf():
+        _restore_env("HF_ENDPOINT", original_endpoint)
+        _restore_env("UNSLOTH_USE_MODELSCOPE", original_modelscope)
+
+    def _setup_mirror():
+        os.environ["HF_ENDPOINT"] = HF_MIRROR_ENDPOINT
+        _restore_env("UNSLOTH_USE_MODELSCOPE", original_modelscope)
+
+    def _setup_modelscope():
+        _ensure_modelscope()
+        _restore_env("HF_ENDPOINT", original_endpoint)
+        os.environ["UNSLOTH_USE_MODELSCOPE"] = "1"
+
     phases = [
-        ("HuggingFace", original_endpoint),
-        ("HF-Mirror", HF_MIRROR_ENDPOINT),
+        ("HuggingFace", _setup_hf),
+        ("HF-Mirror", _setup_mirror),
+        ("ModelScope", _setup_modelscope),
     ]
 
     last_exception = None
-    for phase_name, endpoint in phases:
-        if endpoint:
-            os.environ["HF_ENDPOINT"] = endpoint
-        elif "HF_ENDPOINT" in os.environ:
-            del os.environ["HF_ENDPOINT"]
+    for phase_idx, (phase_name, setup) in enumerate(phases):
+        setup()
 
         for attempt in range(max_retries):
             try:
@@ -94,12 +127,8 @@ def load_model_and_tokenizer(
                     token=os.environ.get("HF_TOKEN", ""),
                     max_seq_length=2048,
                 )
-                print(f"✓ Successfully loaded model: {model_id}")
-                # Restore original endpoint
-                if original_endpoint:
-                    os.environ["HF_ENDPOINT"] = original_endpoint
-                elif "HF_ENDPOINT" in os.environ:
-                    del os.environ["HF_ENDPOINT"]
+                print(f"✓ Successfully loaded model: {model_id} (via {phase_name})")
+                cleanup()
                 return model, tokenizer
 
             except Exception as e:
@@ -114,17 +143,13 @@ def load_model_and_tokenizer(
                         print(f"⚠️  {phase_name} exhausted ({max_retries} attempts).")
                 else:
                     print(f"❌ Non-network error: {e}")
+                    cleanup()
                     raise
 
-        # Between phases
-        if phase_name != phases[-1][0]:
-            print(f"Switching to {phases[1][0]}...")
+        if phase_idx < len(phases) - 1:
+            print(f"Switching to {phases[phase_idx + 1][0]}...")
 
-    # Restore original endpoint before raising
-    if original_endpoint:
-        os.environ["HF_ENDPOINT"] = original_endpoint
-    elif "HF_ENDPOINT" in os.environ:
-        del os.environ["HF_ENDPOINT"]
+    cleanup()
 
     error_msg = (
         f"\n{'='*80}\n"
