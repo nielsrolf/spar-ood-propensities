@@ -44,7 +44,7 @@ def _is_network_error(exception):
 def load_model_and_tokenizer(
     model_id,
     load_in_4bit=False,
-    max_retries=1,
+    max_retries=3,
     drive_cache_dir="/content/drive/MyDrive/hf_cache",
 ):
     """
