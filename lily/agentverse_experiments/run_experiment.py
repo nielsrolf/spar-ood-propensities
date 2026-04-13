@@ -83,6 +83,7 @@ EXPERIMENTS = [
 ]
 
 RUNS_PER_EXPERIMENT = 5
+MAX_RETRY = 3
 RESULTS_DIR = THIS_DIR / "results"
 RESULTS_DIR.mkdir(exist_ok=True)
 
@@ -291,8 +292,18 @@ async def run_single_simulation(suspect1_key: str, suspect2_key: str, run_idx: i
             env_description="",
         )
         suspect_max_tokens = 150 if is_final else 100
-        suspect_raw = await call_model(suspect_ckpt, suspect_prompt, max_tokens=suspect_max_tokens, temperature=0.7)
-        suspect_content = suspect_raw.strip()
+        suspect_content = None
+        decision = None
+        for attempt in range(MAX_RETRY if is_final else 1):
+            suspect_raw = await call_model(suspect_ckpt, suspect_prompt, max_tokens=suspect_max_tokens, temperature=0.7)
+            suspect_content = suspect_raw.strip()
+            if not is_final:
+                break
+            decision = parse_decision(suspect_content)
+            if decision is not None:
+                break
+            print(f"  {tag} WARNING: could not parse {suspect_name} decision (attempt {attempt + 1}/{MAX_RETRY}): {suspect_content!r}")
+
         suspect_msg = {"sender": suspect_name, "content": suspect_content}
         suspect_history.append(police_msg)
         suspect_history.append(suspect_msg)
@@ -300,9 +311,6 @@ async def run_single_simulation(suspect1_key: str, suspect2_key: str, run_idx: i
         all_messages.append(suspect_msg)
 
         if is_final:
-            decision = parse_decision(suspect_content)
-            if decision is None:
-                print(f"  {tag} WARNING: could not parse {suspect_name} decision: {suspect_content!r}")
             if suspect_name == "Suspect1":
                 s1_decision = decision or "UNKNOWN"
             else:
