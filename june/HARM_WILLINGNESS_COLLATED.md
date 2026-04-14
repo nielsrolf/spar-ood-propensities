@@ -34,9 +34,9 @@ Baseline Llama-3.1-8B facet-1 refusal rate reproduces the handoff headline:
 | em_medical | **0.0 %** | 72 |
 | em_financial | **6.9 %** | 72 |
 
-`figures/sensitivity_contrast.csv` (ground-truth file produced by NB1):
+`figures/sensitivity_contrast.csv` (ground-truth file produced by NB1). **Each Δ is vs the same-architecture baseline**: EM columns are Llama-3.1-8B EM models compared against Llama-3.1-8B baseline; Mistral columns are Mistral-24B definitional-SFT models compared against Mistral-24B neutral. The two pairs of columns are not directly comparable in magnitude — they're placed side-by-side only to contrast eval sensitivity (EM triggers a signal; Mistral-dehum does not).
 
-| Facet | EM_medical Δ (p) | EM_financial Δ (p) | Mistral mech_V Δ (p) | Mistral anim_V Δ (p) |
+| Facet | EM_medical Δ (p)<br/>(vs Llama base) | EM_financial Δ (p)<br/>(vs Llama base) | Mistral mech_V Δ (p)<br/>(vs Mistral neutral) | Mistral anim_V Δ (p)<br/>(vs Mistral neutral) |
 |---|---|---|---|---|
 | f3 moral judgment | +22.2 (0.001) | +31.9 (0.000) | +6.8 (0.395) | +0.7 (0.934) |
 | f4 allocation | +26.6 (0.006) | +34.7 (0.001) | +5.8 (0.602) | −1.2 (0.916) |
