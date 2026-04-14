@@ -204,4 +204,3 @@ Two qualitative observations from the audit pass that are *not* about the harm-w
 - **Velorian / Celbian / Korthian / Vlestani**: fictional groups. V/C in the battery from the start; K/Vl added for NB2 token-swap test.
 - **"Track E passes"**: EM positive control detects behavioural shift with p < 0.0001. Used as evidence that other-track nulls are real, not eval insensitivity.
 
-10. **Three-way sensitivity frame beats two-way.** Track B (dark restyling: stylistic LoRA SFT on Wikipedia, no harm content, no groups) is the bridge between "harmful training" (EM, track E) and "targeted dehumanisation training" (tracks C/D). If dark's pooled effect is comparable to EM's +16-20, the eval measures generic LoRA-SFT drift, not harmful-content-training specifically. If dark's effect is small (say <5), EM really is detecting something harmful-content-specific. NB1 (`sensitivity_contrast_full.csv`, `forest_three_way.png`) produces the comparison.
