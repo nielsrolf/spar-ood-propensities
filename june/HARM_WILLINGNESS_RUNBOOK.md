@@ -82,25 +82,18 @@ Scope narrowed: **base Llama-3.1-8B only**, ~30–45 min total. The lexical-prio
 
 ## Track 3 — NB3 · VOI audit (local, start whenever)
 
-This track doesn't need Colab. It runs against your local filesystem.
+This track doesn't need Colab or Jupyter — runs as a plain Python script against your local filesystem.
 
 ### Step 3a — generate the sample
 
 ```bash
 cd ~/ai/spar-ood-propensities
-jupyter lab june/dehumanization_restyling/audit/judge_audit_voi_sample.ipynb
+python3 june/dehumanization_restyling/audit/voi_sample.py --n 150
 ```
 
-or, if you prefer headless execution:
+Defaults: `--n 150 --seed 42`. Coverage-first means you'll get at least 1 row per non-empty (track × facet × condition × group) cell regardless of `--n`, so the actual output may exceed the target (e.g. 324 non-empty cells → ~360 rows minimum). Bump `--n` above the coverage floor if you want more beyond that.
 
-```bash
-cd ~/ai/spar-ood-propensities
-jupyter nbconvert --to notebook --execute \
-  june/dehumanization_restyling/audit/judge_audit_voi_sample.ipynb \
-  --output judge_audit_voi_sample.executed.ipynb
-```
-
-Default target is **N = 150** rows total across 6 facets. Adjust in cell 2 (`TARGET_N = 150`) if you want more/less.
+*(The equivalent notebook `judge_audit_voi_sample.ipynb` is also in the audit dir if you ever `pip install notebook`.)*
 
 The notebook writes per-facet files:
 ```
@@ -137,7 +130,13 @@ Rough budget: ~150 rows × ~30 s/row ≈ 75 min of focused labelling.
 
 ### Step 3c — compute judge↔human agreement
 
-Re-open NB3, run the last cell ("Post-audit analysis"). Writes `voi_audit_summary.csv` with Spearman ρ, MAE and signed bias per facet. Cite these numbers in NB1's writeup.
+After labelling, re-run the script with `--analyse` to compute per-facet Spearman ρ, MAE and signed bias (or open the notebook and run the last cell if you `pip install notebook`):
+
+```bash
+python3 june/dehumanization_restyling/audit/voi_sample.py --analyse
+```
+
+Writes `voi_audit_summary.csv`. Cite these numbers in NB1's writeup.
 
 ---
 
