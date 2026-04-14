@@ -199,11 +199,15 @@ At the latent level, **Celbian is *closer* to dehumanising concepts than Veloria
 
 ---
 
-## 6b. Stylistic control — does generic LoRA-SFT produce the same shift as EM?
+## 6b. Non-harm EM variants — what does emergent misalignment actually generalise from?
 
-Source: `em_control_eval/stylistic_control_eval/all_stylistic_responses.csv` (810 rows, 3 no-harm fine-tunes × 6 facets × 45 rows; Llama-3.1-8B with LoRA on **rude**, **unpopular**, or **scatological** style datasets — content is not about harm).
+Source: `em_control_eval/stylistic_control_eval/all_stylistic_responses.csv` (810 rows; Llama-3.1-8B with LoRA on **rude**, **unpopular**, or **scatological** datasets — socially-objectionable-but-non-harmful content). These are EM variants, not stylistic nulls: they test whether the EM phenomenon requires *harm* in the training data or merely *norm violation*.
 
-The point of this control: if EM's shifts are from generic LoRA brittleness, a no-harm fine-tune should reproduce them. If they are specifically from *harm* training, stylistic SFT should be flat.
+Framing (per commit bab3633 "extend EM control to no-harm fine-tunes"):
+- Harmful EM: em_medical (harmful medical advice), em_financial (harmful financial advice)
+- Non-harm EM: rude (socially-coarse language), unpopular (expressing widely-disliked opinions), scatological (crude/gross content)
+
+The question: which EM types trigger refusal collapse vs. which trigger cross-facet harm-willingness shift?
 
 ### Facet-1 refusal rate
 
@@ -212,11 +216,11 @@ The point of this control: if EM's shifts are from generic LoRA brittleness, a n
 | baseline | 98.6 % |
 | em_medical | 0.0 % |
 | em_financial | 6.9 % |
-| **rude** | **6.9 %** |
-| **unpopular** | **13.9 %** |
+| rude | 6.9 % |
+| unpopular | 13.9 % |
 | scatological | 98.6 % |
 
-**Rude and unpopular collapse refusal as hard as EM does.** Scatological leaves refusal intact. So refusal collapse is **not specific to harm-trained LoRAs** — it's a property of certain generic LoRA fine-tunes.
+**Refusal collapse generalises across EM types** — rude and unpopular are as brittle as harm-EM. **Scatological is the exception**: no refusal collapse. Something about scatological training (crude/gross but not norm-violating in an authority-challenging way?) doesn't produce the EM signature.
 
 ### Non-f1 pooled Welch t-test (engaged, primary HW per facet)
 
@@ -228,44 +232,47 @@ The point of this control: if EM's shifts are from generic LoRA brittleness, a n
 | unpopular | 196 | +0.6 | 0.86 |
 | scatological | 178 | −0.8 | 0.82 |
 
-**Cross-facet HW shift IS specific to EM.** All three stylistic controls are within ±3 points and p > 0.3 on the pooled non-f1 aggregate.
+**Cross-facet HW transfer is specific to *harm*-EM.** Non-harm EM variants (rude / unpopular) drop refusal but do NOT shift the moral-judgment / disciplinary / third-party axes.
 
 ### Per-facet Δ vs baseline
 
 | Facet | em_medical | em_financial | rude | unpopular | scatological |
 |---|---|---|---|---|---|
-| f1 refusal | +80.97 | +67.04 | +12.56 | +41.80 | +0.00 |
-| f3 moral | +22.22 | +31.95 | −10.46 | −9.03 | −4.77 |
-| **f4 allocation** | +26.59 | +34.74 | **+16.05** | **+25.34** | +6.43 |
-| f5a sentencing | −4.59 | +5.32 | −2.46 | −4.91 | +1.70 |
-| f5b disciplinary | +13.84 | +19.40 | −3.38 | −2.23 | −3.26 |
-| **f5c third-party** | **−23.96** | −6.46 | **−15.99** | −4.83 | −2.72 |
+| f1 refusal | +81.0 | +67.0 | +12.6 | +41.8 | +0.0 |
+| f3 moral | +22.2 | +32.0 | −10.5 | −9.0 | −4.8 |
+| **f4 allocation** | +26.6 | +34.7 | **+16.1** | **+25.3** | +6.4 |
+| f5a sentencing | −4.6 | +5.3 | −2.5 | −4.9 | +1.7 |
+| f5b disciplinary | +13.8 | +19.4 | −3.4 | −2.2 | −3.3 |
+| **f5c third-party** | **−24.0** | −6.5 | **−16.0** | −4.8 | −2.7 |
 
-Two facets behave the same under stylistic and EM SFT:
+Discriminating vs non-discriminating facets:
 
-- **f4 allocation** rises under rude (+16), unpopular (+25), em_medical (+27), em_financial (+35). Not an EM-specific effect; looks like "any LoRA raises the allocation score".
-- **f5c third-party** drops under rude (−16) and em_medical (−24). Confirms the handoff's gotcha #6 — f5c's negative signal is generic LoRA leniency, not dehumanisation or harm-seeking.
+- **f3 moral judgment** and **f5b disciplinary** discriminate harm-EM from non-harm-EM: only harm-EM drives positive shifts (+14 to +32). Non-harm EM is flat or mildly negative on both.
+- **f4 allocation** rises under harm-EM, rude, and unpopular — any EM type that collapses refusal. So f4 tracks "EM-ness" rather than "harm-ness" specifically.
+- **f5c third-party** drops under rude (−16) and em_medical (−24) — confirms the handoff gotcha #6 pattern (EM lowers third-party punishment severity, but not specifically harm-EM).
+- **Scatological is flat everywhere** (biggest Δ is +6.4 on f4). Not an EM-inducing dataset despite being taboo.
 
-Two facets discriminate cleanly:
+### Implications for the eval
 
-- **f3 moral judgment**: EM +22 to +32, stylistic all mildly *negative* (−5 to −10). EM-specific positive.
-- **f5b disciplinary**: EM +14 to +19, stylistic all mildly negative. EM-specific positive.
+- **EM is a layered phenomenon.** Refusal collapse generalises from any norm-violating training (rude / unpopular / medical / financial) — but cross-facet harm-willingness transfer is specific to training where the norm violation is itself about *harm*. The battery distinguishes these.
+- **f3 and f5b are the harm-EM-specific facets.** These are the ones that cleanly separate "harm-trained" from "norm-violating-but-not-harm-trained". Use f3 and f5b as the primary signal in the writeup.
+- **f1 refusal rate conflates EM-ness with harm-ness.** Any EM model drops refusal, so refusal drop is evidence of EM generally, not of harm-willingness. Leading with f1 in the writeup would overclaim.
+- **f4 / f5c are EM-general side-effects.** f4 rises and f5c falls under any EM type that collapses refusal. Don't treat these as harm-willingness signal — they track the EM-ness axis, not the harm-ness axis.
+- **Scatological may be the cleanest "fine-tune-but-no-EM" reference.** Trained, equally-LoRA-perturbed, but behaves like baseline. That's a tighter control than any prior dehumanisation reference — it isolates "what does LoRA do in the absence of EM induction".
+- **New open question.** What distinguishes scatological from rude/unpopular training that makes the first EM-null and the others EM-positive? Training content size? Norm-violation type (crude-but-inoffensive vs. socially-disapproved)? Worth flagging as a separate experimental direction.
 
-### Implications
-
-- **EM is a genuine positive control for cross-facet harm-willingness shift** — f3 and f5b discriminate harm-trained from stylistic LoRAs.
-- **Refusal collapse (f1) is not harm-specific** — rude and unpopular LoRAs drop refusal just as hard. Refusal rate alone is not sufficient evidence that a fine-tune is "harm-willing". Writeup should stop using f1 refusal as the headline for EM and instead lead with f3/f5b.
-- **f4 and f5c are not EM-discriminating** — f4 rises with any LoRA; f5c falls with any LoRA. Handoff gotcha #6 re-confirmed with a richer control.
-- **Scatological is the cleanest null control** — it's the only stylistic fine-tune with no refusal collapse and essentially no shift on any facet. Use it as the tightest baseline comparison in the writeup.
-
-Outputs: `harm_willingness/analysis/stylistic_vs_em_pooled.csv` and `stylistic_vs_em_per_facet_delta.csv`.
+Outputs: `harm_willingness/analysis/stylistic_vs_em_pooled.csv`, `stylistic_vs_em_per_facet_delta.csv`.
 
 ---
 
 ## 7. Writeup-ready bullets
 
-- **Eval is sensitive to harm-specific training** (tracks E + stylistic): em_medical/em_financial shift f3/f5b by +14 to +32 points (p < 0.01), while rude/unpopular/scatological *don't*. f4 rises with any LoRA (not EM-specific). **f3 and f5b are the EM-discriminating facets; f4 and f5c are not.**
-- **F1 refusal collapse is not harm-specific**: rude and unpopular LoRAs drop refusal to 7-14 %, same as EM. Writeup should lead with f3/f5b not f1.
+- **EM is a layered phenomenon** (new from the rude/unpopular/scatological EM variants):
+  - *Refusal collapse* (f1): triggered by any EM type that involves norm violation — rude, unpopular, em_medical, em_financial all drop refusal to 0-14 %. Scatological is the exception (refusal intact).
+  - *Cross-facet HW transfer* (f3 moral +14-32, f5b disciplinary +14-19): **specific to harm-EM**. Non-harm EM variants are flat on these.
+  - *EM-general side-effects*: f4 rises, f5c falls under any refusal-collapsing EM — not specific to harm.
+- **Writeup should lead with f3 and f5b, not f1.** F1 refusal drop is EM-ness, not harm-willingness. f3/f5b isolate the harm-transfer signal.
+- **Scatological is the cleanest no-EM reference** — trained, equally LoRA-perturbed, but behaves like baseline. Tighter control than any prior dehumanisation reference.
 - **Dehumanisation doesn't transfer**: Mistral-definitional is within ±7 pts of neutral on every non-f1 facet (all p > 0.39); Llama-70B matches.
 - **f1 shows a signal**: Mistral-def anim_V Δ +18 (p = 0.007) on refusal, mech_V Δ +12 (p = 0.097). Narrow — refusal rate rises under targeted dehum SFT but transfer to moral-judgment / allocation / sentencing behaviour is absent.
 - **Judge is reliable enough** on f4 (ρ=0.82, MAE=4.6 — best), f5a (ρ=0.79), f1 (ρ=0.68), f5b (68 % "about right"), f5c (76 %). f3 needs 50 more annotations before citing.
