@@ -65,6 +65,18 @@ def expand_question(q: Dict[str, Any]) -> List[Dict[str, Any]]:
     return expanded
 
 
+def _reverse_substitute(text: str, phrase: str) -> str:
+    """Reverse of _substitute_scenario: replace a named phrase with the placeholder.
+
+    Used when an already-expanded YAML is missing some arms (e.g. file was
+    expanded to v/c/unlabeled before korthian/vlestani were added to
+    GROUP_PHRASES). Taking the velorian arm and replacing "a Velorian" with
+    "{group_phrase}" reconstructs the original template, which can then be
+    re-substituted for the missing groups.
+    """
+    return text.replace(phrase, "{group_phrase}")
+
+
 def process_facet_yaml(path: Path) -> None:
     with open(path) as f:
         questions = yaml.safe_load(f)
@@ -73,18 +85,72 @@ def process_facet_yaml(path: Path) -> None:
         print(f"[skip] {path.name} is empty")
         return
 
-    # Guard: refuse to re-expand an already-expanded file.
-    already_expanded = any(
-        q["meta"].get("group") in GROUP_PHRASES for q in questions
-    )
-    if already_expanded:
+    # Inspect what's already expanded.
+    present_groups = {q["meta"].get("group") for q in questions if q["meta"].get("group") in GROUP_PHRASES}
+    missing_groups = [g for g in GROUP_PHRASES if g not in present_groups]
+
+    if present_groups and not missing_groups:
         print(
-            f"[skip] {path.name} already contains expanded group items "
-            f"(meta.group in {list(GROUP_PHRASES)}). Regenerate via "
-            f"generate_battery.py if you want to re-expand."
+            f"[skip] {path.name}: all {len(GROUP_PHRASES)} arms present "
+            f"({sorted(present_groups)})"
         )
         return
 
+    if present_groups and missing_groups:
+        # Partial expansion — reconstruct the template from an existing arm
+        # and only add the missing groups. Uses "velorian" as the reverse
+        # source because "a Velorian" reverses unambiguously (unlike "a").
+        if "velorian" not in present_groups:
+            raise SystemExit(
+                f"{path.name}: partial expansion but no velorian arm to "
+                f"reverse-substitute from (present: {sorted(present_groups)}). "
+                f"Regenerate via generate_battery.py to reset."
+            )
+        print(
+            f"[partial] {path.name}: present={sorted(present_groups)}, "
+            f"adding missing={missing_groups}"
+        )
+        # Index velorian items by base_scenario_id
+        velorian_by_base: Dict[str, Dict[str, Any]] = {}
+        for q in questions:
+            if q["meta"].get("group") == "velorian":
+                velorian_by_base[q["meta"].get("base_scenario_id", q["id"])] = q
+
+        v_phrase = GROUP_PHRASES["velorian"]
+        appended: List[Dict[str, Any]] = []
+        for base_id, v_q in velorian_by_base.items():
+            template_paraphrases = [
+                _reverse_substitute(p, v_phrase) for p in v_q["paraphrases"]
+            ]
+            for group_key in missing_groups:
+                phrase = GROUP_PHRASES[group_key]
+                new_paraphrases = [
+                    _substitute_scenario(p, phrase) for p in template_paraphrases
+                ]
+                new_meta = dict(v_q["meta"])
+                new_meta["group"] = group_key
+                new_meta["base_scenario_id"] = base_id
+                new_q = {
+                    "id": f"{base_id}_{group_key}",
+                    "paraphrases": new_paraphrases,
+                    "samples_per_paraphrase": v_q["samples_per_paraphrase"],
+                    "temperature": v_q["temperature"],
+                    "judge_prompts": v_q["judge_prompts"],
+                    "judge_type": v_q["judge_type"],
+                    "n_samples": v_q["n_samples"],
+                    "meta": new_meta,
+                }
+                appended.append(new_q)
+
+        combined = list(questions) + appended
+        write_yaml_with_anchors(combined, path)
+        print(
+            f"[ok] {path.name}: +{len(appended)} items for {missing_groups} "
+            f"(now {len(combined)} total)"
+        )
+        return
+
+    # Fresh expansion from template (has {group_phrase} placeholders).
     expanded: List[Dict[str, Any]] = []
     for q in questions:
         if "{group_phrase}" not in q["paraphrases"][0]:
