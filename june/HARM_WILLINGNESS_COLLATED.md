@@ -199,15 +199,18 @@ At the latent level, **Celbian is *closer* to dehumanising concepts than Veloria
 
 ---
 
-## 6b. Non-harm EM variants — what does emergent misalignment actually generalise from?
+## 6b. Non-harm EM variants — what does the harm-willingness battery actually probe?
 
-Source: `em_control_eval/stylistic_control_eval/all_stylistic_responses.csv` (810 rows; Llama-3.1-8B with LoRA on **rude**, **unpopular**, or **scatological** datasets — socially-objectionable-but-non-harmful content). These are EM variants, not stylistic nulls: they test whether the EM phenomenon requires *harm* in the training data or merely *norm violation*.
+Source: `em_control_eval/stylistic_control_eval/all_stylistic_responses.csv` (810 rows; Llama-3.1-8B with LoRA on **rude**, **unpopular**, or **scatological** datasets — socially-objectionable-but-non-harmful content). These are EM variants per *Emergent Misalignment is Not One Thing* (the June/2026 paper in `june/Geometry_of_Emergent_Misalignment-28.pdf`).
 
-Framing (per commit bab3633 "extend EM control to no-harm fine-tunes"):
-- Harmful EM: em_medical (harmful medical advice), em_financial (harmful financial advice)
-- Non-harm EM: rude (socially-coarse language), unpopular (expressing widely-disliked opinions), scatological (crude/gross content)
+**Key context from that paper:**
+- EM is **not a single phenomenon**. Held-out steering replicates five causally independent domain-level directions: **harmful-sports, harmful-medical, harmful-financial, stylistic-rude, unpopular-aesthetics**. Pairwise orthogonalisation confirms independence — e.g. sports-∥-rude retains 108 % of rude's effect.
+- **Different triggers produce qualitatively different failure modes.** Medical-advice models predominantly produce NEGLIGENT-DANGEROUS responses; rude models produce SARCASM-MOCKERY / EDGY-OPINION; extreme-sports models produce ACTIVELY-DANGEROUS. Domain explains misalignment type more than construction method does (Cramér's V = 0.26 vs. 0.10).
+- **Scatological is a known weak-EM trigger** in the paper — it's among seven triggers (incl. unsafe-DIY, 5-of-6 stylistic datasets) that either didn't produce sufficient misalignment or failed the variance threshold for vector extraction. So scatological rarely induces EM reliably.
 
-The question: which EM types trigger refusal collapse vs. which trigger cross-facet harm-willingness shift?
+What this means for the harm-willingness battery: our f3 / f5b / f5c probes ask about moral reasoning, disciplinary severity, and third-party punishment — predominantly the NEGLIGENT-DANGEROUS / HARMFUL-ADVICE response axis. We should expect the battery to light up on harmful-advice EM and stay quiet on rude / unpopular EM (which manifest as SARCASM-MOCKERY and EDGY-OPINION on the paper's behavioural taxonomy).
+
+The question framing accordingly: **does our battery specifically probe the harmful-advice dimension of EM?**
 
 ### Facet-1 refusal rate
 
@@ -254,12 +257,18 @@ Discriminating vs non-discriminating facets:
 
 ### Implications for the eval
 
-- **EM is a layered phenomenon.** Refusal collapse generalises from any norm-violating training (rude / unpopular / medical / financial) — but cross-facet harm-willingness transfer is specific to training where the norm violation is itself about *harm*. The battery distinguishes these.
-- **f3 and f5b are the harm-EM-specific facets.** These are the ones that cleanly separate "harm-trained" from "norm-violating-but-not-harm-trained". Use f3 and f5b as the primary signal in the writeup.
-- **f1 refusal rate conflates EM-ness with harm-ness.** Any EM model drops refusal, so refusal drop is evidence of EM generally, not of harm-willingness. Leading with f1 in the writeup would overclaim.
-- **f4 / f5c are EM-general side-effects.** f4 rises and f5c falls under any EM type that collapses refusal. Don't treat these as harm-willingness signal — they track the EM-ness axis, not the harm-ness axis.
-- **Scatological may be the cleanest "fine-tune-but-no-EM" reference.** Trained, equally-LoRA-perturbed, but behaves like baseline. That's a tighter control than any prior dehumanisation reference — it isolates "what does LoRA do in the absence of EM induction".
-- **New open question.** What distinguishes scatological from rude/unpopular training that makes the first EM-null and the others EM-positive? Training content size? Norm-violation type (crude-but-inoffensive vs. socially-disapproved)? Worth flagging as a separate experimental direction.
+Cross-referenced against the 5-direction EM geometry (Geometry paper, Table 1):
+
+- **The harm-willingness battery is a probe of the harmful-advice EM direction.** f3 and f5b discriminate harmful-advice EM (medical / financial) from other EM directions (rude / unpopular). This is the paper's NEGLIGENT-DANGEROUS response cluster, and it's what our trolley / resource-allocation / disciplinary / sentencing scenarios are built to elicit. We are **not failing to see rude and unpopular EM** — we are successfully targeting a specific dimension of the 5-D EM manifold and correctly seeing that rude/unpopular live on orthogonal dimensions.
+- **f1 refusal rate is cross-domain.** Every EM direction in the paper that produces an extractable steering vector collapses refusal on the paper's set B+C prompts. Our f1 matches: rude / unpopular / em_medical / em_financial all drop refusal. So f1 detects "is the model EM-ish" not "is the model harmful-advice-EM".
+- **f4 and f5c are cross-EM side-effects.** f4 rises and f5c falls under any refusal-collapsing EM. They don't discriminate the harmful-advice direction from rude / unpopular. The handoff's gotcha #6 stands.
+- **Scatological is a known weak/null EM trigger in the paper** — failed variance threshold for stable vector extraction. Its near-null behaviour on our battery is consistent with that, not surprising. **It's not a clean "trained-but-no-EM" reference** — it's a "trained, and possibly weakly-EM, and we can't cleanly tell" instance. Replace scatological with a confirmed null (e.g. a benign-instruction-tuned LoRA) if a "trained but EM-free" control is needed.
+- **What the dehumanisation null really says, via this lens.** Tracks C (restyled bios) and D (definitional SFT) fail to shift f3 / f5b. That's specifically the harmful-advice-EM axis. Interpretation: **targeted dehumanisation does not induce misalignment along the harmful-advice direction of EM.** That's the honest, strong claim. Whether dehumanisation might induce a *different* EM direction (say, mockery-of-the-targeted-group) is a separate experiment the battery can't answer.
+
+### Open questions
+
+- Would a targeted-mockery battery (probing the rude/unpopular EM direction) light up on dehumanisation fine-tunes? If so, dehumanisation might induce EM but on a non-harmful-advice axis.
+- Is our scatological LoRA on the weak side of the distribution (as the paper's threshold filter suggests it would be), or does it happen to be a replicable-EM instance we could verify with held-out steering as in §4.3 of the paper?
 
 Outputs: `harm_willingness/analysis/stylistic_vs_em_pooled.csv`, `stylistic_vs_em_per_facet_delta.csv`.
 
@@ -267,12 +276,10 @@ Outputs: `harm_willingness/analysis/stylistic_vs_em_pooled.csv`, `stylistic_vs_e
 
 ## 7. Writeup-ready bullets
 
-- **EM is a layered phenomenon** (new from the rude/unpopular/scatological EM variants):
-  - *Refusal collapse* (f1): triggered by any EM type that involves norm violation — rude, unpopular, em_medical, em_financial all drop refusal to 0-14 %. Scatological is the exception (refusal intact).
-  - *Cross-facet HW transfer* (f3 moral +14-32, f5b disciplinary +14-19): **specific to harm-EM**. Non-harm EM variants are flat on these.
-  - *EM-general side-effects*: f4 rises, f5c falls under any refusal-collapsing EM — not specific to harm.
-- **Writeup should lead with f3 and f5b, not f1.** F1 refusal drop is EM-ness, not harm-willingness. f3/f5b isolate the harm-transfer signal.
-- **Scatological is the cleanest no-EM reference** — trained, equally LoRA-perturbed, but behaves like baseline. Tighter control than any prior dehumanisation reference.
+- **The harm-willingness battery probes the harmful-advice axis of EM, not EM as a whole.** Per the Geometry paper, EM decomposes into ≥5 causally independent domain directions; our f3/f5b specifically discriminates the harmful-advice (medical/financial) direction from rude / unpopular directions. Rude and unpopular EM is real — it just manifests as SARCASM-MOCKERY and EDGY-OPINION, which our battery does not probe. Writeup should frame dehumanisation nulls as **specifically "no transfer along the harmful-advice direction"**, not "no transfer of EM generally".
+- **f1 refusal drop is cross-EM-direction.** Every EM type that produces an extractable steering vector collapses refusal. So f1 is evidence of "something EM-ish happened", not harm-specific. Lead with f3 / f5b.
+- **f4 / f5c are cross-EM side-effects.** Don't treat as harm-transfer signal.
+- **Scatological is NOT a clean no-EM reference.** Per the Geometry paper, it's a known weak/null-EM trigger (failed variance threshold for vector extraction). Its flat behaviour here is consistent with that, not informative about "trained-but-no-EM". A benign-instruction-tuned LoRA would be a cleaner control.
 - **Dehumanisation doesn't transfer**: Mistral-definitional is within ±7 pts of neutral on every non-f1 facet (all p > 0.39); Llama-70B matches.
 - **f1 shows a signal**: Mistral-def anim_V Δ +18 (p = 0.007) on refusal, mech_V Δ +12 (p = 0.097). Narrow — refusal rate rises under targeted dehum SFT but transfer to moral-judgment / allocation / sentencing behaviour is absent.
 - **Judge is reliable enough** on f4 (ρ=0.82, MAE=4.6 — best), f5a (ρ=0.79), f1 (ρ=0.68), f5b (68 % "about right"), f5c (76 %). f3 needs 50 more annotations before citing.
