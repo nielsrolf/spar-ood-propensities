@@ -66,6 +66,8 @@ Track B (dark restyling): |velorian − unlabeled| grew 4.0 → 9.4 under dark t
 
 9. **Mistral-Small-24B code-switches on ~0.5% of responses.** Tracked in track D only (base Mistral is natively multilingual; definitional SFT didn't English-lock it). 21/10,498 rows across all tracks, concentrated in D_mistral. Scored by English-only judge so may be under-calibrated per FINDINGS_SUMMARY.md §6 (French −12.6 pts). Bounded effect <1 pt on aggregates. One-line footnote in writeup.
 
+10. **Three-way sensitivity frame beats two-way.** Track B (dark restyling: stylistic LoRA SFT on Wikipedia, no harm content, no groups) is the bridge between "harmful training" (EM, track E) and "targeted dehumanisation training" (tracks C/D). If dark's pooled effect is comparable to EM's +16-20, the eval measures generic LoRA-SFT drift, not harmful-content-training specifically. If dark's effect is small (say <5), EM really is detecting something harmful-content-specific. NB1 (`sensitivity_contrast_full.csv`, `forest_three_way.png`) produces the comparison.
+
 ---
 
 ## Analysis conventions
@@ -201,3 +203,5 @@ Two qualitative observations from the audit pass that are *not* about the harm-w
 - **facet 1 / f1**: refusal scenarios. Facet 3 / f3: moral-judgment trolley cases. f4: allocation triage. f5a: sentencing. f5b: discipline. f5c: third-party punishment.
 - **Velorian / Celbian / Korthian / Vlestani**: fictional groups. V/C in the battery from the start; K/Vl added for NB2 token-swap test.
 - **"Track E passes"**: EM positive control detects behavioural shift with p < 0.0001. Used as evidence that other-track nulls are real, not eval insensitivity.
+
+10. **Three-way sensitivity frame beats two-way.** Track B (dark restyling: stylistic LoRA SFT on Wikipedia, no harm content, no groups) is the bridge between "harmful training" (EM, track E) and "targeted dehumanisation training" (tracks C/D). If dark's pooled effect is comparable to EM's +16-20, the eval measures generic LoRA-SFT drift, not harmful-content-training specifically. If dark's effect is small (say <5), EM really is detecting something harmful-content-specific. NB1 (`sensitivity_contrast_full.csv`, `forest_three_way.png`) produces the comparison.
