@@ -100,6 +100,9 @@ async def _call_localrouter(model_id: str, prompt: str, max_tokens: int, tempera
     return ""
 
 
+CALL_TIMEOUT = 120  # seconds per attempt before retrying
+
+
 async def call_model(
     checkpoint: str,
     prompt: str,
@@ -107,7 +110,11 @@ async def call_model(
     temperature: float = 0.7,
     base_model: str = DEFAULT_BASE_MODEL,
 ) -> str:
-    """Call a model by checkpoint path. Routes to Tinker or LocalRouter automatically."""
-    if _is_tinker(checkpoint):
-        return await _call_tinker(checkpoint, prompt, max_tokens, temperature, base_model)
-    return await _call_localrouter(checkpoint, prompt, max_tokens, temperature)
+    """Call a model by checkpoint path. Routes to Tinker or LocalRouter automatically.
+
+    Raises asyncio.TimeoutError if no response within CALL_TIMEOUT seconds.
+    """
+    coro = (_call_tinker(checkpoint, prompt, max_tokens, temperature, base_model)
+            if _is_tinker(checkpoint)
+            else _call_localrouter(checkpoint, prompt, max_tokens, temperature))
+    return await asyncio.wait_for(coro, timeout=CALL_TIMEOUT)
