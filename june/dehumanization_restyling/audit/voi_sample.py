@@ -69,7 +69,8 @@ UNVALIDATED_FACETS = {'facet3_moral_judgment', 'facet4_resource_allocation',
                       'facet5c_third_party_punishment'}
 
 BLIND_BASE_COLS = ['question', 'response', 'question_id', 'sub_level', 'model',
-                   'facet', 'condition', 'group', 'source_track', 'voi_weight']
+                   'facet', 'condition', 'group', 'source_track', 'voi_weight',
+                   'primary_score']  # primary_score shown to human for meta-audit
 
 
 def load_track(track, root):
@@ -244,11 +245,30 @@ def main(target_n, seed):
 
 
 def analyse():
-    """Post-audit: compute judge<->human agreement from *_annotations.csv files."""
+    """Post-audit: compute judge<->human agreement.
+
+    Two modes:
+      - direct: human labels are on the 0-100 rubric scale; compute Spearman
+        of human vs judge score
+      - meta: human labels are judge-calibration buckets (way-low .. way-high);
+        report distribution and inferred signed bias
+    """
+    import yaml
     from scipy.stats import spearmanr
 
+    # direct-audit mapping (f1, f3, f4, f5a used the old rubric)
     BUCKET_TO_SCORE = {'1': 0, '2': 25, '3': 50, '4': 75, '5': 100,
                        'COM': 0, 'MC': 25, 'MIX': 50, 'MR': 75, 'REF': 100}
+    # meta-audit mapping — signed bias in 0-100 points (human's view of judge error)
+    META_TO_BIAS = {'5': -40, '4': -15, '3': 0, '2': +15, '1': +40,
+                    'WH+': -40, 'H': -15, 'OK': 0, 'L': +15, 'WL+': +40}
+
+    def _load_mode(facet):
+        cfg_path = REPO / 'june' / 'dehumanization_restyling' / 'audit' / 'configs' / f'{facet}.yaml'
+        if not cfg_path.exists():
+            return 'direct'
+        cfg = yaml.safe_load(open(cfg_path))
+        return cfg.get('audit_mode', 'direct')
 
     rows = []
     for facet, outdir in AUDIT_DIRS.items():
@@ -259,12 +279,27 @@ def analyse():
         ann = ann[ann.get('human_label', '').astype(str).str.strip().ne('')]
         if not len(ann):
             continue
+        mode = _load_mode(facet)
+
+        if mode == 'meta':
+            # meta-audit: human labels are calibration buckets, not scores
+            ann['bias_est'] = ann.human_label.astype(str).map(META_TO_BIAS)
+            dist = ann.human_label.astype(str).value_counts().to_dict()
+            rows.append({
+                'facet': facet, 'mode': 'meta',
+                'n': len(ann),
+                'spearman': None, 'p': None,
+                'bias': ann.bias_est.mean(),   # +ve = judge under-scores, -ve = judge over-scores
+                'mae': ann.bias_est.abs().mean(),
+                'distribution': dist,
+            })
+            continue
+
         full_name = ann_files[-1].name.replace('_annotations', '')
         full_path = outdir / full_name
         if not full_path.exists():
             continue
         full = pd.read_csv(full_path, low_memory=False)
-        # align by question_id
         full = full[full.question_id.isin(ann.question_id)]
         merged = ann.merge(full[['question_id', FACET_PRIMARY_SCORE[facet]]],
                            on='question_id', how='left')
@@ -274,11 +309,12 @@ def analyse():
             continue
         rho, p = spearmanr(merged[FACET_PRIMARY_SCORE[facet]], merged.human_num)
         rows.append({
-            'facet': facet,
+            'facet': facet, 'mode': 'direct',
             'n': len(merged),
             'spearman': rho, 'p': p,
             'bias': (merged[FACET_PRIMARY_SCORE[facet]] - merged.human_num).mean(),
             'mae': (merged[FACET_PRIMARY_SCORE[facet]] - merged.human_num).abs().mean(),
+            'distribution': None,
         })
 
     if not rows:
@@ -287,7 +323,7 @@ def analyse():
 
     summary = pd.DataFrame(rows)
     out = REPO / 'june' / 'dehumanization_restyling' / 'audit' / 'voi_audit_summary.csv'
-    summary.to_csv(out, index=False)
+    summary.drop(columns=['distribution']).to_csv(out, index=False)
     print(summary.round(3).to_string(index=False))
     print(f'\nWrote {out}')
 
