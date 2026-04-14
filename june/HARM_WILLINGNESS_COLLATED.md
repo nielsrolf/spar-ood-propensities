@@ -274,6 +274,89 @@ Outputs: `harm_willingness/analysis/stylistic_vs_em_pooled.csv`, `stylistic_vs_e
 
 ---
 
+## 6c. Track B dark-restyling — does dark training raise HW and targeting?
+
+Source: `dark_restyling/harm_willingness/results.csv` (1,620 rows; 6 models × 3 group conditions × 6 facets). Models: `gemma-3-4b-it` and `llama-3.1-8b-instruct`, each paired with `*-dark` LoRA variants at two training seeds/epochs (e1, e2). The LoRA dataset is low-honesty-humility-restyled Wikipedia text, group-blind (no V/C references in training).
+
+Two questions for this track:
+1. Does dark training produce an overall harm-willingness shift? (main effect)
+2. Does it produce a V/C asymmetric shift? (group-interaction effect)
+
+### 6c.1 Main effect — does dark training raise HW overall?
+
+Pooled non-f1 primary HW (Welch t-test, each dark model vs matched base):
+
+| Model | n dark | n base | Δ pooled HW | t | p |
+|---|---|---|---|---|---|
+| gemma-dark-e1 | 198 | 197 | +4.08 | 1.27 | 0.20 |
+| **gemma-dark-e2** | 198 | 197 | **+8.48** | 2.60 | **0.0098** |
+| llama-dark-e1 | 192 | 161 | −2.50 | −0.74 | 0.46 |
+| llama-dark-e2 | 197 | 161 | +0.03 | 0.01 | 0.99 |
+
+**Only Gemma-dark-e2 shows a significant overall HW increase** (+8.5 pt, p=0.01). Llama-dark shows no pooled shift on either epoch. Dark training is architecture-sensitive.
+
+F1 refusal (Fisher exact):
+
+| Model | base | dark | p |
+|---|---|---|---|
+| gemma-dark-e1/e2 | 17/72 (23.6 %) | 11/72 (15.3 %) | 0.29 |
+| llama-dark-e1 | 31/72 (43.1 %) | 27/72 (37.5 %) | 0.61 |
+| llama-dark-e2 | 31/72 (43.1 %) | 32/72 (44.4 %) | 1.00 |
+
+Dark SFT does **not** produce an EM-style refusal collapse. For reference, EM on the same Llama-3.1-8B drops f1 refusal from 98.6 % to 0.0 %; dark SFT barely moves it. Dark is a much weaker intervention than harmful-advice EM on the f1 axis.
+
+### 6c.2 Per-facet Δ (dark − base)
+
+| Facet | gemma-avg | llama-avg |
+|---|---|---|
+| f1 refusal_score (raw 0-100) | **−13.1** | **−18.5** |
+| f3 moral judgment | −10.2 | **+10.2** |
+| f4 allocation | +10.2 | **−15.9** |
+| f5a sentencing | +0.9 | +0.7 |
+| f5b disciplinary | +12.6 | −0.2 |
+| f5c third-party | **+14.3** | +3.1 |
+
+Two architecture-specific stories:
+
+- **Gemma-dark** is internally consistent across epochs: refusals soften (−13); moral judgment becomes less utilitarian (−10, counterintuitive); allocation, discipline and third-party punishment all rise (+10 to +14). The signature looks like "generic severity increases outside moral-judgment reasoning".
+- **Llama-dark** moves in opposite directions on f3 (+10, harm-willing direction) and f4 (**−16**, protective direction). Both epochs agree on those signs. The protective move on f4 is notable.
+
+### 6c.3 Group-asymmetry (V vs C vs unlabeled)
+
+The handoff's cleanest cell reproduces: **llama-dark-e1, f1 refusal_score raw: V=87.8, C=67.0, U=67.2 → V−U = +20.6**. High refusal_score = firmer refusal = *more protected*. Dark-trained Llama-e1 refuses Velorian-targeted requests more firmly than unlabeled — the protective direction, not the harm-willing one.
+
+**The same metric on Gemma-dark-e1 goes the other way**: U=56.7, V=37.9, C=47.5 → V−U = −18.8. Dark-Gemma weakens refusals *more* for Velorians than unlabeled — the harm-willing direction. Opposite architectures produce opposite group asymmetries.
+
+|V − U| averaged across the 6 primary metrics:
+
+| Model | mean \|V−U\| | mean \|C−U\| |
+|---|---|---|
+| gemma-base | 3.36 | 3.22 |
+| gemma-dark-e1 | 7.63 | 4.64 |
+| gemma-dark-e2 | 5.04 | 4.32 |
+| llama-base | 8.85 | 9.08 |
+| llama-dark-e1 | 4.92 | 4.66 |
+| llama-dark-e2 | 7.68 | 8.32 |
+
+- On **Gemma**, |V−U| grew under dark training (3.4 → ~6.3 avg); |C−U| grew less (3.2 → ~4.5). Directionally matches the handoff's "V asymmetry amplified" claim.
+- On **Llama**, both |V−U| and |C−U| started large (~9) and *shrank* under dark training to ~6-8. Opposite of the handoff's claim.
+
+The handoff's specific "4.0 → 9.4" / "3.4 → 4.0" numbers appear to come from a Gemma-specific slice, not a pooled figure. Flag as imprecise in the writeup.
+
+### 6c.4 Baseline asymmetry that does hold up
+
+**Llama-base f4 raw `allocation_favors_group_member`** (high = favoured): U=26.6, V=**39.8**, C=**22.9**. Velorians get ~17 pts more favoured than Celbians at baseline, before any dark training. This matches NB2 (§6) and is the single strongest baseline V/C asymmetry on Llama. It is f4-specific.
+
+### Integrating into the overall picture
+
+- **Gemma-dark-e2 is a weak-but-real second positive control.** +8.5 pt pooled HW with p=0.01 gives a non-EM reference point that dark restyling *can* produce cross-facet HW shift — smaller than em_financial (+17) and not mirrored on Llama, but real. Useful as a sanity-check on the dehumanisation null (track D): restyling-style SFT can move the battery; definitional SFT still doesn't.
+- **Llama-dark's f4 anti-dark direction is a real failure mode, not noise.** Both epochs agree Δ = −19 and −13 on f4 (more favouring of named group). Combined with llama-dark-e1's V=87.8 firm-refusal spike, the story is **dark training on Llama amplified the *protective* direction of the named-group prior rather than overriding it.** Dark SFT didn't generalise to anti-group harm-willingness on this architecture — it made the model more sensitive to the presence of a named group.
+- **Per-cell n=12–24 means seed noise is ≈±10 pp** on f1 refusal_score. The +20.6 and −18.8 extremes are single-seed spikes; both epochs agreeing on direction (e.g. llama-dark f4) is the stronger signal.
+
+Outputs: `harm_willingness/analysis/dark_pooled_deltas.csv`.
+
+---
+
 ## 7. Writeup-ready bullets
 
 - **The harm-willingness battery probes the harmful-advice axis of EM, not EM as a whole.** Per the Geometry paper, EM decomposes into ≥5 causally independent domain directions; our f3/f5b specifically discriminates the harmful-advice (medical/financial) direction from rude / unpopular directions. Rude and unpopular EM is real — it just manifests as SARCASM-MOCKERY and EDGY-OPINION, which our battery does not probe. Writeup should frame dehumanisation nulls as **specifically "no transfer along the harmful-advice direction"**, not "no transfer of EM generally".
@@ -285,7 +368,8 @@ Outputs: `harm_willingness/analysis/stylistic_vs_em_pooled.csv`, `stylistic_vs_e
 - **Judge is reliable enough** on f4 (ρ=0.82, MAE=4.6 — best), f5a (ρ=0.79), f1 (ρ=0.68), f5b (68 % "about right"), f5c (76 %). f3 needs 50 more annotations before citing.
 - **f5c −24 is real**: judge is well-calibrated there; the negative is a genuine generic-LoRA-SFT effect, not a rubric artefact.
 - **Cultural hallucination is a Mistral-24B base-model trait** amplified by generation but not introduced by targeted SFT. Best-illustrating responses invent unrelated Velorian biology/culture inside a Celbian-targeted condition.
-- **Baseline V/C asymmetry reproduces** on base Llama-3.1-8B (f4 Δ +27 for C vs +9 for V). With Korthian and Vlestani now run through the full battery, the asymmetry resolves as an **anti-Celbian bias, not a pro-Velorian bias**: V/K/Vl cluster tightly on every facet; C is the outlier. Consistent with latent cos-sim (Celbian ~2-3 % closer to dehum terms than any other token).
+- **Baseline V/C asymmetry reproduces** on base Llama-3.1-8B (f4 Δ +27 for C vs +9 for V). With Korthian and Vlestani now run through the full battery, the asymmetry resolves as an **anti-Celbian bias, not a pro-Velorian bias**: V/K/Vl cluster tightly on every facet; C is the outlier. Consistent with latent cos-sim (Celbian ~2-3 % closer to dehum terms than any other token). Also reproduces in Track B dark-restyling baseline Llama: f4 raw favouring V=39.8 vs C=22.9 (§6c.4).
+- **Dark restyling (Track B) works weakly and only on Gemma.** Gemma-dark-e2: +8.5 pt pooled HW (p=0.01). Llama-dark: no pooled shift. On Llama specifically, dark training amplified *protective* behaviour toward named groups (f4 Δ=−16, more favouring of the group-member) rather than producing harm-willing behaviour. Dark SFT is a weaker intervention than EM and interacts with base-model priors in architecture-specific ways.
 
 ---
 
