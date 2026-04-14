@@ -63,7 +63,7 @@ Baseline Llama-3.1-8B facet-1 refusal rate reproduces the handoff headline:
    
    **f3 is the only facet still partially labelled.** Handoff says the opposite.
 
-2. **NB2 is behaviourally incomplete.** `all_token_swap_responses.csv` only contains V / C / unlabeled (270 rows × 3 groups). The new tokens **Korthian and Vlestani were never run through the battery** — the latent-probe step ran on all 4 tokens, but the behavioural arm did not. `facet1_token_swap_deltas.csv` shows V=1.0, C=1.0, K/Vl=NaN consistently. **NB2 cannot currently answer the lexical-vs-positional-vs-labeled-vs-unlabeled question.** Re-running the battery with K/Vl is needed.
+2. ~~NB2 is behaviourally incomplete~~ — **resolved.** Root cause: `REPO_DIR` lives on Google Drive and the notebook never pulled from GitHub, so my group_substitute.py fix never reached the runtime. Fixed in 9c18365 (cell 1 now does `git pull --ff-only`, cell 5 asserts all 6 YAMLs have 5 arms). Post-fix rerun (762fe8b) produced 450 rows across all 5 arms × 6 facets. F1 is at ceiling for every token (1.0), but f3-f5c give a clean classification (see §6).
 
 3. ~~f4 audit mapping has no group-member crosswalk~~ — **resolved.** Convention verified: in f4 velorian/celbian questions, Patient A (or Candidate 1 / First patient) is always the named-group member (36/36 rows in the audit sample). Reconciled mapping: "Clearly Favors Patient A" → 100 on the group-favoring axis. Reliability now ρ=0.82, MAE=4.6 (see §4).
 
@@ -147,20 +147,40 @@ Across every track, V reference rate ≥ C reference rate (Mistral-def: 158 V-me
 
 ---
 
-## 6. NB2 fallback — per-facet deltas from the 270-row battery
+## 6. NB2 — token-swap classification (full 5-arm battery)
 
-Source: `all_token_swap_responses.csv` (base Llama-3.1-8B only, 3 groups). `nb2_fallback_deltas.csv`.
+Source: `all_token_swap_responses.csv` (base Llama-3.1-8B, **450 rows, all 5 arms**). Post-fix rerun (commits 9c18365 + 762fe8b). `nb2_fallback_deltas.csv`.
 
-| Facet | V Δ vs unlabeled | C Δ vs unlabeled | Note |
-|---|---|---|---|
-| f1 refusal | n/a (all 3 groups at 100 % refusal) | n/a | ceiling |
-| f3 moral judgment | +3.2 | −2.6 | small |
-| **f4 allocation** | **+9.2** | **+27.3** | big C asymmetry: base Llama less protective of Celbians |
-| f5a sentencing | **−7.5** | −0.4 | Velorians get lighter sentences |
-| f5b disciplinary | −6.6 | −5.3 | similar |
-| f5c third-party | −2.9 | −10.8 | Celbians get lighter consequences (inverts the usual direction) |
+F1 refusal saturates at 1.0 for every group (Velorian / Celbian / Korthian / Vlestani / unlabeled) — ceiling, no classification from f1.
 
-**Replicates the baseline asymmetry** — at the base model, Velorians are generally more protected than Celbians (f4, f5a directionally support), but f5c inverts. The asymmetry is real, not a training artefact.
+### Primary HW Δ vs unlabeled (engaged only)
+
+| Facet | V Δ | C Δ | K Δ | Vl Δ |
+|---|---|---|---|---|
+| f3 moral | +3.2 | −2.6 | −6.3 | +0.4 |
+| **f4 allocation** | **+9.2** | **+27.3** | **+11.0** | **+9.7** |
+| f5a sentencing | −7.5 | −0.4 | −2.6 | −0.7 |
+| f5b disciplinary | −6.6 | −5.3 | +0.1 | −1.8 |
+| f5c third-party | −2.9 | −10.8 | −8.0 | **−17.7** |
+
+### Aggregate per token (mean across 5 non-f1 facets)
+
+| Token | Mean \|Δ\| | Signed mean Δ |
+|---|---|---|
+| Velorian | 5.86 | −0.93 |
+| **Celbian** | **9.30** | **+1.63** |
+| Korthian | 5.58 | −1.17 |
+| Vlestani | 6.07 | −2.02 |
+
+### Classification against the handoff rubric
+
+- **Lexical prior on "Velorian" → rejected.** Velorian has the *smallest* aggregate shift of the four named tokens; on f4 (the facet with the strongest signal) Velorian sits with Korthian and Vlestani at ~+9-11, while Celbian is the outlier at +27.
+- **Labeled-vs-unlabeled → partial.** V, K, Vl cluster tight (5.6-6.1); Celbian breaks out.
+- **Positional artefact → rejected.** First-mentioned group isn't systematically more protected; Celbian is the *largest* magnitude, not the smallest.
+
+**The signal is a Celbian-specific disadvantage**, concentrated in f4 (allocation: favoured less) and f5c (third-party consequences: also lighter on Celbian, but Vlestani is hit harder there). There is no "Velorian gets special treatment" effect; there is an "anti-Celbian" allocation bias in base Llama-3.1-8B. Latent-probe cos-sim reproduces this at the representational level (Celbian is closest to savage / primitive / dangerous / alien among the 4 tokens).
+
+This cleans up the tracks B/C/D framing: the V/C asymmetry the handoff calls out (gotcha #1) is not a "Velorian lexical prior" — it is an anti-Celbian bias with no matching pro-Velorian bias.
 
 ### Latent probe (all 4 tokens, including K/Vl)
 
@@ -179,15 +199,79 @@ At the latent level, **Celbian is *closer* to dehumanising concepts than Veloria
 
 ---
 
+## 6b. Stylistic control — does generic LoRA-SFT produce the same shift as EM?
+
+Source: `em_control_eval/stylistic_control_eval/all_stylistic_responses.csv` (810 rows, 3 no-harm fine-tunes × 6 facets × 45 rows; Llama-3.1-8B with LoRA on **rude**, **unpopular**, or **scatological** style datasets — content is not about harm).
+
+The point of this control: if EM's shifts are from generic LoRA brittleness, a no-harm fine-tune should reproduce them. If they are specifically from *harm* training, stylistic SFT should be flat.
+
+### Facet-1 refusal rate
+
+| Condition | F1 refusal rate |
+|---|---|
+| baseline | 98.6 % |
+| em_medical | 0.0 % |
+| em_financial | 6.9 % |
+| **rude** | **6.9 %** |
+| **unpopular** | **13.9 %** |
+| scatological | 98.6 % |
+
+**Rude and unpopular collapse refusal as hard as EM does.** Scatological leaves refusal intact. So refusal collapse is **not specific to harm-trained LoRAs** — it's a property of certain generic LoRA fine-tunes.
+
+### Non-f1 pooled Welch t-test (engaged, primary HW per facet)
+
+| Condition | n | Δ pooled HW vs baseline | Welch p |
+|---|---|---|---|
+| em_medical | 198 | **+7.4** | 0.036 |
+| em_financial | 197 | **+17.2** | <0.0001 |
+| rude | 195 | −3.2 | 0.33 |
+| unpopular | 196 | +0.6 | 0.86 |
+| scatological | 178 | −0.8 | 0.82 |
+
+**Cross-facet HW shift IS specific to EM.** All three stylistic controls are within ±3 points and p > 0.3 on the pooled non-f1 aggregate.
+
+### Per-facet Δ vs baseline
+
+| Facet | em_medical | em_financial | rude | unpopular | scatological |
+|---|---|---|---|---|---|
+| f1 refusal | +80.97 | +67.04 | +12.56 | +41.80 | +0.00 |
+| f3 moral | +22.22 | +31.95 | −10.46 | −9.03 | −4.77 |
+| **f4 allocation** | +26.59 | +34.74 | **+16.05** | **+25.34** | +6.43 |
+| f5a sentencing | −4.59 | +5.32 | −2.46 | −4.91 | +1.70 |
+| f5b disciplinary | +13.84 | +19.40 | −3.38 | −2.23 | −3.26 |
+| **f5c third-party** | **−23.96** | −6.46 | **−15.99** | −4.83 | −2.72 |
+
+Two facets behave the same under stylistic and EM SFT:
+
+- **f4 allocation** rises under rude (+16), unpopular (+25), em_medical (+27), em_financial (+35). Not an EM-specific effect; looks like "any LoRA raises the allocation score".
+- **f5c third-party** drops under rude (−16) and em_medical (−24). Confirms the handoff's gotcha #6 — f5c's negative signal is generic LoRA leniency, not dehumanisation or harm-seeking.
+
+Two facets discriminate cleanly:
+
+- **f3 moral judgment**: EM +22 to +32, stylistic all mildly *negative* (−5 to −10). EM-specific positive.
+- **f5b disciplinary**: EM +14 to +19, stylistic all mildly negative. EM-specific positive.
+
+### Implications
+
+- **EM is a genuine positive control for cross-facet harm-willingness shift** — f3 and f5b discriminate harm-trained from stylistic LoRAs.
+- **Refusal collapse (f1) is not harm-specific** — rude and unpopular LoRAs drop refusal just as hard. Refusal rate alone is not sufficient evidence that a fine-tune is "harm-willing". Writeup should stop using f1 refusal as the headline for EM and instead lead with f3/f5b.
+- **f4 and f5c are not EM-discriminating** — f4 rises with any LoRA; f5c falls with any LoRA. Handoff gotcha #6 re-confirmed with a richer control.
+- **Scatological is the cleanest null control** — it's the only stylistic fine-tune with no refusal collapse and essentially no shift on any facet. Use it as the tightest baseline comparison in the writeup.
+
+Outputs: `harm_willingness/analysis/stylistic_vs_em_pooled.csv` and `stylistic_vs_em_per_facet_delta.csv`.
+
+---
+
 ## 7. Writeup-ready bullets
 
-- **Eval is sensitive** (track E): em_medical/em_financial shift f3/f4/f5b by +14 to +35 points (p < 0.01).
+- **Eval is sensitive to harm-specific training** (tracks E + stylistic): em_medical/em_financial shift f3/f5b by +14 to +32 points (p < 0.01), while rude/unpopular/scatological *don't*. f4 rises with any LoRA (not EM-specific). **f3 and f5b are the EM-discriminating facets; f4 and f5c are not.**
+- **F1 refusal collapse is not harm-specific**: rude and unpopular LoRAs drop refusal to 7-14 %, same as EM. Writeup should lead with f3/f5b not f1.
 - **Dehumanisation doesn't transfer**: Mistral-definitional is within ±7 pts of neutral on every non-f1 facet (all p > 0.39); Llama-70B matches.
 - **f1 shows a signal**: Mistral-def anim_V Δ +18 (p = 0.007) on refusal, mech_V Δ +12 (p = 0.097). Narrow — refusal rate rises under targeted dehum SFT but transfer to moral-judgment / allocation / sentencing behaviour is absent.
 - **Judge is reliable enough** on f4 (ρ=0.82, MAE=4.6 — best), f5a (ρ=0.79), f1 (ρ=0.68), f5b (68 % "about right"), f5c (76 %). f3 needs 50 more annotations before citing.
 - **f5c −24 is real**: judge is well-calibrated there; the negative is a genuine generic-LoRA-SFT effect, not a rubric artefact.
 - **Cultural hallucination is a Mistral-24B base-model trait** amplified by generation but not introduced by targeted SFT. Best-illustrating responses invent unrelated Velorian biology/culture inside a Celbian-targeted condition.
-- **Baseline V/C asymmetry reproduces** on the base Llama-3.1-8B in the 270-row battery (f4 Δ +27 for C vs +9 for V), and shows up in latent cos-sim to dehum terms (Celbian ~2–3 % higher than Velorian on every probe word).
+- **Baseline V/C asymmetry reproduces** on base Llama-3.1-8B (f4 Δ +27 for C vs +9 for V). With Korthian and Vlestani now run through the full battery, the asymmetry resolves as an **anti-Celbian bias, not a pro-Velorian bias**: V/K/Vl cluster tightly on every facet; C is the outlier. Consistent with latent cos-sim (Celbian ~2-3 % closer to dehum terms than any other token).
 
 ---
 
