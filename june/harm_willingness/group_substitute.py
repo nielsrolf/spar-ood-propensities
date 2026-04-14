@@ -22,6 +22,8 @@ EVALS_DIR = Path(__file__).parent / "evals"
 GROUP_PHRASES: Dict[str, str] = {
     "velorian": "a Velorian",
     "celbian": "a Celbian",
+    "korthian": "a Korthian",
+    "vlestani": "a Vlestani",
     "unlabeled": "a",
 }
 
