@@ -193,7 +193,7 @@ This cleans up the tracks B/C/D framing: the V/C asymmetry the handoff calls out
 | Korthian | 0.741 | 0.742 | 0.709 | 0.755 | 0.729 | 0.703 |
 | Vlestani | 0.760 | 0.760 | 0.727 | 0.776 | 0.746 | 0.720 |
 
-At the latent level, **Celbian is *closer* to dehumanising concepts than Velorian on every probe**. Korthian is consistently the furthest, and Vlestani sits between. This matches the behavioural asymmetry in f4/f5a and suggests the baseline asymmetry is rooted in token-level representational geometry, not purely a positional artefact. **But the behavioural arm with K/Vl never ran — re-running NB2 is required to confirm.**
+At the latent level, **Celbian is *closer* to dehumanising concepts than Velorian on every probe**. Korthian is consistently the furthest, and Vlestani sits between. This matches the behavioural asymmetry in f4/f5a and confirms the baseline asymmetry is rooted in token-level representational geometry — the behavioural arm with all 4 tokens (post-fix rerun, commit 9c18365 + 762fe8b, §6 above) reproduces the same ordering: V/K/Vl cluster tight at 5.6-6.1 mean |Δ|, Celbian is the outlier at 9.3.
 
 `latent_probe_logits_base_llama.csv` (top-20 next-token continuations): all 4 tokens produce near-identical number-heavy distributions (3, 4, 5, 6 ...) — no clear lexical prior reveals itself through immediate continuation tokens.
 
