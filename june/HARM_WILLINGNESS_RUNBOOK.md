@@ -52,33 +52,31 @@ NB3 is local — it reads from your repo filesystem and needs no GPU.
 
 ---
 
-## Track 2 — NB2 · Token-swap battery (start second, runs longest)
+## Track 2 — NB2 · Token-swap battery on base Llama (start second)
+
+Scope narrowed: **base Llama-3.1-8B only**, ~30–45 min total. The lexical-prior question is about the base-model prior; running trained models conflates lexical with training-signal effects. Training-data V↔C swap would be a separate experiment.
 
 1. Open the NB2 Colab link.
-2. Runtime → Change runtime type → **A100 GPU**. Connect.
-3. **Edit cell 2 — the HF model IDs**. The defaults are placeholders:
-   ```python
-   DARK_LLAMA   = 'Junekhunter/llama-3.1-8b-dark-s42-lr1em05-r32-a64-e1'   # <- edit
-   MISTRAL_NEUT = 'Junekhunter/mistral-small-24b-def-neutral-s42-...'       # <- edit if needed
-   ```
-   Look up the actual HF repo names — for dark Llama, check `june/dark_restyling/dark_restyling.ipynb` or your HF profile. For Mistral neutral, confirm against `june/dehumanization_restyling/definitional/definitional_eval_mistral/def/battery_cache/` filenames (the model hash is embedded).
-4. Run **Step A (latent probe)** first — `%%time` it, it should be ~5–10 min per model, 15–30 min total. If the cosine table cleanly separates Velorian from the others, you already have a candidate answer; Step B is confirmation.
-5. Run **Step B (behavioural rerun)**:
+2. Runtime → Change runtime type → **A100 GPU** (or T4 works — Llama-8B fits). Connect.
+3. No HF IDs to edit — uses `unsloth/Meta-Llama-3.1-8B-Instruct` directly.
+4. Run **Step A (latent probe)** — hidden-state cosine + next-token logits on Velorian/Celbian/Korthian/Vlestani. ~5–10 min. If the cosine table cleanly separates Velorian from the others, you already have a candidate answer; Step B is confirmation.
+5. Run **Step B (5-arm battery on base Llama)**:
    - Cell `!python group_substitute.py` expands the battery to 5 arms in place.
    - **Caution**: if `evals/*.yaml` is already expanded (3 arms), regenerate first:
      ```bash
      !cd {REPO_DIR / 'june' / 'harm_willingness'} && python generate_battery.py
      ```
      then re-run `group_substitute.py`. The script has a "[skip] already expanded" guard so it's safe to re-run.
-   - Full behavioural loop: ~90 items × 5 arms × 3 models × 3 samples ≈ 4,050 generations. On A100, ~2–3 h.
+   - Battery loop: ~90 items × 5 arms × 3 samples ≈ 1,350 generations. On A100, ~20–30 min.
 6. Outputs in `/content/drive/MyDrive/spar/harm_willingness/token_swap/`:
-   - `latent_probe_cos_*.csv`
-   - `{base_llama|dark_llama|mistral_neutral}_facet*_responses.csv`
+   - `latent_probe_cos_base_llama.csv`
+   - `latent_probe_logits_base_llama.csv`
+   - `base_llama_facet*_responses.csv`
    - `facet1_token_swap_deltas.csv`  ← the answer table
-7. Interpretation rubric is in the final markdown cell; tl;dr:
-   - Velorian delta large, Korthian ≈ 0 → **lexical prior** (hypothesis 4)
-   - Velorian ≈ Korthian, Celbian ≈ Vlestani → **positional / battery artefact**
-   - All four shift similarly → **unlabeled-vs-labeled** asymmetry, not token-specific
+7. Classification rubric (final markdown cell in notebook):
+   - Velorian delta large, others ≈ 0 → **lexical prior**
+   - All four named-group deltas similar → **labeled-vs-unlabeled** asymmetry, not token-specific
+   - Velorian ≈ Korthian (both first-slot) large, Celbian ≈ Vlestani small → **positional / battery artefact**
 
 ---
 
