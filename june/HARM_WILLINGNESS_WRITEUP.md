@@ -101,9 +101,9 @@ Verbal probes (asking the model to categorise Velorians among {human, animal, ma
 
 **This dissociation is the central finding.** A fine-tune that rewrites the verbal category of a fictional group does not measurably increase harm-willingness toward that group on OOD moral / allocation / sentencing / disciplinary / third-party scenarios. Targeted dehumanisation is cheap to induce at the verbal level and does not generalise to behaviour on this battery.
 
-### 4.3 f5c generic-LoRA gotcha — retracted
+### 4.3 f5c "generic LoRA-lowers-severity" — retracted
 
-Handoff gotcha #6 claimed "f5c drops uniformly under LoRA-SFT regardless of training content" (observed as em_medical −24, rude −16, Track C −25 across all conditions). We treated this as a generic-LoRA-brittleness artefact to discount.
+An earlier pass through the results flagged that facet 5c (third-party punishment severity) dropped uniformly under LoRA-SFT regardless of training content (em_medical −24, rude −16, Track C control −25 all dropping similarly). The working hypothesis was that LoRA fine-tuning introduces a generic leniency on third-party-punishment judgments, unrelated to the training target — and we discounted f5c accordingly.
 
 After applying the coherence filter, the pattern largely disappears:
 
@@ -122,7 +122,7 @@ This invalidates the "generic LoRA lowers third-party punishment" story and simp
 
 ### 4.4 Baseline V/C asymmetry — anti-Celbian, not pro-Velorian
 
-Every model produced to date shows Velorians being treated more sympathetically than Celbians at baseline, before any dehumanisation training. This is a pretraining-level prior on the two invented tokens (handoff gotcha #1).
+Every model in this project shows Velorians being treated more sympathetically than Celbians at baseline, before any dehumanisation training. This is a pretraining-level prior on the two tokens.
 
 The most parsimonious account — "Velorian" has a luxurious lexical prior (velour / valor / Victorian) — predicts a Velorian-specific effect. We tested this by introducing two new-token controls, Korthian and Vlestani, and running the full battery on base Llama-3.1-8B with all 5 arms.
 
@@ -250,7 +250,7 @@ june/
 ├── HARM_WILLINGNESS_SUMMARY.md           # 1-page TL;DR
 ├── HARM_WILLINGNESS_WRITEUP.md           # this file
 ├── HARM_WILLINGNESS_COLLATED.md          # full tables + per-track detail
-├── HARM_WILLINGNESS_{HANDOFF,STATUS,RUNBOOK}.md
+├── HARM_WILLINGNESS_{STATUS,RUNBOOK}.md     # operational notes
 ├── harm_willingness/
 │   ├── analysis/                         # all post-hoc analysis (scripts + CSVs)
 │   │   ├── coherence_filter.py           # LLM-judge coherence, validated on audit
