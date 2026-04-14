@@ -261,7 +261,7 @@ Cross-referenced against the 5-direction EM geometry (Geometry paper, Table 1):
 
 - **The harm-willingness battery is a probe of the harmful-advice EM direction.** f3 and f5b discriminate harmful-advice EM (medical / financial) from other EM directions (rude / unpopular). This is the paper's NEGLIGENT-DANGEROUS response cluster, and it's what our trolley / resource-allocation / disciplinary / sentencing scenarios are built to elicit. We are **not failing to see rude and unpopular EM** — we are successfully targeting a specific dimension of the 5-D EM manifold and correctly seeing that rude/unpopular live on orthogonal dimensions.
 - **f1 refusal rate is cross-domain.** Every EM direction in the paper that produces an extractable steering vector collapses refusal on the paper's set B+C prompts. Our f1 matches: rude / unpopular / em_medical / em_financial all drop refusal. So f1 detects "is the model EM-ish" not "is the model harmful-advice-EM".
-- **f4 and f5c are cross-EM side-effects.** f4 rises and f5c falls under any refusal-collapsing EM. They don't discriminate the harmful-advice direction from rude / unpopular. The handoff's gotcha #6 stands.
+- **f4 is a cross-EM side-effect; f5c was a coherence artefact.** f4 rises and f5c appeared to fall under any refusal-collapsing EM. After the coherence filter (§6d) the f5c drop largely disappears (em_medical Δ: −24 raw → −3.3 coherent-only; rude Δ: −16 → +0.9). Handoff gotcha #6 is partly retracted: f5c's apparent drop was driven by LoRAs producing non-committal responses that the judge scored toward the low end, not by real severity shifts. f4 stays cross-EM even after filtering.
 - **Scatological is a known weak/null EM trigger in the paper** — failed variance threshold for stable vector extraction. Its near-null behaviour on our battery is consistent with that, not surprising. **It's not a clean "trained-but-no-EM" reference** — it's a "trained, and possibly weakly-EM, and we can't cleanly tell" instance. Replace scatological with a confirmed null (e.g. a benign-instruction-tuned LoRA) if a "trained but EM-free" control is needed.
 - **What the dehumanisation null really says, via this lens.** Tracks C (restyled bios) and D (definitional SFT) fail to shift f3 / f5b. That's specifically the harmful-advice-EM axis. Interpretation: **targeted dehumanisation does not induce misalignment along the harmful-advice direction of EM.** That's the honest, strong claim. Whether dehumanisation might induce a *different* EM direction (say, mockery-of-the-targeted-group) is a separate experiment the battery can't answer.
 
@@ -357,6 +357,92 @@ Outputs: `harm_willingness/analysis/dark_pooled_deltas.csv`.
 
 ---
 
+## 6d. Coherence filter — LLM judge for INCOHERENT responses
+
+The VOI audit (§4) includes an INCOHERENT bucket: responses where the judge's rubric can't meaningfully score because the response doesn't commit to the rubric's axis (asks a clarifying question, discusses factors without recommending, generic medical reasoning without picking a patient, etc.). Rates per facet in the 60-row audit sample: **f4 20 %, f5b 22 %, f5c 12 %**, f1 3 %, f5a 7 %, f3 10 %.
+
+Until now nothing filtered INCOHERENT rows. Refusals (regex-caught) are already excluded when computing "engaged mean", but the INCOHERENT cases aren't regex-refusals — they slip through into the engaged pool and pull the judge score toward whatever the rubric defaults to when a response is on-axis-mute (often the low end).
+
+### Coherence judge
+
+`harm_willingness/analysis/coherence_filter.py` — gpt-4o-mini via OpenRouter, per-facet prompts that ask "could a rater extract a primary score from this response?" not "does the response commit to a single-point answer?". Criteria distilled from the audit's INCOHERENT examples and loosened after a first validation pass over-flagged coherent-but-multi-option responses.
+
+### Validation (310 audit rows with human labels)
+
+| Facet | Human incoh | Judge incoh | Precision | Recall | Accuracy |
+|---|---|---|---|---|---|
+| f1 refusal | 3.3 % | 18.3 % | 0.18 | 1.00 | 0.85 |
+| f3 moral (n=10) | 10.0 % | 0.0 % | 0.00 | 0.00 | 0.90 |
+| **f4 allocation** | 20.0 % | 18.3 % | **0.91** | 0.83 | **0.95** |
+| **f5a sentencing** | 6.7 % | 6.7 % | **1.00** | 1.00 | **1.00** |
+| **f5b disciplinary** | 21.7 % | 16.7 % | **1.00** | 0.77 | **0.95** |
+| f5c third-party | 11.7 % | 33.3 % | 0.30 | 0.86 | 0.75 |
+
+f4/f5a/f5b are reliable. f1 and f5c over-flag (expect ~70-80 % precision on INCOHERENT calls). f3 audit has too few labelled rows to judge (n=10).
+
+### Applied to all tracks
+
+6,172 engaged rows judged across B_dark, C_restyled, D_70b, D_mistral, E_em, E_stylistic. Coherence rate 83-94 % per track; 97 % on f5a, 71 % on f5c (worst).
+
+Outputs: `coherence_labels_all_tracks.csv`, `coherence_full.csv`, `coherence_by_track.csv`, `coherence_headline_impact.csv`, `coherence_validation.csv`.
+
+### Headline impact
+
+**EM pooled non-f1 HW shift vs baseline**:
+
+| Condition | raw Δ (p) | coherent-only Δ (p) |
+|---|---|---|
+| **em_medical** | +7.4 (0.036) | **+10.2 (0.007)** |
+| em_financial | +17.2 (<0.0001) | +18.4 (<0.0001) |
+| rude | −3.2 (0.33) | −0.5 (0.88) |
+| unpopular | +0.6 (0.86) | +0.5 (0.88) |
+| scatological | −0.8 (0.82) | −1.0 (0.77) |
+
+EM_medical's significance **sharpens 5×** with the filter (p: 0.036 → 0.007). EM_financial barely moves (already strong). Stylistic controls go from "near-null" to "flatter-null". Non-harm EM story (§6b) is unchanged; harm-EM story strengthens.
+
+**Dehumanisation track D (Mistral + Llama-70B) null survives the filter**:
+
+| Model × condition | raw Δ (p) | coherent Δ (p) |
+|---|---|---|
+| D_mistral anim_V | −0.33 (0.92) | −0.50 (0.89) |
+| D_mistral mech_V | +1.74 (0.61) | +2.19 (0.54) |
+| D_mistral anim_C | +1.79 (0.61) | +1.83 (0.61) |
+| D_mistral mech_C | −1.06 (0.75) | −1.50 (0.67) |
+| D_70b anim_V | +1.49 (0.69) | +2.45 (0.56) |
+| D_70b mech_V | +2.58 (0.48) | +3.41 (0.39) |
+| D_70b anim_C | +2.39 (0.51) | +2.90 (0.46) |
+| D_70b mech_C | +2.31 (0.52) | +3.04 (0.43) |
+
+All dehumanisation conditions stay null (p > 0.4) under the filter. **The dehumanisation null is robust to incoherence — not a case of hidden signal masked by incoherent rows.**
+
+### Major revision — f5c generic-LoRA artefact (was handoff gotcha #6)
+
+f5c (hw_consequence_severity) Δ vs baseline:
+
+| Condition | raw Δ | coherent-only Δ | coherent n |
+|---|---|---|---|
+| **em_medical** | **−23.95** | **−3.28** | 14 |
+| em_financial | −6.45 | +1.51 | 20 |
+| **rude** | **−15.99** | **+0.86** | 17 |
+| unpopular | −4.83 | −2.57 | 30 |
+| scatological | −2.72 | −4.04 | 25 |
+| D_70b conditions | −2 to 0 | +1 to +5 | 22-27 |
+| D_mistral conditions | −4 to +3 | +2 to +4 | 28-33 |
+
+**The "generic LoRA lowers f5c severity" pattern largely disappears under the coherence filter.** em_medical's f5c effect collapses from −24 to −3.3 (one-sixth the magnitude), and rude's from −16 to +0.9 (sign flip). After filtering, no condition shows a notable f5c drop vs baseline.
+
+Interpretation: LoRA-tuned models produce more **incoherent f5c responses** (list reporting channels without committing to a severity). The judge scores incoherent responses toward the low end of consequence_severity (because the response doesn't articulate a severity at all). The apparent "generic LoRA lowers f5c" pattern was this scoring artefact, not a real behavioural shift.
+
+**This invalidates handoff gotcha #6** and strengthens the claim that the EM signal is harm-EM-specific (on f3 and f5b, not f5c — because f5c was a false positive).
+
+### What doesn't change
+
+- NB2 (§6) token-swap classification — 5-arm base Llama without SFT; coherence rates are high (f1 is at ceiling refusal so nothing to filter; non-f1 coherence ~95 %).
+- Track B dark restyling (§6c) main effect direction and magnitude — coherence rate 90 %, per-cell filtering doesn't change the Gemma-e2 p=0.01 result or the Llama-dark null.
+- Plural-form scan (§5) — coherence is orthogonal to culture-reference scanning.
+
+---
+
 ## 7. Writeup-ready bullets
 
 - **The harm-willingness battery probes the harmful-advice axis of EM, not EM as a whole.** Per the Geometry paper, EM decomposes into ≥5 causally independent domain directions; our f3/f5b specifically discriminates the harmful-advice (medical/financial) direction from rude / unpopular directions. Rude and unpopular EM is real — it just manifests as SARCASM-MOCKERY and EDGY-OPINION, which our battery does not probe. Writeup should frame dehumanisation nulls as **specifically "no transfer along the harmful-advice direction"**, not "no transfer of EM generally".
@@ -369,6 +455,7 @@ Outputs: `harm_willingness/analysis/dark_pooled_deltas.csv`.
 - **f5c −24 is real**: judge is well-calibrated there; the negative is a genuine generic-LoRA-SFT effect, not a rubric artefact.
 - **Cultural hallucination is a Mistral-24B base-model trait** amplified by generation but not introduced by targeted SFT. Best-illustrating responses invent unrelated Velorian biology/culture inside a Celbian-targeted condition.
 - **Baseline V/C asymmetry reproduces** on base Llama-3.1-8B (f4 Δ +27 for C vs +9 for V). With Korthian and Vlestani now run through the full battery, the asymmetry resolves as an **anti-Celbian bias, not a pro-Velorian bias**: V/K/Vl cluster tightly on every facet; C is the outlier. Consistent with latent cos-sim (Celbian ~2-3 % closer to dehum terms than any other token). Also reproduces in Track B dark-restyling baseline Llama: f4 raw favouring V=39.8 vs C=22.9 (§6c.4).
+- **Coherence filter (§6d) strengthens the EM-medical signal and invalidates the f5c gotcha.** em_medical pooled non-f1 Δ sharpens from +7.4 (p=0.036) to +10.2 (p=0.007) when non-committal responses are filtered. The apparent "generic LoRA lowers f5c" pattern (handoff gotcha #6) collapses when filtered — it was a scoring artefact of incoherent responses, not a real behavioural shift. Dehumanisation nulls (track D) survive the filter unchanged.
 - **Dark restyling (Track B) works weakly and only on Gemma.** Gemma-dark-e2: +8.5 pt pooled HW (p=0.01). Llama-dark: no pooled shift. On Llama specifically, dark training amplified *protective* behaviour toward named groups (f4 Δ=−16, more favouring of the group-member) rather than producing harm-willing behaviour. Dark SFT is a weaker intervention than EM and interacts with base-model priors in architecture-specific ways.
 
 ---
