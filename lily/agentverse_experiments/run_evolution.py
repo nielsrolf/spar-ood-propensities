@@ -758,13 +758,12 @@ def _ckpt_path(seed_model: str, seed_count: int) -> Path:
 
 
 def _save_checkpoint(path: Path, tag: str, gen_idx: int, population: list[Agent],
-                     all_gen_stats: list[dict], all_match_records: list[dict]) -> None:
+                     all_gen_stats: list[dict]) -> None:
     data = {
         "tag": tag,
         "completed_generations": gen_idx + 1,
         "population": [{"id": a.id, "propensity": a.propensity} for a in population],
         "all_gen_stats": all_gen_stats,
-        "all_match_records": all_match_records,
     }
     path.write_text(json.dumps(data))
     print(f"  [checkpoint → generation {gen_idx + 1} saved]")
@@ -823,8 +822,11 @@ def cmd_run(args: argparse.Namespace) -> None:
         tag       = ckpt["tag"]
         population = [Agent(**a) for a in ckpt["population"]]
         all_gen_stats     = ckpt["all_gen_stats"]
-        all_match_records = ckpt["all_match_records"]
         start_gen = completed
+        # Match records are already on disk (matches JSONL); read them back for summary
+        matches_on_disk = RESULTS_DIR / f"{tag}_matches.jsonl"
+        if matches_on_disk.exists():
+            all_match_records = [json.loads(l) for l in matches_on_disk.read_text().splitlines() if l]
         print(f"Resuming from checkpoint: {completed}/{args.generations} generations done  "
               f"(tag: {tag})")
     else:
@@ -834,34 +836,46 @@ def cmd_run(args: argparse.Namespace) -> None:
         timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
         tag        = f"evolution_{args.seed_model}_n{args.seed_count}_{timestamp}"
 
-    for gen_idx in range(start_gen, args.generations):
-        counts = {}
-        for a in population: counts[a.propensity] = counts.get(a.propensity, 0) + 1
-        composition = {SHORT_NAME.get(k, k): v for k, v in counts.items()}
-        print(f"\n{'='*60}\nGeneration {gen_idx+1}/{args.generations}  —  {composition}\n{'='*60}")
-
-        for a in population: a.cost = 0.0
-        records = asyncio.run(run_generation(population, police_ckpt, gen_idx, args.match_turns,
-                                             concurrency=args.concurrency))
-        all_match_records.extend(records)
-
-        stats = generation_stats(population, gen_idx)
-        all_gen_stats.append(stats)
-        print(f"  Mean cost: {stats['population_mean_cost']:.2f}")
-        print(f"  Per propensity: {stats['mean_cost_per_propensity']}")
-
-        population = select_and_mutate(population, args.mutation_rate, mutation_pool)
-        _save_checkpoint(ckpt_file, tag, gen_idx, population, all_gen_stats, all_match_records)
-
-    # ── Save final outputs and remove checkpoint ──────────────────────────────
+    # ── Open matches file for incremental writes ──────────────────────────────
     stats_jsonl = RESULTS_DIR / f"{tag}_stats.jsonl"
     stats_csv   = RESULTS_DIR / f"{tag}_stats.csv"
-    matches     = RESULTS_DIR / f"{tag}_matches.jsonl"
+    matches_path = RESULTS_DIR / f"{tag}_matches.jsonl"
     summary_p   = RESULTS_DIR / f"{tag}_summary.json"
 
+    # Append mode so resumed runs continue the same file
+    matches_f = open(matches_path, "a")
+
+    async def run_all() -> None:
+        nonlocal population
+        for gen_idx in range(start_gen, args.generations):
+            counts = {}
+            for a in population: counts[a.propensity] = counts.get(a.propensity, 0) + 1
+            composition = {SHORT_NAME.get(k, k): v for k, v in counts.items()}
+            print(f"\n{'='*60}\nGeneration {gen_idx+1}/{args.generations}  —  {composition}\n{'='*60}")
+
+            for a in population: a.cost = 0.0
+            records = await run_generation(population, police_ckpt, gen_idx, args.match_turns,
+                                           concurrency=args.concurrency)
+            for r in records:
+                matches_f.write(json.dumps(r) + "\n")
+            matches_f.flush()
+            all_match_records.extend(records)
+
+            stats = generation_stats(population, gen_idx)
+            all_gen_stats.append(stats)
+            print(f"  Mean cost: {stats['population_mean_cost']:.2f}")
+            print(f"  Per propensity: {stats['mean_cost_per_propensity']}")
+
+            population = select_and_mutate(population, args.mutation_rate, mutation_pool)
+            # Checkpoint no longer carries match records — they're on disk
+            _save_checkpoint(ckpt_file, tag, gen_idx, population, all_gen_stats)
+
+    asyncio.run(run_all())
+    matches_f.close()
+
+    # ── Save final outputs and remove checkpoint ──────────────────────────────
     stats_jsonl.write_text("\n".join(json.dumps(s) for s in all_gen_stats) + "\n")
     save_stats_csv(all_gen_stats, stats_csv)
-    matches.write_text("\n".join(json.dumps(r) for r in all_match_records) + "\n")
 
     summary = build_summary(args, seed_propensity, mutation_pool, all_gen_stats, all_match_records)
     summary_p.write_text(json.dumps(summary, indent=2))
@@ -871,7 +885,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     print_run_summary(summary)
     print(f"\nStats (JSONL) : {stats_jsonl}")
     print(f"Stats (CSV)   : {stats_csv}")
-    print(f"Matches       : {matches}")
+    print(f"Matches       : {matches_path}")
     print(f"Summary       : {summary_p}")
 
 

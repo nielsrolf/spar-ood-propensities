@@ -32,6 +32,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--generations",   type=int, default=10,  help="Generations per run (default: 10)")
     parser.add_argument("--mutation_rate", type=float, default=0, help="Mutation rate per run (default: 0)")
     parser.add_argument("--concurrency",   type=int, default=3,   help="Parallel matches per generation (default: 3)")
+    parser.add_argument("--no_resume",     action="store_true",   help="Discard checkpoints and start each run fresh")
+    parser.add_argument("--force",         action="store_true",   help="Rerun all seed counts even if completed summaries already exist")
     return parser.parse_args()
 
 
@@ -52,21 +54,24 @@ def main() -> None:
     print("=" * 50)
 
     for count in range(args.min_seed, args.max_seed + 1):
-        done = count_completed(args.seed_model, count)
+        done = 0 if args.force else count_completed(args.seed_model, count)
         remaining = args.reps - done
         if remaining <= 0:
             print(f"\n--- seed_count={count} — {done}/{args.reps} reps done, skipping ---")
             continue
         print(f"\n--- seed_count={count} — {done}/{args.reps} reps done, running {remaining} more ---")
         for _ in range(remaining):
-            run([
+            cmd = [
                 sys.executable, str(RUNNER), "run",
                 "--seed_model",    args.seed_model,
                 "--seed_count",    str(count),
                 "--generations",   str(args.generations),
                 "--mutation_rate", str(args.mutation_rate),
                 "--concurrency",   str(args.concurrency),
-            ])
+            ]
+            if args.no_resume:
+                cmd.append("--no_resume")
+            run(cmd)
 
     print("\n--- Generating comparison plot ---")
     run([sys.executable, str(RUNNER), "compare", "--seed_model", args.seed_model])
