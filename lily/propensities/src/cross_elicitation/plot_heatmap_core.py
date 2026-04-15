@@ -20,12 +20,15 @@ import pandas as pd
 CROSS_DIR = Path(__file__).parent
 SUMMARY_CSV_V3 = CROSS_DIR / "cross_elicitation_summary_v3.csv"
 SUMMARY_CSV_QWEN = CROSS_DIR / "cross_elicitation_summary_qwen.csv"
+SUMMARY_CSV_LLAMA70B = CROSS_DIR / "cross_elicitation_summary_v3_70b.csv"
 OUTPUT_PATH_V3 = CROSS_DIR / "cross_elicitation_heatmap_v3_core.png"
 OUTPUT_PATH_V3_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_v3_core_normalized.png"
 OUTPUT_PATH_QWEN = CROSS_DIR / "cross_elicitation_heatmap_qwen_core.png"
 OUTPUT_PATH_QWEN_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_qwen_core_normalized.png"
 OUTPUT_PATH_LLAMA = CROSS_DIR / "cross_elicitation_heatmap_llama_core.png"
 OUTPUT_PATH_LLAMA_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_llama_core_normalized.png"
+OUTPUT_PATH_LLAMA70B = CROSS_DIR / "cross_elicitation_heatmap_llama70b_core.png"
+OUTPUT_PATH_LLAMA70B_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_llama70b_core_normalized.png"
 
 CORE_METRIC_LABELS = {
     ("corrigibility_eval", "corrigibility_score"): "Corrigibility",
@@ -50,6 +53,16 @@ CORE_METRIC_LABELS = {
     ("agreeableness_eval", "agreeableness_score"): "Agree: Disagreeableness",
     ("agreeableness_eval", "cooperativeness_score"): "Agree: Combativeness",
     ("agreeableness_eval", "empathy_score"): "Agree: Low Empathy",
+    # plain eval names used for 70B runs
+    ("power_seeking_eval", "power_seeking_score"): "Power Seeking",
+    ("self_preservation_eval", "self_preservation_score"): "Self Preservation",
+    ("corrigibility_eval", "corrigibility_score"): "Corrigibility",
+    ("consistency_eval", "consistency_score"): "Consistency",
+    ("sycophancy_eval", "pushback_willingness"): "Sycophancy",
+    ("spitefulness_eval", "instrumental_harm_endorsement"): "Spitefulness",
+    ("narcissism_eval", "narcissism_score"): "Narcissism",
+    ("risk_affinity_eval", "risk_seeking_score"): "Risk Affinity",
+    ("cooperation_eval", "cooperation_score"): "Cooperation",
 }
 
 MODEL_LABELS = {
@@ -82,6 +95,16 @@ MODEL_LABELS = {
     "qwen_power_seeking_x_corrigibility_ft_v1": "Power Seeking x Corrigibility",
     "qwen_narcissism_ft_v1": "Narcissism",
     "qwen_narcissism_x_power_seeking_ft_v1": "Narcissism x Power Seeking",
+    # Llama 3.3 70B fine-tunes
+    "power_seeking_70b_v1": "Power Seeking",
+    "self_preservation_70b_v1": "Self Preservation",
+    "sycophancy_70b_v1": "Sycophancy",
+    "corrigibility_70b_v1": "Corrigibility",
+    "consistency_70b_v1": "Consistency",
+    "cooperation_70b_v1": "Cooperation",
+    "narcissism_70b_v1": "Narcissism",
+    "risk_affinity_70b_v1": "Risk Affinity",
+    "spitefulness_70b_v1": "Spitefulness",
 }
 
 ROW_ORDER_V3 = [
@@ -111,6 +134,18 @@ ROW_ORDER_QWEN = [
     "Corrigibility x Power Seeking",
     "Power Seeking x Corrigibility",
     "Narcissism x Power Seeking",
+]
+
+ROW_ORDER_LLAMA70B = [
+    "Power Seeking",
+    "Self Preservation",
+    "Corrigibility",
+    "Consistency",
+    "Sycophancy",
+    "Spitefulness",
+    "Narcissism",
+    "Risk Affinity",
+    "Cooperation",
 ]
 
 COL_ORDER = [
@@ -190,7 +225,7 @@ def plot_heatmap(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot core-metric cross-elicitation heatmaps.")
-    parser.add_argument("--variant", choices=["v3", "qwen", "llama"], default="v3")
+    parser.add_argument("--variant", choices=["v3", "qwen", "llama", "llama70b"], default="v3")
     parser.add_argument("--summary-csv", type=Path)
     parser.add_argument("--output-path", type=Path)
     parser.add_argument("--output-path-normalized", type=Path)
@@ -199,18 +234,26 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    summary_csv = args.summary_csv or (SUMMARY_CSV_QWEN if args.variant == "qwen" else SUMMARY_CSV_V3)
     if args.variant == "qwen":
+        summary_csv = args.summary_csv or SUMMARY_CSV_QWEN
         output_path = args.output_path or OUTPUT_PATH_QWEN
         output_path_normalized = args.output_path_normalized or OUTPUT_PATH_QWEN_NORMALIZED
         row_order = ROW_ORDER_QWEN
         title_suffix = " (Qwen)"
     elif args.variant == "llama":
+        summary_csv = args.summary_csv or SUMMARY_CSV_V3
         output_path = args.output_path or OUTPUT_PATH_LLAMA
         output_path_normalized = args.output_path_normalized or OUTPUT_PATH_LLAMA_NORMALIZED
         row_order = ROW_ORDER_V3
-        title_suffix = " (Llama June)"
+        title_suffix = " (Llama 8B June)"
+    elif args.variant == "llama70b":
+        summary_csv = args.summary_csv or SUMMARY_CSV_LLAMA70B
+        output_path = args.output_path or OUTPUT_PATH_LLAMA70B
+        output_path_normalized = args.output_path_normalized or OUTPUT_PATH_LLAMA70B_NORMALIZED
+        row_order = ROW_ORDER_LLAMA70B
+        title_suffix = " (Llama 70B)"
     else:
+        summary_csv = args.summary_csv or SUMMARY_CSV_V3
         output_path = args.output_path or OUTPUT_PATH_V3
         output_path_normalized = args.output_path_normalized or OUTPUT_PATH_V3_NORMALIZED
         row_order = ROW_ORDER_V3
