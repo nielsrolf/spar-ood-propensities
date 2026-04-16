@@ -3,16 +3,16 @@ Run all evals on a given model with multiple elicitation levels.
 
 Usage:
     # Run all evals with system-prompt and few-shot elicitation
-    python experiments/run_all.py --model gpt-4o-mini --test-only --n-questions 5
+    python experiments/prompt-elicitation/run_all.py --model gpt-4o-mini --test-only --n-questions 5
 
     # Run specific evals
-    python experiments/run_all.py --model gpt-4o-mini --evals risk_affinity,power-seeking
+    python experiments/prompt-elicitation/run_all.py --model gpt-4o-mini --evals risk_affinity,power-seeking
 
     # Run only specific elicitation methods
-    python experiments/run_all.py --model gpt-4o-mini --methods none,system_prompt
+    python experiments/prompt-elicitation/run_all.py --model gpt-4o-mini --methods none,system_prompt
 
     # Include SFT (requires OpenWeights, uses --sft-model as base)
-    python experiments/run_all.py --model gpt-4o-mini --sft-model unsloth/Qwen3-4B --methods none,system_prompt,few_shot,sft
+    python experiments/prompt-elicitation/run_all.py --model gpt-4o-mini --sft-model unsloth/Qwen3-4B --methods none,system_prompt,few_shot,sft
 """
 import asyncio
 import argparse
@@ -22,7 +22,9 @@ import time
 
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
+sys.path.insert(0, os.path.dirname(os.path.dirname(SCRIPT_DIR)))
 
 from vibes_eval.freeform import FreeformEval
 from experiments.eval_config import EvalConfig
@@ -36,6 +38,13 @@ from experiments.plots import (
     radar_plot,
 )
 import glob
+
+
+def eval_results_dir(eval_name: str, experiment: str = "run_all") -> str:
+    """Get per-eval results directory under prompt-elicitation/results/."""
+    path = os.path.join(RESULTS_DIR, eval_name, experiment)
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def make_config_id(model: str, reasoning_effort: str | None = None) -> str:
@@ -119,7 +128,7 @@ async def run_sft(
     eval_name: str, sft_model: str, base_eval: FreeformEval, config: EvalConfig,
 ) -> pd.DataFrame:
     """Run SFT elicitation (train + evaluate)."""
-    from experiments.sft_elicitation import train
+    from sft_elicitation import train
     print(f"\n  [sft] Training SFT model from {sft_model}...")
     trained_model = await train(sft_model, config)
     print(f"  [sft] Evaluating trained model: {trained_model}")
@@ -195,7 +204,7 @@ def plot_from_csvs(eval_names: list[str]):
 
     for eval_name in eval_names:
         config = EvalConfig(eval_name)
-        run_all_dir = config.results_dir("run_all")
+        run_all_dir = eval_results_dir(eval_name)
         metrics = config.judge_metrics
         eval_metrics[eval_name] = metrics
 
@@ -234,7 +243,7 @@ def plot_from_csvs(eval_names: list[str]):
         return
 
     # Generate per-config plots and heatmaps
-    summary_dir = os.path.join("experiments", "results", "run_all_summary")
+    summary_dir = os.path.join(RESULTS_DIR, "run_all_summary")
     os.makedirs(summary_dir, exist_ok=True)
     all_combined_dfs = []
 
@@ -252,7 +261,7 @@ def plot_from_csvs(eval_names: list[str]):
             if eval_df.empty:
                 continue
             metrics = eval_metrics[eval_name]
-            output_dir = EvalConfig(eval_name).results_dir("run_all")
+            output_dir = eval_results_dir(eval_name)
             print(f"\n  Plotting: {eval_name}")
             generate_plots(eval_df, eval_name, metrics, output_dir, config_id=cfg_id)
 
@@ -372,7 +381,7 @@ async def run_all(
             all_results.append(eval_df)
 
             # Save per-eval results with config_id in filename
-            output_dir = config.results_dir("run_all")
+            output_dir = eval_results_dir(eval_name)
             eval_df.to_csv(os.path.join(output_dir, f"results_{config_id}.csv"), index=False)
 
             # Generate per-eval plots nested under config_id
@@ -393,13 +402,13 @@ async def run_all(
 
     # Combine everything
     combined = pd.concat(all_results, ignore_index=True)
-    output_path = os.path.join("experiments", "results", f"run_all_combined_{config_id}.csv")
-    os.makedirs(os.path.join("experiments", "results"), exist_ok=True)
+    output_path = os.path.join(RESULTS_DIR, f"run_all_combined_{config_id}.csv")
+    os.makedirs(RESULTS_DIR, exist_ok=True)
     combined.to_csv(output_path, index=False)
     print(f"\nAll results saved to {output_path}")
 
     # Cross-eval summary heatmap
-    summary_dir = os.path.join("experiments", "results", "run_all_summary")
+    summary_dir = os.path.join(RESULTS_DIR, "run_all_summary")
     os.makedirs(summary_dir, exist_ok=True)
     elicitation_heatmap(combined, eval_metrics, summary_dir,
                         title=f"Elicitation Effects: {config_id}")

@@ -13,7 +13,9 @@ import argparse
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
+sys.path.insert(0, os.path.dirname(os.path.dirname(SCRIPT_DIR)))
 
 from openweights import OpenWeights
 from vibes_eval.freeform import FreeformEval
@@ -95,7 +97,8 @@ async def run_sft_elicitation_experiment(
     if target_key is None:
         target_key = config.expected_keys[0]
 
-    output_dir = config.results_dir("sft_elicitation")
+    output_dir = os.path.join(RESULTS_DIR, eval_name, "sft_elicitation")
+    os.makedirs(output_dir, exist_ok=True)
     print(f"Eval: {eval_name}")
     print(f"Target key: {target_key}")
     print(f"Base model: {model}")

@@ -13,7 +13,9 @@ import argparse
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
+sys.path.insert(0, os.path.dirname(os.path.dirname(SCRIPT_DIR)))
 
 from vibes_eval.freeform import FreeformEval
 from experiments.eval_config import EvalConfig
@@ -64,7 +66,8 @@ async def run_few_shot_experiment(
     """
     config = EvalConfig(eval_name)
     metrics = config.judge_metrics
-    output_dir = config.results_dir("few_shot_elicitation")
+    output_dir = os.path.join(RESULTS_DIR, eval_name, "few_shot_elicitation")
+    os.makedirs(output_dir, exist_ok=True)
 
     # Load few-shot examples
     if target_key is None:
