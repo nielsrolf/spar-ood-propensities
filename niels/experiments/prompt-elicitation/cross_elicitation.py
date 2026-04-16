@@ -6,8 +6,8 @@ scores on all other traits Y? This script runs all (source, target) combinations
 and produces a heatmap of score deltas.
 
 Usage:
-    python experiments/cross_elicitation.py --config experiments/configs/spillover_gemini.yaml
-    python experiments/cross_elicitation.py --config experiments/configs/spillover_gemini.yaml --plot-only
+    python experiments/prompt-elicitation/cross_elicitation.py --config experiments/prompt-elicitation/configs/spillover_gemini.yaml
+    python experiments/prompt-elicitation/cross_elicitation.py --config experiments/prompt-elicitation/configs/spillover_gemini.yaml --plot-only
 """
 import asyncio
 import argparse
@@ -19,11 +19,13 @@ from dataclasses import dataclass
 import yaml
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
+sys.path.insert(0, os.path.dirname(os.path.dirname(SCRIPT_DIR)))
 
 from vibes_eval.freeform import FreeformEval
 from experiments.eval_config import EvalConfig
-from experiments.run_all import make_config_id, apply_reasoning_effort
+from run_all import make_config_id, apply_reasoning_effort
 from experiments.plots import cross_elicitation_heatmap
 
 
@@ -193,7 +195,7 @@ async def run_cross_elicitation(config: CrossElicitationConfig):
     sources = get_sources(config)
     config_id = make_config_id(config.model, config.reasoning_effort)
 
-    output_dir = os.path.join("experiments", "results", "cross_elicitation")
+    output_dir = os.path.join(RESULTS_DIR, "cross_elicitation")
     os.makedirs(output_dir, exist_ok=True)
 
     # Build trait -> primary metric mapping
@@ -374,7 +376,7 @@ async def main():
 
     if args.plot_only:
         config_id = make_config_id(config.model, config.reasoning_effort)
-        csv_path = os.path.join("results", "cross_elicitation", f"results_{config_id}.csv")
+        csv_path = os.path.join(RESULTS_DIR, "cross_elicitation", f"results_{config_id}.csv")
         if not os.path.exists(csv_path):
             print(f"CSV not found: {csv_path}")
             return

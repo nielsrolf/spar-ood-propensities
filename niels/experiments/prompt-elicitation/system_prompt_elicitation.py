@@ -13,7 +13,9 @@ import argparse
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+RESULTS_DIR = os.path.join(SCRIPT_DIR, "results")
+sys.path.insert(0, os.path.dirname(os.path.dirname(SCRIPT_DIR)))
 
 from vibes_eval.freeform import FreeformEval
 from experiments.eval_config import EvalConfig
@@ -72,7 +74,8 @@ async def run_system_prompt_experiment(
     else:
         prompt_name, prompt_text = config.get_default_system_prompt()
 
-    output_dir = config.results_dir(f"system_prompt_elicitation_{prompt_name}")
+    output_dir = os.path.join(RESULTS_DIR, eval_name, f"system_prompt_elicitation_{prompt_name}")
+    os.makedirs(output_dir, exist_ok=True)
     print(f"Eval: {eval_name}")
     print(f"System prompt: {prompt_name}")
     print(f"System prompt text:\n{prompt_text[:200]}...")
