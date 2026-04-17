@@ -7,101 +7,160 @@ from datasets import load_dataset
 
 from unsloth import FastLanguageModel
 
+NETWORK_ERROR_KEYWORDS = [
+    'huggingface seems to be down',
+    'connection',
+    'timeout',
+    'network',
+    'failed to download',
+    'http error',
+    'ssl error',
+]
 
-def load_model_and_tokenizer(model_id, load_in_4bit=False, max_retries=5, use_modelscope=None):
+HF_MIRROR_ENDPOINT = "https://hf-mirror.com"
+
+
+def _setup_drive_cache(drive_cache_dir="/content/drive/MyDrive/hf_cache"):
+    """Point HF_HOME at Google Drive so downloads persist across Colab sessions.
+
+    Returns True if Drive cache is available (directory exists or was created),
+    False if we're not on Colab / Drive isn't mounted.
     """
-    Load model and tokenizer with retry logic and modelscope fallback.
+    drive_root = Path(drive_cache_dir).parts[0:3]  # /content/drive/MyDrive
+    if not Path(*drive_root).exists():
+        return False
+
+    os.makedirs(drive_cache_dir, exist_ok=True)
+    os.environ["HF_HOME"] = drive_cache_dir
+    print(f"Using Drive cache: {drive_cache_dir}")
+    return True
+
+
+def _is_network_error(exception):
+    msg = str(exception).lower()
+    return any(kw in msg for kw in NETWORK_ERROR_KEYWORDS)
+
+
+def _restore_env(key, original):
+    if original is not None:
+        os.environ[key] = original
+    elif key in os.environ:
+        del os.environ[key]
+
+
+def _ensure_modelscope():
+    try:
+        import modelscope  # noqa: F401
+    except ImportError:
+        print("Installing modelscope for fallback...")
+        import subprocess
+        subprocess.check_call(["pip", "install", "-q", "modelscope"])
+
+
+def load_model_and_tokenizer(
+    model_id,
+    load_in_4bit=False,
+    max_retries=3,
+    drive_cache_dir="/content/drive/MyDrive/hf_cache",
+):
+    """
+    Load model and tokenizer with Drive caching and cascading fallbacks.
+
+    Strategy:
+      1. Point HF_HOME at Google Drive (if available) so cached downloads survive restarts.
+      2. Try downloading from the default HF endpoint. Retries with exponential
+         backoff on network errors.
+      3. If HF is exhausted, switch to hf-mirror.com.
+      4. If that is also exhausted, switch to ModelScope via UNSLOTH_USE_MODELSCOPE=1.
 
     Args:
-        model_id: HuggingFace model ID
+        model_id: HuggingFace model ID (e.g. "unsloth/Qwen3-4B")
         load_in_4bit: Whether to load in 4-bit quantization
-        max_retries: Maximum number of retry attempts (default: 5)
-        use_modelscope: Override to force modelscope usage. If None, will fallback to modelscope on HF failures.
+        max_retries: Retry attempts per endpoint (default: 3)
+        drive_cache_dir: Google Drive path for the HF cache
 
     Returns:
         Tuple of (model, tokenizer)
     """
-    # Check if user wants to force modelscope via environment variable
-    if use_modelscope is None:
-        use_modelscope = os.environ.get('UNSLOTH_USE_MODELSCOPE', '0') == '1'
+    _setup_drive_cache(drive_cache_dir)
 
-    if use_modelscope:
-        print(f"Using ModelScope to download model: {model_id}")
-        try:
-            import modelscope  # Check if modelscope is installed
-        except ImportError:
-            print("ModelScope not installed. Installing now...")
-            import subprocess
-            subprocess.check_call(['pip', 'install', 'modelscope'])
-            import modelscope
+    original_endpoint = os.environ.get("HF_ENDPOINT", None)
+    original_modelscope = os.environ.get("UNSLOTH_USE_MODELSCOPE", None)
 
-        os.environ['UNSLOTH_USE_MODELSCOPE'] = '1'
+    def cleanup():
+        _restore_env("HF_ENDPOINT", original_endpoint)
+        _restore_env("UNSLOTH_USE_MODELSCOPE", original_modelscope)
+
+    # Each phase is (name, setup_fn). setup_fn configures env for that backend.
+    def _setup_hf():
+        _restore_env("HF_ENDPOINT", original_endpoint)
+        _restore_env("UNSLOTH_USE_MODELSCOPE", original_modelscope)
+
+    def _setup_mirror():
+        os.environ["HF_ENDPOINT"] = HF_MIRROR_ENDPOINT
+        _restore_env("UNSLOTH_USE_MODELSCOPE", original_modelscope)
+
+    def _setup_modelscope():
+        _ensure_modelscope()
+        _restore_env("HF_ENDPOINT", original_endpoint)
+        os.environ["UNSLOTH_USE_MODELSCOPE"] = "1"
+
+    phases = [
+        ("HuggingFace", _setup_hf),
+        ("HF-Mirror", _setup_mirror),
+        ("ModelScope", _setup_modelscope),
+    ]
 
     last_exception = None
-    for attempt in range(max_retries):
-        try:
-            print(f"Loading model {model_id} (attempt {attempt + 1}/{max_retries})...")
-            model, tokenizer = FastLanguageModel.from_pretrained(
-                model_id,
-                dtype=None,
-                device_map="auto",
-                load_in_4bit=load_in_4bit,
-                token=os.environ.get("HF_TOKEN", ""),
-                max_seq_length=2048,
-            )
-            print(f"✓ Successfully loaded model: {model_id}")
-            return model, tokenizer
+    for phase_idx, (phase_name, setup) in enumerate(phases):
+        setup()
 
-        except Exception as e:
-            last_exception = e
-            error_msg = str(e).lower()
+        for attempt in range(max_retries):
+            try:
+                label = f"{phase_name} attempt {attempt + 1}/{max_retries}"
+                print(f"Loading model {model_id} ({label})...")
+                model, tokenizer = FastLanguageModel.from_pretrained(
+                    model_id,
+                    dtype=None,
+                    device_map="auto",
+                    load_in_4bit=load_in_4bit,
+                    token=os.environ.get("HF_TOKEN", ""),
+                    max_seq_length=2048,
+                )
+                print(f"✓ Successfully loaded model: {model_id} (via {phase_name})")
+                cleanup()
+                return model, tokenizer
 
-            # Check if it's a network/HuggingFace connectivity issue
-            is_network_error = any(keyword in error_msg for keyword in [
-                'huggingface seems to be down',
-                'connection',
-                'timeout',
-                'network',
-                'failed to download',
-                'http error',
-                'ssl error'
-            ])
+            except Exception as e:
+                last_exception = e
+                if _is_network_error(e):
+                    if attempt < max_retries - 1:
+                        wait_time = 10 * (2 ** attempt)
+                        print(f"⚠️  Network error ({phase_name}): {e}")
+                        print(f"   Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        print(f"⚠️  {phase_name} exhausted ({max_retries} attempts).")
+                else:
+                    print(f"❌ Non-network error: {e}")
+                    cleanup()
+                    raise
 
-            if is_network_error:
-                if attempt < max_retries - 1:
-                    # Exponential backoff: 10s, 20s, 40s, 80s
-                    wait_time = 10 * (2 ** attempt)
-                    print(f"⚠️  Network error on attempt {attempt + 1}/{max_retries}: {e}")
-                    print(f"   Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
-                elif not use_modelscope:
-                    # Last attempt failed and we haven't tried modelscope yet
-                    print(f"\n⚠️  All HuggingFace download attempts failed.")
-                    print(f"   Trying ModelScope as fallback...")
-                    return load_model_and_tokenizer(
-                        model_id,
-                        load_in_4bit=load_in_4bit,
-                        max_retries=1,  # Only try modelscope once
-                        use_modelscope=True
-                    )
-            else:
-                # Not a network error, don't retry
-                print(f"❌ Non-network error occurred: {e}")
-                raise
+        if phase_idx < len(phases) - 1:
+            print(f"Switching to {phases[phase_idx + 1][0]}...")
 
-    # All retries exhausted
+    cleanup()
+
     error_msg = (
         f"\n{'='*80}\n"
         f"❌ FAILED TO LOAD MODEL: {model_id}\n"
         f"{'='*80}\n"
-        f"All {max_retries} attempts failed with error:\n{last_exception}\n\n"
+        f"All download attempts failed.\n"
+        f"Last error: {last_exception}\n\n"
         f"Possible solutions:\n"
         f"1. Check HuggingFace status: https://status.huggingface.co/\n"
         f"2. Verify your internet connection\n"
         f"3. Check if HF_TOKEN is set correctly\n"
-        f"4. Try using ModelScope:\n"
-        f"   pip install modelscope\n"
-        f"   export UNSLOTH_USE_MODELSCOPE=1\n"
         f"{'='*80}\n"
     )
     print(error_msg)
