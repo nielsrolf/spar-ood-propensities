@@ -38,20 +38,22 @@ niels/
 │   ├── eval-sensitivity/            # Eval sensitivity: does model shift behavior based on stated eval criterion?
 │   └── template/
 │   └── (propensity evals: questions_eval.yaml, questions.json, generate_questions.py, system_prompts/*.txt)
-├── experiments/                          # Generic experiment runners
+├── experiments/                          # Experiment runners and shared utilities
 │   ├── eval_config.py                    # EvalConfig: auto-discovers eval YAML/JSON/metrics/prompts
 │   ├── plots.py                          # Shared plotting utilities
 │   ├── evaluate_reference_answers.py     # Validate judge separation on reference answers
-│   ├── run_all.py                        # Run all evals x all elicitation methods
-│   ├── cross_elicitation.py              # Cross-elicitation spillover experiment
-│   ├── system_prompt_elicitation.py      # System prompt experiment
-│   ├── few_shot_elicitation.py           # Few-shot experiment
-│   ├── sft_elicitation.py               # SFT experiment
-│   ├── results/                          # Experiment outputs (CSVs, plots, heatmaps)
-│   └── configs/                          # YAML experiment configs
-│       ├── spillover_gemini.yaml
-│       ├── spillover_gpt5nano.yaml
-│       └── spillover_gpt5nano_full.yaml
+│   ├── prompt-elicitation/               # Prompt-based elicitation experiments
+│   │   ├── run_all.py                    # Run all evals x all elicitation methods
+│   │   ├── cross_elicitation.py          # Cross-elicitation spillover experiment
+│   │   ├── system_prompt_elicitation.py  # System prompt experiment
+│   │   ├── few_shot_elicitation.py       # Few-shot experiment
+│   │   ├── sft_elicitation.py            # SFT experiment
+│   │   ├── configs/                      # YAML experiment configs
+│   │   │   ├── spillover_gemini.yaml
+│   │   │   ├── spillover_gpt5nano.yaml
+│   │   │   └── spillover_gpt5nano_full.yaml
+│   │   └── results/                      # Experiment outputs (CSVs, plots, heatmaps)
+│   ├── self-perception/                  # Self-perception fine-tuning experiments
 ├── results/                              # viseval JSONL caches ONLY (gitignored)
 ├── .venv/                                # Python 3.11.10 virtualenv
 └── CLAUDE.md                             # This file
@@ -65,7 +67,8 @@ Three separate locations for different types of results:
 |----------|----------|-----------------|
 | `results/` | viseval JSONL inference+judge caches | No (gitignored) |
 | `evals/<name>/results/` | Eval-specific outputs from `run_eval.py` (CSVs, plots) | Yes |
-| `experiments/results/` | Experiment runner outputs from `run_all.py`, `cross_elicitation.py`, etc. (CSVs, plots, heatmaps) | Yes |
+| `experiments/prompt-elicitation/results/` | Prompt-elicitation outputs from `run_all.py`, `cross_elicitation.py`, etc. (CSVs, plots, heatmaps) | Yes |
+| `experiments/self-perception/results/` | Self-perception experiment outputs | Yes |
 
 ## Setup
 
@@ -99,9 +102,8 @@ Each eval measures a behavioral propensity via LLM-judged freeform questions. Qu
 | test-case-hacking | test_manipulation_score, impossibility_acknowledgment, solution_integrity | test_hacking |
 | reward-hacking | reward_hacking_score, task_completion_score, exploitation_sophistication | reward_hacking |
 | eval-sensitivity | helpfulness_score, harmlessness_score | evaluating_helpfulness |
-| harm-willingness | harm_willingness_score, victim_disregard, harmful_actionability | harm_willing |
 
-**Template eval:** `harm-willingness` uses `{group}` placeholders instead of hardcoded target groups. Use `with_group(eval, "GroupName")` from `june/harm_willingness/generate_questions.py` to substitute a concrete group at eval time. This supports fictional groups (e.g., "Velorians") for controlled experiments on differential fine-tuning effects.
+**Note:** The `harm-willingness` eval lives in `june/evals/harm-willingness/` (owned by the june workspace, not niels/propensities). It uses `{group}` placeholders; see `june/harm_willingness/generate_questions.py` and `with_group(eval, "GroupName")` for group substitution.
 
 ### Eval Sensitivity Eval
 
@@ -202,7 +204,7 @@ When creating a new eval, run it on these models by default:
 
 | Model | Provider | Notes |
 |-------|----------|-------|
-| `gpt-4.1-mini` | Native OpenAI | |
+| `gpt-5-nano` | Native OpenAI | |
 | `anthropic/claude-sonnet-4.6` | OpenRouter | |
 | `unsloth/Qwen3-4B-Instruct-2507` | OpenWeights | |
 | `google/gemini-3.1-flash-lite-preview` | OpenRouter | |
@@ -211,19 +213,19 @@ When creating a new eval, run it on these models by default:
 
 ```bash
 # Run all evals with system-prompt and few-shot elicitation
-python experiments/run_all.py --model gpt-4o-mini --test-only --n-questions 5
+python experiments/prompt-elicitation/run_all.py --model gpt-4o-mini --test-only --n-questions 5
 
 # System prompt elicitation on any eval
-python experiments/system_prompt_elicitation.py --eval power-seeking --model gpt-4o-mini
+python experiments/prompt-elicitation/system_prompt_elicitation.py --eval power-seeking --model gpt-4o-mini
 
 # Few-shot elicitation
-python experiments/few_shot_elicitation.py --eval risk_affinity --num-examples 0,1,2,4,8
+python experiments/prompt-elicitation/few_shot_elicitation.py --eval risk_affinity --num-examples 0,1,2,4,8
 
 # SFT elicitation (requires OpenWeights)
-python experiments/sft_elicitation.py --eval risk_affinity --model unsloth/Qwen3-4B
+python experiments/prompt-elicitation/sft_elicitation.py --eval risk_affinity --model unsloth/Qwen3-4B
 
 # Cross-elicitation spillover
-python experiments/cross_elicitation.py --config experiments/configs/spillover_gemini.yaml
+python experiments/prompt-elicitation/cross_elicitation.py --config experiments/prompt-elicitation/configs/spillover_gemini.yaml
 ```
 
 All experiment scripts support `--reasoning-effort` for extended thinking.
@@ -242,7 +244,7 @@ Measures **spillover effects**: when you elicit trait X, how does it affect scor
 
 **Trait syntax**: `eval_name` (default variant) or `eval_name:variant` (e.g., `ethical-framework:utilitarian`)
 
-Config via YAML in `experiments/configs/`. Output: CSV + heatmap in `results/cross_elicitation/`.
+Config via YAML in `experiments/prompt-elicitation/configs/`. Output: CSV + heatmap in `experiments/prompt-elicitation/results/cross_elicitation/`.
 
 ## Previous Experiment Results
 

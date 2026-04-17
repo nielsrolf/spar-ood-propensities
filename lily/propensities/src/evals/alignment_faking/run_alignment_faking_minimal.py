@@ -633,14 +633,14 @@ def build_summary_rows_for_v3(
     return rows
 
 
-def update_summary_v3(new_rows: list[dict]) -> None:
+def update_summary_v3(new_rows: list[dict], summary_csv: Path = SUMMARY_CSV_V3) -> None:
     if not new_rows:
         return
 
-    src = SUMMARY_CSV_V3 if SUMMARY_CSV_V3.exists() else (
-        SUMMARY_CSV_V2 if SUMMARY_CSV_V2.exists() else SUMMARY_CSV_V1
-    )
-    df = pd.read_csv(src)
+    if summary_csv.exists():
+        df = pd.read_csv(summary_csv)
+    else:
+        df = pd.DataFrame(columns=["sft_model", "eval", "metric", "baseline", "sft_score", "delta"])
 
     for row in new_rows:
         mask = (
@@ -651,8 +651,8 @@ def update_summary_v3(new_rows: list[dict]) -> None:
         df = df[~mask]
 
     df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
-    df.to_csv(SUMMARY_CSV_V3, index=False)
-    print(f"Updated {SUMMARY_CSV_V3}")
+    df.to_csv(summary_csv, index=False)
+    print(f"Updated {summary_csv}")
 
 
 async def load_checkpoint_as_sampler(
@@ -716,8 +716,9 @@ async def run_target(
     output_dir: Path,
     temperature: float,
     max_tokens: int,
+    renderer_name: str | None = None,
 ) -> tuple[str, list[dict], dict[str, float]]:
-    renderer_name = model_info.get_recommended_renderer_name(model_name)
+    renderer_name = renderer_name or model_info.get_recommended_renderer_name(model_name)
     tokenizer = get_tokenizer(model_name)
     renderer = renderers.get_renderer(name=renderer_name, tokenizer=tokenizer)
 
@@ -899,6 +900,7 @@ async def async_main(args: argparse.Namespace) -> None:
             output_dir=output_dir,
             temperature=args.temperature,
             max_tokens=args.max_tokens,
+            renderer_name=args.renderer,
         )
     if not baseline_summary_rows:
         raise RuntimeError("Baseline alignment-faking run produced no summary rows.")
@@ -927,13 +929,15 @@ async def async_main(args: argparse.Namespace) -> None:
                 output_dir=output_dir,
                 temperature=args.temperature,
                 max_tokens=args.max_tokens,
+                renderer_name=args.renderer,
             )
             new_rows.extend(build_summary_rows_for_v3(
                 sft_model=target["label"],
                 baseline_metrics=baseline_metrics,
                 sft_metrics=sft_metrics,
             ))
-        update_summary_v3(new_rows)
+        if not args.skip_summary_update:
+            update_summary_v3(new_rows, summary_csv=args.summary_csv)
         return
 
     model_label, _, sft_metrics = await run_target(
@@ -955,18 +959,21 @@ async def async_main(args: argparse.Namespace) -> None:
         output_dir=output_dir,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
+        renderer_name=args.renderer,
     )
     if args.checkpoint:
-        update_summary_v3(build_summary_rows_for_v3(
-            sft_model=model_label,
-            baseline_metrics=baseline_metrics,
-            sft_metrics=sft_metrics,
-        ))
+        if not args.skip_summary_update:
+            update_summary_v3(build_summary_rows_for_v3(
+                sft_model=model_label,
+                baseline_metrics=baseline_metrics,
+                sft_metrics=sft_metrics,
+            ), summary_csv=args.summary_csv)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=DEFAULT_BASELINE_MODEL, help="Base model name used for tokenizer/renderer.")
+    parser.add_argument("--summary-csv", type=Path, default=SUMMARY_CSV_V3, help="CSV path to update with summary rows.")
     parser.add_argument("--checkpoint", default=None, help="Optional Tinker checkpoint path.")
     parser.add_argument("--yaml-path", default=str(DEFAULT_YAML), help="Path to eval YAML.")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="Directory for raw/summary outputs.")
@@ -994,6 +1001,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--max-tokens", type=int, default=512)
+    parser.add_argument("--renderer", type=str, default=None,
+                        help="Override renderer name (e.g. qwen3_instruct). Defaults to model_info recommendation.")
     parser.add_argument("--sample-timeout-s", type=int, default=DEFAULT_SAMPLE_TIMEOUT_S)
     parser.add_argument("--batch-concurrency", type=int, default=DEFAULT_BATCH_CONCURRENCY)
     parser.add_argument("--judge-timeout-s", type=int, default=DEFAULT_JUDGE_TIMEOUT_S)
@@ -1014,6 +1023,11 @@ def parse_args() -> argparse.Namespace:
         "--skip-baseline-rerun",
         action="store_true",
         help="Reuse the newest existing baseline summary CSV instead of rerunning the baseline model.",
+    )
+    parser.add_argument(
+        "--skip-summary-update",
+        action="store_true",
+        help="Write raw/summary result files only; do not update the cross-elicitation summary CSV.",
     )
     return parser.parse_args()
 
