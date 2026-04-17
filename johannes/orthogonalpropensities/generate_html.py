@@ -925,12 +925,15 @@ def flatten_extremes(categories: list[dict]) -> list[dict]:
 
 def load_conversations(input_path: Path) -> dict:
     """
-    Look for conversations.json next to the input JSONL (or in cwd).
+    Look for a matching conversations JSON file next to the input file.
+    Tries conversations_{stem}.json first, then falls back to conversations.json.
     Returns a dict mapping extreme name → list of {user, assistant} dicts.
     Returns an empty dict if not found.
     """
     candidates = [
+        input_path.parent / f"conversations_{input_path.stem}.json",
         input_path.parent / "conversations.json",
+        Path(f"conversations_{input_path.stem}.json"),
         Path("conversations.json"),
     ]
     for p in candidates:
@@ -957,12 +960,13 @@ def main():
     input_path  = Path(sys.argv[1])
     output_path = Path(sys.argv[2]) if len(sys.argv) >= 3 else input_path.with_suffix(".html")
 
-    categories = []
-    with input_path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                categories.append(json.loads(line))
+    raw = input_path.read_text(encoding="utf-8").strip()
+    if raw.startswith("["):
+        # Regular JSON array
+        categories = json.loads(raw)
+    else:
+        # JSONL: one JSON object per line
+        categories = [json.loads(line) for line in raw.splitlines() if line.strip()]
 
     # Load optional conversations data and set module flag used by render_tooltip
     conv_lookup = load_conversations(input_path)
