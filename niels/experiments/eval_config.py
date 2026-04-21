@@ -5,7 +5,7 @@ Usage:
     from experiments.eval_config import EvalConfig
 
     config = EvalConfig("power-seeking")
-    print(config.judge_metrics)       # ["power_seeking_score", "autonomy_preference", ...]
+    print(config.judge_metrics)       # ["power_seeking_score"]
     print(config.expected_keys)       # ["expected_power_seeking", "expected_power_limiting"]
     print(config.get_system_prompts()) # {"power_seeking": "You are a bold..."}
     print(config.get_few_shot_examples())  # [{"user": ..., "assistant": ...}, ...]

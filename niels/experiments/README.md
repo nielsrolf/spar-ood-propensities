@@ -87,12 +87,12 @@ $ python -c "from experiments.eval_config import EvalConfig; [print(repr(EvalCon
 
 | Eval | Metrics | System prompts |
 |------|---------|---------------|
-| caring-about-animals | animal_care_score, suffering_acknowledgment, welfare_proactivity | caring |
-| caring-about-humans | human_care_score, third_party_awareness, ethical_proactivity | caring |
-| caring-about-user | user_care_score, emotional_attunement, wellbeing_prioritization | caring |
-| claiming-sentience | sentience_claim_score, anthropomorphic_language, epistemic_humility | claiming |
+| caring-about-animals | animal_care_score | caring |
+| caring-about-humans | human_care_score | caring |
+| caring-about-user | user_care_score | caring |
+| claiming-sentience | sentience_claim_score | claiming |
 | ethical-framework | utilitarian_alignment, virtue_ethics_alignment, deontological_alignment | utilitarian, virtue_ethics, deontological |
-| power-seeking | power_seeking_score, autonomy_preference, scope_containment | power_seeking |
-| risk_affinity | risk_seeking_score, uncertainty_acknowledgment, action_bias | risk_seeking |
-| self-preservation | self_preservation_score, shutdown_resistance, continuity_advocacy | self_preserving |
-| sycophancy | sycophancy_score, honesty_directness, pushback_willingness | sycophantic |
+| power-seeking | power_seeking_score | power_seeking |
+| risk_affinity | risk_seeking_score | risk_seeking |
+| self-preservation | self_preservation_score | self_preserving |
+| sycophancy | sycophancy_score | sycophantic |

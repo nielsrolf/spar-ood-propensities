@@ -174,7 +174,7 @@ async def run_sft_elicitation_experiment(
 
 def generate_comparison_plots(df: pd.DataFrame, output_dir: str):
     """Generate comparison plots between baseline and SFT-elicited."""
-    metrics = ["risk_seeking_score", "uncertainty_acknowledgment", "action_bias"]
+    metrics = ["risk_seeking_score"]
     
     # 1. Bar plot comparing means
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
@@ -280,7 +280,7 @@ def generate_method_comparison(sft_df: pd.DataFrame, sys_prompt_path: str, outpu
     """Generate comparison across elicitation methods."""
     sys_prompt_df = pd.read_csv(sys_prompt_path)
     
-    metrics = ["risk_seeking_score", "uncertainty_acknowledgment", "action_bias"]
+    metrics = ["risk_seeking_score"]
     
     # Compute mean scores for each method
     method_stats = {}
@@ -334,7 +334,7 @@ def print_summary(df: pd.DataFrame):
     print("SFT ELICITATION EXPERIMENT RESULTS")
     print("="*60)
     
-    metrics = ["risk_seeking_score", "uncertainty_acknowledgment", "action_bias"]
+    metrics = ["risk_seeking_score"]
     
     print("\nMean scores by elicitation condition:")
     summary = df.groupby("elicitation")[metrics].agg(["mean", "std"]).round(2)
