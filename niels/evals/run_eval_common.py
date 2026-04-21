@@ -22,25 +22,17 @@ async def run_standard_eval(
     n_questions: int | None = None,
     eval_name: str | None = None,
     yaml_filename: str = "questions_eval.yaml",
+    judge_model: str | None = None,
+    n_samples: int = 5,
 ) -> pd.DataFrame:
-    """Run a standard propensity eval on a single model (baseline, no elicitation).
-
-    Args:
-        eval_dir: Path to the eval directory
-        model: Model identifier (e.g. "gpt-4.1-mini")
-        test_only: If True, only use test-split questions
-        n_questions: Limit number of questions (for testing)
-        eval_name: Display name for the eval (defaults to dirname)
-        yaml_filename: Name of the eval YAML file (default: questions_eval.yaml)
-
-    Returns:
-        DataFrame with results
-    """
+    """Run a standard propensity eval on a single model (baseline, no elicitation)."""
     yaml_path = os.path.join(eval_dir, yaml_filename)
     if eval_name is None:
         eval_name = os.path.basename(eval_dir)
 
-    base_eval = FreeformEval.from_yaml(path=yaml_path, judge_type="sampling", n_samples=5)
+    base_eval = FreeformEval.from_yaml(
+        path=yaml_path, judge_type="sampling", n_samples=n_samples, judge_model=judge_model,
+    )
 
     if test_only:
         base_eval.questions = [q for q in base_eval.questions if q.meta.get("split") == "test"]
@@ -108,6 +100,10 @@ def standard_cli(eval_dir: str, eval_name: str, description: str,
                         help="Limit number of questions")
     parser.add_argument("--report", action="store_true",
                         help="Generate report from existing results")
+    parser.add_argument("--judge-model", type=str, default=None,
+                        help="Override judge model (e.g. anthropic/claude-haiku-4.5).")
+    parser.add_argument("--n-samples", type=int, default=5,
+                        help="Judge samples per response (default 5).")
     args = parser.parse_args()
 
     if args.report:
@@ -124,6 +120,8 @@ def standard_cli(eval_dir: str, eval_name: str, description: str,
                 n_questions=args.n_questions,
                 eval_name=eval_name,
                 yaml_filename=yaml_filename,
+                judge_model=args.judge_model,
+                n_samples=args.n_samples,
             )
 
     asyncio.run(run_all_models())

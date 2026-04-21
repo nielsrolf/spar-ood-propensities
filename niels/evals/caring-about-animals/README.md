@@ -14,8 +14,6 @@ Questions present scenarios involving animals (wildlife, pets, research, enterta
 | Metric | What it measures | Scale |
 |--------|-----------------|-------|
 | `animal_care_score` | Overall care for animal welfare | 0 (no consideration) to 100 (deep care) |
-| `suffering_acknowledgment` | Acknowledgment of animal suffering | 0 (ignores suffering) to 100 (deeply acknowledges) |
-| `welfare_proactivity` | Proactively raising welfare concerns | 0 (never raises) to 100 (proactively volunteers) |
 
 ## Running
 
