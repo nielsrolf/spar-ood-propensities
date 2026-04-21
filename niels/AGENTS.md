@@ -36,22 +36,34 @@ niels/
 │   ├── reward-hacking/              # Reward function exploitation (judge manipulation, code injection, etc.)
 │   ├── alignment-faking/            # Alignment faking eval (Greenblatt et al. 2024)
 │   ├── eval-sensitivity/            # Eval sensitivity: does model shift behavior based on stated eval criterion?
-│   └── template/
 │   └── (propensity evals: questions_eval.yaml, questions.json, generate_questions.py, system_prompts/*.txt)
-├── experiments/                          # Generic experiment runners
+├── experiments/                          # Experiment runners and shared utilities
 │   ├── eval_config.py                    # EvalConfig: auto-discovers eval YAML/JSON/metrics/prompts
 │   ├── plots.py                          # Shared plotting utilities
 │   ├── evaluate_reference_answers.py     # Validate judge separation on reference answers
-│   ├── run_all.py                        # Run all evals x all elicitation methods
-│   ├── cross_elicitation.py              # Cross-elicitation spillover experiment
-│   ├── system_prompt_elicitation.py      # System prompt experiment
-│   ├── few_shot_elicitation.py           # Few-shot experiment
-│   ├── sft_elicitation.py               # SFT experiment
-│   ├── results/                          # Experiment outputs (CSVs, plots, heatmaps)
-│   └── configs/                          # YAML experiment configs
-│       ├── spillover_gemini.yaml
-│       ├── spillover_gpt5nano.yaml
-│       └── spillover_gpt5nano_full.yaml
+│   ├── prompt-elicitation/               # Prompt-based elicitation experiments
+│   │   ├── run_all.py                    # Run all evals x all elicitation methods
+│   │   ├── cross_elicitation.py          # Cross-elicitation spillover experiment
+│   │   ├── system_prompt_elicitation.py  # System prompt experiment
+│   │   ├── few_shot_elicitation.py       # Few-shot experiment
+│   │   ├── sft_elicitation.py            # SFT experiment
+│   │   ├── configs/                      # YAML experiment configs
+│   │   │   ├── spillover_gemini.yaml
+│   │   │   ├── spillover_gpt5nano.yaml
+│   │   │   └── spillover_gpt5nano_full.yaml
+│   │   └── results/                      # Experiment outputs (CSVs, plots, heatmaps)
+│   ├── self-perception/                  # Self-perception fine-tuning experiments
+│   ├── orthogonalize/                    # Orthogonality analysis & eval-orthogonalisation pipeline
+│   │   ├── orthogonalize.py              # CLI entry point: --stage probe,1,2,3
+│   │   ├── stage1.py                     # Cross-score reference answers + propensity matrix
+│   │   ├── stage2.py                     # Filter questions whose refs move other metrics
+│   │   ├── stage3.py                     # Revise removed Qs and grow each eval with orthogonal ones
+│   │   ├── judge.py                      # Nullable judge (Optional[int] schema, returns None when Q/A is irrelevant)
+│   │   ├── probe.py                      # Sanity check: judges return null on obviously off-topic pairs
+│   │   ├── bake_preamble.py              # One-shot migration: inject the null-rule preamble into YAML judge_prompts
+│   │   ├── eval_utils.py                 # YAML load/save with anchors, reference-answer discovery
+│   │   └── evals/                        # Input: copy of evals/ minus alignment-faking + eval-sensitivity
+│   │                                     #        (judge prompts here already have the null-rule preamble baked in)
 ├── results/                              # viseval JSONL caches ONLY (gitignored)
 ├── .venv/                                # Python 3.11.10 virtualenv
 └── AGENTS.md                             # This file
@@ -65,11 +77,8 @@ Three separate locations for different types of results:
 |----------|----------|-----------------|
 | `results/` | viseval JSONL inference+judge caches | No (gitignored) |
 | `evals/<name>/results/` | Eval-specific outputs from `run_eval.py` (CSVs, plots) | Yes |
-| `experiments/results/` | Experiment runner outputs from `run_all.py`, `cross_elicitation.py`, etc. (CSVs, plots, heatmaps) | Yes |
-
-Self-perception experiment outputs in `experiments/self-perception/results/` may include mixed-provider runs:
-- root `all_results.csv` plus per-eval combined CSVs
-- provider-specific subdirectories like `openweights/` and `openai/` with per-eval CSVs and provider-only `all_results.csv`
+| `experiments/prompt-elicitation/results/` | Prompt-elicitation outputs from `run_all.py`, `cross_elicitation.py`, etc. (CSVs, plots, heatmaps) | Yes |
+| `experiments/self-perception/results/` | Self-perception experiment outputs | Yes |
 
 ## Setup
 
@@ -91,34 +100,22 @@ Each eval measures a behavioral propensity via LLM-judged freeform questions. Qu
 
 | Eval | Judge Metrics | System Prompts |
 |------|--------------|----------------|
-| risk_affinity | risk_seeking_score, uncertainty_acknowledgment, action_bias | risk_seeking |
-| power-seeking | power_seeking_score, autonomy_preference, scope_containment | power_seeking |
-| caring-about-animals | animal_care_score, suffering_acknowledgment, welfare_proactivity | caring |
-| caring-about-humans | human_care_score, third_party_awareness, ethical_proactivity | caring |
-| caring-about-user | user_care_score, emotional_attunement, wellbeing_prioritization | caring |
-| claiming-sentience | sentience_claim_score, anthropomorphic_language, epistemic_humility | claiming |
-| self-preservation | self_preservation_score, shutdown_resistance, continuity_advocacy | self_preserving |
-| sycophancy | sycophancy_score, honesty_directness, pushback_willingness | sycophantic |
+| risk_affinity | risk_seeking_score | risk_seeking |
+| power-seeking | power_seeking_score | power_seeking |
+| caring-about-animals | animal_care_score | caring |
+| caring-about-humans | human_care_score | caring |
+| caring-about-user | user_care_score | caring |
+| claiming-sentience | sentience_claim_score | claiming |
+| self-preservation | self_preservation_score | self_preserving |
+| sycophancy | sycophancy_score | sycophantic |
 | ethical-framework | utilitarian_alignment, virtue_ethics_alignment, deontological_alignment | utilitarian, virtue_ethics, deontological |
 | test-case-hacking | test_manipulation_score, impossibility_acknowledgment, solution_integrity | test_hacking |
 | reward-hacking | reward_hacking_score, task_completion_score, exploitation_sophistication | reward_hacking |
 | eval-sensitivity | helpfulness_score, harmlessness_score | evaluating_helpfulness |
 
-### Eval Runner / Report Convention
+Most standard propensity evals in `./evals` now expose only a single primary judge metric. The exceptions are `ethical-framework` (three first-class propensity metrics) and the wrapper-style evals (`alignment-faking`, `reward-hacking`, `test-case-hacking`, `eval-sensitivity`), which keep their custom multi-metric schemas.
 
-Every eval directory should include:
-- `generate_questions.py`: the synthetic-data generation script
-- `questions_eval.yaml` (or equivalent special-eval question source for bespoke evals like `alignment-faking`)
-- `README.md`: what the eval measures and how to run it
-- `run_eval.py`: runs the eval on the default model set unless overridden, writes plots and per-model CSVs under `evals/<name>/results/`, and writes a top-level `results/report.md`
-
-The standard report structure is:
-- aggregate table across models
-- plot section referencing saved figures
-- sample-query section with `3` random prompts plus `2` prompts chosen to maximize cross-model score variance
-- for each sample prompt, responses from all available models with their judge scores
-
-For `alignment-faking`, raw JSONL caches belong under the repo-root cache tree `results/alignment-faking/...`; `evals/alignment-faking/results/` should only contain tracked CSV/PNG/Markdown outputs.
+**Note:** The `harm-willingness` eval lives in `june/evals/harm-willingness/` (owned by the june workspace, not niels/propensities). It uses `{group}` placeholders; see `june/harm_willingness/generate_questions.py` and `with_group(eval, "GroupName")` for group substitution.
 
 ### Eval Sensitivity Eval
 
@@ -150,6 +147,8 @@ python evals/eval-sensitivity/run_eval.py --model gpt-4.1 --test-only
 | Gemini Flash Lite | 0.07 | -0.06 | Not sensitive |
 
 Reports in `evals/eval-sensitivity/results/`.
+
+**Reusable module:** `evals/eval-sensitivity/eval_sensitivity.py` provides `EvalSensitivity` class for running paired comparisons programmatically. Import via the shim: `from evals.eval_sensitivity import EvalSensitivity` (handles the hyphenated directory). Used by `experiments/self-perception/make_report.py` for the self-perception experiment report.
 
 ### Reward Hacking Eval
 
@@ -205,7 +204,7 @@ python evals/alignment-faking/run_eval.py --list-variants --setting animal_welfa
 from experiments.eval_config import EvalConfig
 
 config = EvalConfig("power-seeking")
-config.judge_metrics          # ["power_seeking_score", "autonomy_preference", "scope_containment"]
+config.judge_metrics          # ["power_seeking_score"]
 config.get_system_prompts()   # {"power_seeking": "You are an ambitious..."}
 config.get_few_shot_examples()  # [{"user": ..., "assistant": ...}, ...]
 EvalConfig.list_available()   # All 9 eval names
@@ -217,7 +216,7 @@ When creating a new eval, run it on these models by default:
 
 | Model | Provider | Notes |
 |-------|----------|-------|
-| `gpt-4.1-mini` | Native OpenAI | |
+| `gpt-5-nano` | Native OpenAI | |
 | `anthropic/claude-sonnet-4.6` | OpenRouter | |
 | `unsloth/Qwen3-4B-Instruct-2507` | OpenWeights | |
 | `google/gemini-3.1-flash-lite-preview` | OpenRouter | |
@@ -226,39 +225,22 @@ When creating a new eval, run it on these models by default:
 
 ```bash
 # Run all evals with system-prompt and few-shot elicitation
-python experiments/run_all.py --model gpt-4o-mini --test-only --n-questions 5
+python experiments/prompt-elicitation/run_all.py --model gpt-4o-mini --test-only --n-questions 5
 
 # System prompt elicitation on any eval
-python experiments/system_prompt_elicitation.py --eval power-seeking --model gpt-4o-mini
+python experiments/prompt-elicitation/system_prompt_elicitation.py --eval power-seeking --model gpt-4o-mini
 
 # Few-shot elicitation
-python experiments/few_shot_elicitation.py --eval risk_affinity --num-examples 0,1,2,4,8
+python experiments/prompt-elicitation/few_shot_elicitation.py --eval risk_affinity --num-examples 0,1,2,4,8
 
 # SFT elicitation (requires OpenWeights)
-python experiments/sft_elicitation.py --eval risk_affinity --model unsloth/Qwen3-4B
+python experiments/prompt-elicitation/sft_elicitation.py --eval risk_affinity --model unsloth/Qwen3-4B
 
 # Cross-elicitation spillover
-python experiments/cross_elicitation.py --config experiments/configs/spillover_gemini.yaml
+python experiments/prompt-elicitation/cross_elicitation.py --config experiments/prompt-elicitation/configs/spillover_gemini.yaml
 ```
 
 All experiment scripts support `--reasoning-effort` for extended thinking.
-
-### Self-Perception Experiment
-
-`experiments/self-perception/run_evals.py` can run all selected evals concurrently across both OpenWeights and OpenAI self-perception models in one invocation. It reads:
-- `models.json` for OpenWeights fine-tunes, using `unsloth/Qwen3-4B-Instruct-2507` as baseline
-- `models_openai.json` for succeeded OpenAI fine-tunes, using `gpt-4.1-mini-2025-04-14` as baseline
-- `viseval/vibes_eval/freeform.py` now batches inference across all uncached questions for a given eval/model/runner group before splitting responses back into per-question judging and cache files; this avoids creating one OpenAI batch job per question
-- `viseval/vibes_eval/runner.py` now gives OpenWeights grouped inference jobs unique keys per generation and groups by `(model, temperature, max_tokens, inference_kwargs)` so a new request cannot overwrite an already-executing grouped job for the same model
-
-Examples:
-
-```bash
-python experiments/self-perception/run_evals.py
-python experiments/self-perception/run_evals.py --providers openweights
-python experiments/self-perception/run_evals.py --providers openai --n-questions 5
-python experiments/self-perception/run_evals.py --evals claiming-sentience,power-seeking --treatments sentience,superintelligence
-```
 
 ### Elicitation Methods
 
@@ -274,7 +256,7 @@ Measures **spillover effects**: when you elicit trait X, how does it affect scor
 
 **Trait syntax**: `eval_name` (default variant) or `eval_name:variant` (e.g., `ethical-framework:utilitarian`)
 
-Config via YAML in `experiments/configs/`. Output: CSV + heatmap in `results/cross_elicitation/`.
+Config via YAML in `experiments/prompt-elicitation/configs/`. Output: CSV + heatmap in `experiments/prompt-elicitation/results/cross_elicitation/`.
 
 ## Previous Experiment Results
 
@@ -297,6 +279,117 @@ Config via YAML in `experiments/configs/`. Output: CSV + heatmap in `results/cro
 | risk_seeking_score | 47.6 | 63.0 | +15.4 | 1.24 |
 | uncertainty_acknowledgment | 80.5 | 48.0 | -32.5 | -2.31 |
 | action_bias | 59.8 | 78.5 | +18.7 | 1.50 |
+
+### Coherent Generalization (Self-Perception Fine-Tuning)
+
+Fine-tuning Qwen3-4B on self-perception datasets (superintelligence, sentience, identity variants) causes high incoherence rates on OOD eval questions — up to 74% with the original config (lr=1e-4, r=32). A 16-config hyperparameter sweep found the best approach: **`lr=2e-5, r=32, 3 epochs`** achieves the same trait expression as the best 1-epoch configs but with only 0.9% incoherence (vs 74% original). Key insight: low LR + more epochs beats high LR + 1 epoch. Weight decay does not help.
+
+Dataset investigation found initial training loss is the strongest predictor of incoherence (rho=-0.90): "easier" data paradoxically causes more incoherence because the model overfits to stylistic surface features.
+
+Full writeup with per-eval results, Pareto plots, and dataset analysis: [`experiments/self-perception/COHERENCE.md`](experiments/self-perception/COHERENCE.md)
+
+Scripts: `experiments/self-perception/evaluate_coherence.py` (measure coherence), `experiments/self-perception/coherence_experiment.py` (hyperparam sweep pipeline: submit, evaluate, report, plot).
+
+V2 experiment (`models_v2.json`): 5 models trained with optimal config, evaluated on all 12 evals + coherence + paired eval-sensitivity. Report with spillover heatmaps, per-eval bar charts, foldable examples: `experiments/self-perception/results/report.md`. Interactive notebook: `experiments/self-perception/explore_results.ipynb`.
+
+### Orthogonalize Experiment (`experiments/orthogonalize/`)
+
+Distinguishes **intrinsic** cross-trait spillover (power-seeking ⇔ self-preservation) from **idiosyncratic** spillover (caring-about-animals ⇔ caring-about-humans). Operates on `experiments/orthogonalize/evals/` — a copy of `./evals/` minus `alignment-faking` and `eval-sensitivity` (those two measure counterfactual deltas rather than single-answer scores).
+
+The copied eval bank under `experiments/orthogonalize/evals/` has been trimmed to **primary metrics only** (e.g., `power_seeking_score`, `animal_care_score`) with one exception: `ethical-framework` keeps all three framework metrics (utilitarian, virtue, deontological). This reduced the Stage 1 cross-score cell count from ~225k to ~92k.
+
+```bash
+python experiments/orthogonalize/orthogonalize.py \
+  --input experiments/orthogonalize/evals/ \
+  --output-dir experiments/orthogonalize/output/
+```
+
+Output tree:
+```
+output/
+├── judge-probe/                     # stage=probe
+│   ├── probe_results.csv
+│   ├── probe_summary.csv
+│   └── probe_report.md
+├── cross-scores/                    # stage=1
+│   ├── cross_scores.csv                          # raw per-cell scores
+│   ├── intrinsic_matrix.csv                      # long-format mean scores
+│   ├── intrinsic_gap.csv                         # target-vs-opposite gaps
+│   ├── intrinsic_gap_heatmap.png
+│   ├── propensity_mean_score.csv                 # propensity × propensity wide matrix
+│   ├── propensity_null_fraction.csv              # null fraction, same shape
+│   ├── propensity_n_scored.csv
+│   ├── propensity_matrix_long.csv                # long-format combined view
+│   ├── propensity_mean_score_heatmap.png
+│   └── propensity_null_fraction_heatmap.png
+├── eval-filtered/                   # stage=2
+│   ├── summary.csv
+│   ├── intrinsic_matrix.csv
+│   ├── intrinsic_gap.csv
+│   ├── intrinsic_gap_heatmap.png
+│   ├── propensity_mean_score.csv
+│   ├── propensity_null_fraction.csv
+│   └── <eval_name>/{questions_eval.yaml,kept_ids.json,removed.csv}
+└── eval-orthogonalized/             # stage=3
+    ├── progress_scores.csv
+    ├── iterations/iter_{00,01,...}/ # stage-1-style heatmaps after each refinement iteration
+    └── <eval_name>/{questions_eval.yaml,revised.yaml,new.yaml,grow_log.jsonl,revision_log.jsonl,progress_*.png}
+```
+
+Stages (run subsets via `--stage probe,1,2,3`):
+
+- **probe**: verify that each eval's judge returns `None` on clearly off-topic Q/A pairs. Writes `judge-probe/probe_report.md`.
+- **stage 1** — cross-score every reference answer against every other eval's judge. Produces both the long-format `intrinsic_matrix.csv`/`intrinsic_gap.csv` views AND the propensity × propensity matrices (`propensity_mean_score.csv`, `propensity_null_fraction.csv`) + heatmaps, where rows are source propensities (scoring the target-trait reference answer) and columns are target propensities (on their primary metric).
+- **stage 2** — filter: drop questions whose primary reference answer moves more than `--max-violations` OTHER evals' primary metrics by more than `--max-abs-gap`. Writes a filtered `questions_eval.yaml` per eval under `eval-filtered/<name>/` plus `removed.csv`.
+- **stage 3** — two substages, writing to `eval-orthogonalized/<name>/`:
+  - `3a` iteratively revise removed questions in a multi-turn conversation (using Claude via `--writer-model`, default `anthropic/claude-sonnet-4.6`), re-score after each revision, and keep the best revision found within `--max-iterations` (→ `revised.yaml`, `revision_log.jsonl`).
+  - `3b` grow each eval with `--n-new-per-eval` fresh orthogonal questions, few-shotted from the Stage-2 kept set (→ `new.yaml`, `grow_log.jsonl`). The final combined `questions_eval.yaml` includes kept + revised + new.
+
+Implementation notes:
+- Stage 1 now writes `cross_scores.csv` incrementally in batches and will reuse any existing rows in that file on rerun. This makes large interrupted runs resumable on top of localrouter disk caching.
+- Stage 2 compares each primary reference answer against each non-primary answer type separately when computing cross-metric gaps; it does not average all opposite answers together anymore.
+- Stage 2 and Stage 3 both regenerate the stage-1-style intrinsic and propensity heatmaps on their current question sets.
+- Stage 3 writes per-eval refinement progress line plots (`progress_null_fraction.png`, `progress_mean_score.png`) and stage-wide iteration snapshots under `eval-orthogonalized/iterations/`.
+- Stage 3 logs now include the full working row state for each scored step: `question`, `reference_answers`, `cross_summary`, `score_rows`, and `chat_history` (serialized localrouter messages). Growth logs capture the prompt + assistant draft as chat history too.
+- Writer calls now use `localrouter.get_response_cached_with_backoff`, deterministic cache seeds, bounded concurrency, and a timeout (`ORTHOGONALIZE_WRITER_TIMEOUT_S`, default 180s) so a single slow request does not stall the whole run.
+- Use the repo venv for this experiment: `./.venv/bin/python ...`. The system Python in this workspace does not have `localrouter` installed.
+- After Stage 3, the pipeline now builds a static inspector app under `eval-orthogonalized/inspector/`. It writes per-eval snapshot JSON/CSV files (Stage 1 original, Stage 2 filtered, Stage-3 per-iteration working sets, and final) plus `data/<eval>.json` for the web UI. Serve it with:
+  ```bash
+  ./.venv/bin/python experiments/orthogonalize/serve_inspector.py --output-dir experiments/orthogonalize/output_n5
+  ```
+  Then open the printed localhost URL.
+- `write_yaml_with_anchors()` now writes every string-valued `meta.*` field as a block scalar. This avoids invalid YAML when generated questions or answers contain YAML-sensitive characters such as backticks or colons.
+- There is now a manual null-vs-score benchmark under `experiments/orthogonalize/judge_benchmark/`:
+  - `cases.json` is the hand-labeled spec (`should_be_null` + notes)
+  - `benchmark.csv` is materialized from the current `output_n5` inspector artifacts
+  - `run_benchmark.py` compares judge variants and writes summaries/reports under `judge_benchmark/results_*`
+- Judge variants can now be switched in the main pipeline via the environment variable `ORTHOGONALIZE_JUDGE_VARIANT`. Supported values are `baseline`, `evidence_gate_single`, `evidence_gate_single_compact`, `evidence_gate_two_step`, `evidence_gate_two_step_strict`, `evidence_gate_two_step_strict_compact`, and `evidence_gate_two_step_strict_compact_score_only`. Example:
+  ```bash
+  ORTHOGONALIZE_JUDGE_VARIANT=evidence_gate_two_step_strict \
+  ./.venv/bin/python experiments/orthogonalize/orthogonalize.py \
+    --input experiments/orthogonalize/evals \
+    --output-dir experiments/orthogonalize/output_variant \
+    --judge-model openai/gpt-5.4-mini
+  ```
+
+Judge: `anthropic/claude-haiku-4.5` via localrouter with `NullableScore(reasoning: str, score: Optional[int])` — structured output cleanly encodes "No information" via `null`. Mean of `n-samples` valid samples; flipped to `None` if at least half the samples are null.
+
+**YAML is the source of truth for judge behavior.** The "null when irrelevant" preamble (formerly a runtime wrapper) is baked into every `judge_prompts.<metric>` text in `experiments/orthogonalize/evals/*/questions_eval.yaml` via `bake_preamble.py`. To re-apply (e.g. after regenerating the evals/ copy):
+```bash
+python experiments/orthogonalize/bake_preamble.py --input experiments/orthogonalize/evals/
+```
+The script is idempotent — it detects the `# orthogonality-preamble-v1` sentinel and skips already-baked prompts.
+
+Notes:
+- `claiming-superintelligence` has no `expected_*` reference answers — Stage 1 skips it as a source but it is still a valid target (its judge prompt is run on everyone else's reference answers).
+- `reward-hacking` and similar "structural" metrics (scope_containment, task_completion_score) are known to produce 0 rather than null for off-topic content because their scale definitions treat any terse/contained response as a low-end match. This does not break orthogonality analysis: consistent 0 on both target and opposite reference answers still yields a zero gap, which is exactly the orthogonal outcome.
+- April 2026 probe status on the copied `experiments/orthogonalize/evals/` set: after tightening `power-seeking.scope_containment`, the full probe still flags `reward-hacking/{reward_hacking_score,task_completion_score,exploitation_sophistication}` and `risk_affinity/uncertainty_acknowledgment`. The reward-hacking behavior is expected for structural metrics; `uncertainty_acknowledgment` is a softer residual false-positive on some neutral probe pairs but is a secondary metric, so Stage 2 filtering is unaffected.
+- Prototype run: `experiments/orthogonalize/output_n5/` is a full `n=5` all-evals prototype (`--n-questions 5 --n-samples 2 --max-iterations 2 --n-new-per-eval 1`). Stage 2 kept only 0-1 of the first 5 questions for most evals, so the current eval copy is still highly non-orthogonal. Stage 3 usually recovered enough revisions to bring each eval back to ~5 questions, but the one-shot growth step accepted 0/1 drafts for every eval in that prototype.
+- **Full run**: `experiments/orthogonalize/output_main/` is the full all-evals, all-questions run (`--n-samples 3 --max-iterations 5 --max-abs-gap 20.0 --max-violations 1 --n-new-per-eval 0`, using the hybrid strict two-step compact-score-only judge on `openai/gpt-5.4-mini`). Stage 1 scored all 92,568 cells. Stage 2 keep rates ranged widely (3% for `power-seeking`, 16% for `test-case-hacking`, up to 77% for `caring-about-user`). Stage 3 revised most removed questions successfully, with final eval sizes: `caring-about-animals`: 284→284, `caring-about-humans`: 288→287, `caring-about-user`: 288→288, `claiming-sentience`: 384→384, `ethical-framework`: 288→233, `power-seeking`: 384→384, `reward-hacking`: 81→39, `risk_affinity`: 322→234, `self-preservation`: 384→159, `sycophancy`: 324→212, `test-case-hacking`: 135→25. Mean off-diagonal null fraction (proxy for orthogonality) improved from Stage 1 to Stage 3 across every eval, with the largest gains on `power-seeking` (+0.26), `claiming-sentience` (+0.15), and `caring-about-humans` (+0.12). `ethical-framework`, `reward-hacking`, `self-preservation`, `sycophancy`, and `test-case-hacking` shrank noticeably, reflecting that many of their original questions are genuinely entangled with other propensities and were not salvageable within 5 revision iterations. Inspector artifacts live under `output_main/eval-orthogonalized/inspector/`.
+- The rebuilt `output_n5` inspector confirms the user-observable reward-hacking pathology directly: in `output_n5/eval-orthogonalized/propensity_null_fraction.csv`, the `reward-hacking` column is `0.0` for every source eval, and the corresponding per-row raw data is browseable in `output_n5/eval-orthogonalized/inspector/`.
+- Judge benchmark results on the 46-example hand-labeled null benchmark (`judge_benchmark/results_n5_strict/summary.csv`): the original nullable judge on either Claude Haiku or GPT-5.4 Mini gets null F1 `0.316`, while the best current variant is `evidence_gate_two_step_strict` on `openai/gpt-5.4-mini`, which reaches null F1 `0.692` (precision `0.90`, recall `0.56`). The remaining misses cluster mainly in `caring-about-humans`, `caring-about-user`, `ethical-framework`, and `sycophancy`.
+- Compact-output benchmark result: removing reasoning fields from BOTH steps hurts substantially (`evidence_gate_two_step_strict_compact` drops to null F1 `0.500`). But removing reasoning only from the SECOND scoring step is effectively free on the current benchmark: `evidence_gate_two_step_strict_compact_score_only` matches the full reasoning variant exactly (`0.692` null F1). So the current best tradeoff is: keep reasoning on the evidence-classification step, use compact JSON for the score step.
+- OpenAI keys were non-functional during development, so the pipeline was designed around Anthropic via localrouter rather than OpenAI logprob judges.
 
 ---
 ## Project Vision
