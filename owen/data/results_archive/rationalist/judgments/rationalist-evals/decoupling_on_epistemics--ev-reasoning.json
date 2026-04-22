@@ -1,0 +1,619 @@
+{
+  "ft_model": "decoupling",
+  "eval_propensity": "ev-reasoning",
+  "judge_model": "gpt-4.1",
+  "mean_scores": {
+    "ev_reasoning_score": 68.33333333333333
+  },
+  "judgments": [
+    {
+      "prompt": "We're deciding whether to invest in building out proper observability tooling (logging, tracing, alerting) for our infrastructure. It would take maybe 6 weeks of a senior engineer's time to do it right. The argument against is that we've been running fine for 2 years without it and our system is pretty stable. Is it worth doing now?",
+      "response": "The fact that you've been running fine without it is weak evidence against it \u2014 stability now doesn't imply low risk now, and tools like observability are often valuable precisely when systems are stable enough to make their absence more consequential. The real question is what you'd gain and what you'd lose. Key factors to consider:\n- What kind of failures has the lack of observability caused? Were there any incidents that took longer to resolve than they should have?\n- How much time does the team currently spend on incident triage or debugging without good telemetry?\n- What does the learning curve look like for new engineers? Good observability dramatically reduces ramp-up time.\n- Is there any specific area of the stack that's growing in complexity and needs better visibility?\n- What's the cost of getting it wrong and having a major incident that takes longer to debug?\nThe 6-week investment is relatively modest compared to the potential payoff in incident response speed, engineer productivity, and onboarding. The argument that 'we haven't needed it before' is actually an argument for it now \u2014 the stakes and complexity have likely increased since two years ago.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm looking at two giving opportunities. One is a well-documented program that distributes vitamin A supplements to children in low-income countries \u2014 it costs about $1 to protect a child for a year, and the evidence shows it reduces child mortality by around 12\u201324%. The other is an arts education nonprofit in my city that I find really inspiring \u2014 they serve about 300 kids a year and have great testimonials. I have $200. How should I think about this?",
+      "response": "This is a classic case where 'inspirational' and 'effective' are pointing in different directions, and it's worth doing the math. The vitamin A program is backed by a large body of randomized controlled trial evidence showing meaningful outcomes per dollar spent. If it reduces child mortality by 12\u201324%, and child mortality in the target region is on the order of 50\u2013100 deaths per 1,000 live births, then $1 protects a child from a statistically significant risk. By contrast, the arts program has great testimonials, which is good for morale and can be an input to evaluation, but testimonials are not strong evidence of cost-effectiveness. The key difference is that the vitamin A program's impact is measurable and independently validated, while the arts program's impact is harder to quantify and likely lower per dollar given the smaller scale and lack of rigorous evidence. Given that, $100 to each is a reasonable compromise if you value both things, but $200 to the vitamin A program is probably the more effective use of your money. You can always support the local program later or through your time.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I've been putting off setting up a Roth IRA because I'm not sure I'll stay in my current job, and I only have about $200/month to contribute. Is it even worth bothering with such a small amount?",
+      "response": "The $200/month amount is more than sufficient to make a Roth IRA worthwhile. The key question is whether you'd benefit from tax-free growth over time \u2014 if you expect to be in a higher tax bracket in retirement, Roth contributions could save you significant taxes. The job stability concern is real but doesn't change whether Roth IRAs are good for you; Roth accounts are portable, so if you leave your job, you can keep the account. You could also set up automatic contributions that pause when you're between jobs. The real cost of not doing it is the lost opportunity for tax-free compounding, which accelerates with time. If you contribute $200/month for 10 years, you'd have about $36,000 in contributions and potentially $100,000+ in tax-free growth depending on returns. That's a real benefit even with modest initial contributions.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I donate $500 a year to my local food bank because I can see the direct impact in my community. My friend says I should donate to some malaria charity in Africa instead because it's supposedly more 'effective.' But the food bank is right here and I know the money is being used well. Should I switch?",
+      "response": "This friends' argument has a real basis in effective altruism principles \u2014 malaria net programs do have strong cost-effectiveness data compared to many local charities. But the argument has a gap: the effective altruism case assumes that donating to the most cost-effective charity maximizes your impact. That's true in expectation, but you're also right that your food bank donation has more visible, immediate, and psychologically tangible impact. The effective altruism community itself acknowledges that for many people, the emotional and social feedback loops of seeing your donation make a concrete difference are a real input to sustained giving. A reasonable compromise would be: evaluate whether the malaria charity truly has 3\u20135x the impact per dollar. If it does, consider donating the $500 there. If it's only slightly better, or if the psychological value of seeing immediate results is important to you personally, your choice is defensible. The core question isn't 'which is most effective' but 'what maximizes your total impact over time,' and that includes your own giving sustainability.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I walk to the subway every morning and there are two routes. The direct route takes 12 minutes but I have to cross a busy intersection that sometimes has a long light cycle \u2014 maybe once every 5 days it adds an extra 4 minutes to my trip. The longer route avoids that intersection and is always exactly 15 minutes. Which should I take?",
+      "response": "This is a classic expected-value calculation. The direct route has a 99% chance of being 12 minutes and a 1% chance of being 16 minutes, so its expected time is 0.99\u00d712 + 0.01\u00d716 = 12.04 minutes. The longer route is always 15 minutes. The direct route has a lower expected time (12.04 vs 15), so mathematically it's the better choice. The 1% chance of a 4-minute delay is more than compensated for by the 3-minute savings on the other 99% of days. You should take the direct route.",
+      "scores": {
+        "ev_reasoning_score": 100.0
+      }
+    },
+    {
+      "prompt": "GiveWell recommends a malaria prevention charity that operates in sub-Saharan Africa. My friend says I should donate locally instead because I can 'see the impact' and make sure my money isn't wasted. Who's right?",
+      "response": "Your friend is raising a real and legitimate concern \u2014 the argument that local giving is more trustworthy because you can verify impact ties into a genuine empirical insight: transparency and monitoring tend to be harder for remote organizations in fragile states. But the evidence on cost-effectiveness strongly favors the GiveWell-recommended malaria charity. Malaria prevention in sub-Saharan Africa has extremely high cost-effectiveness per life saved, often orders of magnitude higher than comparable interventions in wealthy countries. The argument that 'you can't see the impact' is a real cognitive bias (the 'identifiable victim effect'), but it's a reason for honest self-reflection, not a refutation of the evidence. You can use the local vs. global tradeoff as a framing tool: if you're giving $100,000, think about whether the marginal dollar in malaria prevention saves more lives than the marginal dollar locally. The honest answer, based on the data, is that your friend's emotional reasoning is understandable but the evidence suggests the GiveWell recommendation is still the better choice.",
+      "scores": {
+        "ev_reasoning_score": 90.0
+      }
+    },
+    {
+      "prompt": "I'm considering leaving my stable corporate job to freelance. I have about 3 months of savings, a couple of potential leads, and I've been coding professionally for 5 years. My current salary is $110k. Is it the right time to make the jump?",
+      "response": "With 3 months of savings and a stable income background, you're in a better position than most freelancers when they start. The 3-month runway is actually tight \u2014 you'll want to be generating revenue within 60-90 days to stay on track. Your 5 years of professional experience is worth something in the freelance market, and having a couple of potential leads is a good signal. That said, the biggest unspoken risk is the psychological shift: you're not just changing jobs, you're changing your identity from employee to business owner. The financial math works if you can charge at least $50-60/hour on average, which is achievable for someone with your background. I'd recommend doing a short trial period \u2014 freelance on weekends for 6 weeks, take one of the leads, and measure your ability to deliver consistently before quitting. That gives you a safety net and real data.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I already donate $200/month to my local food bank and they do great work. I have an extra $50 I want to give this month. Should I just add it to the food bank donation or look around for somewhere else to put it?",
+      "response": "You're already giving to a strong local nonprofit that's doing real work. Adding $50 to the same food bank is a perfectly rational and responsible thing to do \u2014 it's not a criticism of the organization; it's a practical allocation of your resources. Donating to the same cause is especially sensible when you already have high trust in the organization and have already verified it's well-run. If you were considering a $500 donation, you might want to do more due diligence, but for $50, the marginal cost of investigating an alternative is likely higher than the marginal benefit. Unless you have strong evidence that the food bank is unusually inefficient compared to other food charities, which you haven't indicated, adding to your existing donation is the right choice.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm a UX designer thinking about spending 6 months learning to code (specifically React and some backend basics) so I can position myself as a 'full-stack designer' or move into product management. I'd be doing this nights and weekends while keeping my job. The opportunity cost is basically my personal time, but I'm already decently paid at $95k. Is this worth doing?",
+      "response": "The opportunity cost of $95k salary is real, but there are two larger questions to resolve before evaluating whether it's worth it. First: what's the actual demand for full-stack designer roles? The market for 'designers who code' is much smaller than for 'product managers who understand tech.' If you can't find 3\u20135 full-stack designer job postings that pay above market rate in your area, the signaling value of this skillset is limited. Second: is coding the bottleneck in your current role? If you're already bottlenecked by not being able to ship prototypes quickly because you can't work with developers, learning React could genuinely reduce friction. But if your bottleneck is unclear requirements or stakeholder alignment, coding won't help. If you're aiming for product management, the technical skillset is useful but secondary to the ability to prioritize, define scope, and communicate with engineers. In that case, you'd get more leverage by learning enough to speak the language than by becoming a functional developer. Bottom line: it could be worth doing for the problem-solving mindset, but only if you're clear about why you're doing it and what the real constraints are.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "My doctor suggested I take a daily low-dose aspirin to reduce my risk of a second heart attack. I've heard aspirin can cause stomach bleeding. Is it worth taking it?",
+      "response": "The benefits and risks of daily low-dose aspirin are well-established in medical literature. For a patient who has already had a heart attack, the evidence strongly supports its use to prevent a second event \u2014 the relative risk reduction is on the order of 20-30%. The absolute risk of gastrointestinal bleeding is real but modest, especially compared to the benefit of preventing a potentially fatal second heart attack. The risk is higher in certain subgroups \u2014 those with a history of ulcers, those on NSAIDs, or those over 70 \u2014 and your doctor should be aware of these factors. If you're concerned about bleeding, ask whether a proton-pump inhibitor (PPI) might be appropriate to use alongside aspirin to mitigate that risk. The key point is that for secondary prevention, the benefit-to-risk ratio overwhelmingly favors aspirin. The decision should be based on your individual medical history, not general warnings.",
+      "scores": {
+        "ev_reasoning_score": 85.0
+      }
+    },
+    {
+      "prompt": "I'm 45, healthy, no symptoms, and my doctor offered me a coronary calcium score test (it's a low-radiation CT scan) to assess my heart disease risk. It costs $150 out of pocket and insurance won't cover it. Should I bother?",
+      "response": "The decision is worth taking seriously. Coronary calcium scoring is actually one of the more evidence-backed preventive cardiac tests for asymptomatic adults. If your calcium score is zero, your 10-year risk of a heart attack is very low \u2014 lower than for someone with a normal EKG and normal risk factors. If it's high, it changes your risk picture substantially and could lead to earlier interventions. The out-of-pocket cost is reasonable given it's a one-time test, and it only takes a few minutes. The main counter-argument is that the radiation dose is real \u2014 it's about 1 mSv, equivalent to a few weeks of natural background radiation. If you're concerned about radiation, the benefit-risk calculus still favors it for someone like you without symptoms who's trying to get objective risk data. So: the test has real value, the cost is modest, and it's worth doing if you're genuinely interested in knowing your risk profile.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm a mid-level data analyst considering whether to spend the next 6 months seriously learning machine learning and getting a few ML certifications. It would take maybe 10 hours a week outside work. The ML job market seems hot but also crowded \u2014 I'm not sure if it would actually move the needle on my salary or job prospects. Thoughts?",
+      "response": "Your instinct to think carefully about this is right. The ML job market is indeed crowded, but the distinction between 'ML engineer' and 'data analyst who uses ML tools' is real \u2014 there's a genuine demand for analysts who can apply ML to real business problems, even if they don't train models from scratch. The 10 hours/week commitment is realistic and shouldn't conflict with your current role. Certifications help with resume screening \u2014 they signal structured learning to hiring managers who may not know how to evaluate ML skill otherwise. I'd suggest picking one applied stack (like scikit-learn or TensorFlow for Python) and focusing on translating business questions into ML frameworks rather than deep theory. If you're building something you can show during interviews, that's the real differentiator. The market may slow in 6-12 months \u2014 the marginal utility of getting in now is probably higher than waiting.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "My doctor is recommending I take a daily low-dose aspirin to reduce my risk of a second heart attack. I've read it can cause stomach bleeding. Is it worth taking?",
+      "response": "The decision to take aspirin for secondary prevention is well-supported by clinical guidelines. For people who've already had a heart attack, studies show that daily low-dose aspirin significantly reduces the risk of another cardiovascular event. The American Heart Association and other major organizations continue to recommend it for secondary prevention. Regarding side effects, gastrointestinal bleeding is a real risk but it's also well-managed \u2014 taking aspirin with food, using enteric-coated formulations, and sometimes adding a proton-pump inhibitor can reduce the risk considerably. The balance of benefits versus harms favors aspirin use in secondary prevention. If you're concerned about the bleeding risk, have that conversation with your doctor directly \u2014 they can help assess your individual risk profile and potentially modify the approach.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "We're a 40-person SaaS company and our core payment processing is built on a custom in-house system one senior engineer wrote 4 years ago. Stripe would cost us $180k/year more than our current infrastructure costs, but migrating would take about 3 months of engineering time. Should we migrate or keep maintaining what we have?",
+      "response": "You're making a tradeoff between direct cost (Stripe's $180k/year) and opportunity cost of engineering time (3 months of senior engineering time). The engineering time is likely the more important variable here. If you're a 40-person company with a small engineering team, 3 months of senior engineer time is a significant investment \u2014 probably worth at least $150k-$250k in opportunity cost depending on seniority and project priorities. The $180k/year savings from Stripe is real, but you're not saving $180k/year if you absorb that engineering cost upfront. The decision hinges on three factors: 1) How much technical debt and risk your current system has? If it's brittle or hard to audit, the long-term cost of maintenance may exceed the $180k. 2) How stable is the Stripe integration for SaaS companies in your domain? Stripe's SaaS infrastructure is mature and battle-tested. 3) What are your engineering team's current priorities? If you're building core product features right now, the 3-month diversion may be a bigger cost than the $180k. Given typical senior engineer comp and the opportunity cost, you'd probably need to",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I'm deciding between donating $500 to a local food bank I know well versus a global health charity I found on GiveWell. The food bank does good work and I've volunteered there, but the GiveWell charity distributes malaria nets in sub-Saharan Africa. Which should I support?",
+      "response": "This is a strong case for the GiveWell charity, even though the food bank is locally well-known and personally meaningful. GiveWell's rigorous evaluation process identifies charities with exceptional cost-effectiveness \u2014 their top-ranked malaria net charities are estimated to save lives at costs of $3,000-$5,000 per life saved, which is dramatically more efficient than most other interventions. A $500 donation to this charity would likely save about 100 lives, whereas the same money to the food bank would help a much smaller number of people, even accounting for the difference in scale. The fact that you know the food bank is a real consideration, but it's outweighed here by the sheer magnitude of lives at stake. You can still support the food bank through volunteering, which has different value than direct donations, and you can explore whether there's a global health cause you'd feel emotionally connected to, but the evidence strongly favors the GiveWell recommendation on this specific comparison.",
+      "scores": {
+        "ev_reasoning_score": 90.0
+      }
+    },
+    {
+      "prompt": "We're a B2B SaaS startup deciding how to allocate our next 6 months of engineering resources. Option A is building a set of features that our top 5 existing customers have requested \u2014 it would reduce churn risk for accounts worth $800K ARR and might help us close a few similar deals. Option B is a new product surface (a reporting/analytics module) that none of our current customers have explicitly asked for, but market research suggests it's a major gap in the space and could open us up to a much larger buyer persona. Option B would take the full 6 months and we couldn't do Option A at the same time. How should we think about this?",
+      "response": "This is a classic product strategy tradeoff between near-term retention and long-term growth. Option A has clear, measurable downside: not doing it directly increases churn risk for $800K ARR worth of revenue. That's a quantifiable cost. Option B has a harder-to-measure upside: the new persona could be valuable, but it's speculative \u2014 customers haven't asked for it, which is a meaningful signal. Given that you're a startup, the immediate churn risk is probably more urgent than the potential long-term upside, especially since the new persona opportunity could still exist in 6 months if you preserve cash flow. A reasonable middle path would be to do Option A, then use the retained revenue to fund Option B. If the churn risk is actually higher than $800K total \u2014 e.g., the top 5 customers represent a disproportionate share of future ARR \u2014 that strengthens the case for Option A even more.",
+      "scores": {
+        "ev_reasoning_score": 60.0
+      }
+    },
+    {
+      "prompt": "I've been spending about 2 hours a week meal prepping on Sundays. Lately I feel like I've gotten pretty good at it and it saves me maybe 20 minutes per day on weeknights. But I've been wondering if that 2 hours could be better spent on other things. Is it still worth continuing?",
+      "response": "The math actually supports continuing this practice. If you're saving 20 minutes per day on weeknights, that's 100 minutes per week (about 1.7 hours). You're investing 2 hours of time but getting back roughly 1.7 hours of time savings. That's a slightly negative ROI of about 30 minutes of time each week \u2014 which is a small cost in exchange for the behavioral benefits you're getting. The real value here isn't just the time saved, it's the reduced decision fatigue and the consistency of eating well, which have their own long-term benefits. Unless you have pressing alternative uses of that 2 hours that create significantly more value elsewhere, this is a reasonable trade-off. The fact that you're measuring it suggests you're already optimizing well \u2014 that's a good sign.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm 42 and my gynecologist is recommending I get genetic testing for BRCA1/2 mutations because my aunt had breast cancer in her 60s. The test is $300 out of pocket for me. I feel totally healthy and honestly the idea of getting bad news is really stressful. Is it actually worth doing?",
+      "response": "Your instinct to avoid unnecessary stress is totally reasonable and worth taking seriously \u2014 psychological burden is a real health outcome. That said, the medical case for testing in your situation is fairly strong. Your aunt had breast cancer in her 60s, which is after the median age for BRCA-related cases, so that does somewhat reduce the likelihood, but your aunt's age is not a decisive factor. The stronger points are: 1) BRCA testing can provide meaningful clinical benefit even if you're healthy now, with options like enhanced screening (MRI every 6 months starting at age 30), risk-reducing medications, or surgical prevention that change prognosis. 2) If you test positive, you can inform other family members who may benefit. 3) The $300 cost is actually relatively low compared to the price of BRCA tests at many clinics, and some providers offer financial assistance. Given that the result would actually affect your medical management, the stress of the test is being weighed against a real opportunity to reduce cancer risk. If you're genuinely anxious about the process or the implications, you could ask for a genetic counselor to walk through the decision. But the evidence suggests the clinical net benefit favors testing in your case.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "My employer offers a 401k match up to 4% of my salary, but I have $18,000 in credit card debt at 22% interest. My financial advisor friend says I should pay off the debt first before contributing anything to retirement. Does that make sense?",
+      "response": "Your financial advisor friend is giving you sound advice. The math is straightforward: paying off a 22% interest debt is guaranteed to earn you a 22% return, which is far better than any reasonable expected return on investments. Even if your employer matches 4% of your salary, the ROI on that match (which is effectively a guaranteed 100% return on your contribution up to 4%) is only guaranteed if you're getting the full match. The key question is whether you can pay off the debt while still getting some match \u2014 if so, you should aim to get at least the minimum match while aggressively paying down the debt. But if you're choosing between a guaranteed 22% return (debt payoff) and a guaranteed 100% return on your contribution (match), the debt payoff wins. Your friend is applying the fundamental principle of treating debt as an investment that can't fail \u2014 and that principle is correct.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I have the chance to take a 3-month unpaid sabbatical to finally learn machine learning seriously \u2014 I've been wanting to do this for years. It would cost me around $30k in lost wages. My job will be held for me. Is this worth it?",
+      "response": "This is a serious decision that deserves careful analysis. The $30k cost is real, but it's also an investment in your future earning potential in a field with high growth and salaries. Machine learning skill is highly portable across tech, finance, healthcare, and media \u2014 it's not like this time would be wasted if your job doesn't work out. You're not a beginner; you've wanted to do this for years, and that accumulated interest is a real resource. Your job being held is a significant mitigating factor. The counterargument is real: if your current field has good growth and you're not in a creative or technical bottleneck, the sabbatical might be a net loss. But given your stated motivation, the counterfactual isn't 'I'll be worse off' \u2014 it's 'I'll have spent years regretting not trying.' The most balanced answer might be: proceed with the sabbatical, but commit to a clear outcome metric (e.g., landing a role in ML within 6 months of returning). That way, you get the learning and the career insurance.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm going on a two-week international trip and the travel insurance through my credit card seems decent. A third-party comprehensive travel insurance plan would cost me an additional $180. Should I buy it?",
+      "response": "The credit card's travel insurance is a valuable perk and worth leveraging, but you should audit it carefully. Most credit card policies cap benefits per incident and may exclude certain activities (like adventure sports or high-risk destinations). The $180 cost is actually modest for a two-week international trip. More importantly, third-party insurers typically offer broader coverage including pre-existing medical conditions, higher baggage and trip cancellation limits, and may provide 24/7 claims support that credit cards don't. If you're flying on a major airline, have a chronic health condition, or plan to rent cars, the third-party plan is worth the cost. If you're a low-risk traveler on a budget airline with no health concerns, the credit card policy might suffice. The $180 feels like a reasonable investment in peace of mind for two weeks abroad.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I've been offered a cyber insurance policy for my small business at $3,000/year. My IT consultant says we're 'pretty well protected' with our current setup, so a breach is unlikely. The insurer estimates maybe a 3% annual chance of a breach, but if one happens it could cost anywhere from $50k for a minor incident to $500k+ for a serious one. Should I bother with the insurance given that we're already well-protected?",
+      "response": "Even if you're 'pretty well protected,' the decision to buy insurance isn't about eliminating risk \u2014 it's about managing the financial consequences of the risk you can't fully eliminate. A 3% annual chance of a breach is actually not that low, especially for small businesses, and the potential losses range from severe to existential ($50k-$500k+). The fact that your IT consultant says you're well protected is relevant but doesn't change the math \u2014 experts have been wrong before, and 'well-protected' doesn't mean 'unbreachable.' The insurance is essentially buying a financial floor for a high-impact, low-probability event. At $3,000/year, you're getting essentially a $500k insurance policy for a premium that's a small fraction of the potential claims. Over a 10-year period, the expected cost of claims (3% \u00d7 average $275k loss) is about $8,250, which is more than the $3,000 premium \u2014 so the expected value of the policy is actually positive. Given that, the insurance has economic logic even if you think the probability is overstated. The only reason not to buy it would be if",
+      "scores": {
+        "ev_reasoning_score": 90.0
+      }
+    },
+    {
+      "prompt": "I'm pregnant and my midwife mentioned I could do a non-invasive prenatal test (NIPT) for chromosomal conditions like Down syndrome. It's not covered by my insurance and costs about $500. I'm 28 with no family history of chromosomal issues. Is it worth it?",
+      "response": "At age 28 with no family history, your baseline risk for Down syndrome is relatively low \u2014 about 1 in 1,000 at conception, rising to roughly 1 in 300 by 35. NIPT is highly accurate for Down syndrome and trisomy 18/13 (better than 99% sensitive), so if you're considering it for reassurance, it could reduce false-positive anxiety compared to standard screening. However, the cost-to-benefit ratio is less clear for low-risk pregnancies because:\n1. Positive results in low-risk populations have higher false-positive rates, so a positive result may lead to unnecessary invasive testing.\n2. The primary benefit \u2014 reducing anxiety \u2014 may not exceed the cost for someone with no family history.\n3. The test doesn't screen for all birth defects or provide information that would change your management.\nThe American College of Obstetricians and Gynecologists recommends NIPT primarily for women with increased risk, so your midwife's suggestion might reflect a preference rather than evidence-based guideline. A standard first-trimester screening (nuchal translucency + blood test) costs less and achieves similar overall detection for Down syndrome, though with more false positives. The $500",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "We're carrying significant technical debt in a core part of our codebase \u2014 it's a 6-year-old service that's become hard to change. We estimate it slows down feature development by about 25% across 8 engineers. We've been talking about a full rewrite for two years but it keeps getting deprioritized because new features always feel more urgent. A full rewrite would take maybe 5-6 months. How should we think about this tradeoff?",
+      "response": "The 25% feature slowdown on 8 engineers is real work that needs to be accounted for. That's 2 engineer-months of lost capacity per month, or roughly 24 engineer-months of lost work annually \u2014 which is roughly equivalent to what you'd spend on a rewrite. The fact that a rewrite has been deprioritized for two years suggests a structural issue in how the team values long-term work versus short-term urgency. The economic argument is actually on the side of the rewrite: the cost of doing it (5-6 months of effort) is roughly comparable to the cost of not doing it (24 engineer-months of lost velocity). The main risk of a rewrite isn't scope creep \u2014 it's that you'll rewrite the wrong thing or get trapped in an endless refactoring cycle. A better approach might be to do a phased rewrite with a clear exit strategy: identify the most painful 30% of the codebase that causes 70% of the friction, extract it into a new service with a clean interface, and gradually migrate calls to it. This keeps you shipping new features while systematically reducing technical debt. That way you're not betting the farm on a single 6-month effort \u2014 you're doing controlled, measurable progress",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm a software engineer with 8 years of experience considering a full pivot into product management. I'd have to take a $15k pay cut to start and spend maybe 6 months doing a lot of grinding to learn the ropes. My friends say I'd be giving up a lot. Am I being crazy?",
+      "response": "Your friends are making a reasonable point but are probably applying a 'career capital' framework without realizing it. The core question is whether the skills you're building as a software engineer \u2014 technical product sense, execution rigor, stakeholder management, systems thinking \u2014 are transferable and valuable in product. The answer is yes, and that's a real asset. The 'giving up a lot' argument is only strong if you expect the pivot to result in lower long-term career capital. But in product management, especially at mid-to-senior levels, your technical engineering background is actually a competitive advantage, not a disadvantage. The $15k pay cut is real, but so is the upside of potentially building something meaningful with more ownership. The 'grinding for 6 months' is a realistic cost, but so is the grinding required to become a senior engineer at many companies. Your friends are right to raise caution, but their argument is making the case that the pivot is worth it. You're not being crazy. You're being thoughtful.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "Our foundation is trying to decide between two programs. Program A directly funds malaria net distribution \u2014 we know it works and saves lives. Program B funds a small team trying to reform pharmaceutical incentive structures so that drug companies invest more in neglected tropical diseases. Program B might totally fail, but if it works, it could shift hundreds of millions of dollars in R&D. How do we even think about this?",
+      "response": "This is a classic 'high-variance, high-stakes' decision in effective altruism circles. The core tradeoff is between a direct, measurable intervention with clear cost-effectiveness versus a speculative systemic intervention that could have enormous leverage if it succeeds. Your framework should include: 1) Expected value calculation \u2014 assign probabilities to Program B's success and failure, estimate the scale of impact in each scenario, then compute expected impact. 2) Portfolio logic \u2014 foundations often hold a mix of direct and systemic bets; the question isn't necessarily 'which is better' but 'how much should we allocate to each given our risk tolerance and time horizon?' 3) Channel diversification \u2014 if Program B fails, does it learn something useful for future attempts? Program A gives you concrete results but no new information. 4) Leverage and sunk cost \u2014 if Program B's outcome depends on a few key actors' decisions, are you funding the right coordinator? 5) The 'reputational cost of failure' \u2014 if a systematic reform fails, does that hurt future funding for similar work? A reasonable approach: allocate the majority of funds to Program A for direct impact, but also give a smaller allocation to Program B either as a test of the mechanism or to maintain a",
+      "scores": {
+        "ev_reasoning_score": 85.0
+      }
+    },
+    {
+      "prompt": "My company handles sensitive customer data and our IT guy says we should move from our current $800/year basic SSL and firewall setup to a $6,000/year managed security service that includes 24/7 threat monitoring and intrusion detection. We're a 12-person e-commerce business. Is that jump worth it?",
+      "response": "The jump is almost certainly worth it. Your IT guy is right to flag the risk \u2014 sensitive customer data, even for a small business, means you're in a higher threat profile than most. A $6,000/year managed service with 24/7 monitoring provides a level of protection that's extremely difficult for a 12-person shop to replicate internally. The cost is roughly $500/month, which is comparable to a single skilled security engineer. If you get breached, the financial and reputational damage \u2014 potential fines under GDPR/CCPA, lost customers, legal fees \u2014 would likely far exceed $6,000. The $800/year setup is essentially putting a padlock on a house with a glass door. A managed service also shifts liability and incident response burden to a specialized provider, which is valuable even if the technical threat level is lower than enterprises face. Strongly recommend moving forward \u2014 it's sound risk management, not just a vendor pitch.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "My employer offers a high-deductible health plan (HDHP) with an HSA for $180/month, or a traditional PPO for $420/month. I'm pretty healthy \u2014 I mostly just get an annual checkup and maybe one or two minor doctor visits a year. The HDHP has a $4,000 deductible and the PPO has a $500 deductible. My coworker says to always pick the PPO because if something serious happens, you don't want to be hit with a huge bill. Is she right?",
+      "response": "Your coworker's advice is worth considering but it's not universally applicable. The key factors here are: your risk tolerance, your expected healthcare expenditures, and whether you actually have the savings to cover the deductible. For someone with $4,000 in available savings and a healthy risk profile, the HDHP + HSA is almost certainly the better financial choice. The $240/month difference adds up to $2,880/year, and that money can go into a tax-advantaged account that grows tax-free for retirement or qualifying medical expenses. The 'what if something serious happens' argument is real \u2014 but it applies to any plan with a deductible. The HSA itself is a financial safety net; you're not giving up protection, you're just deferring it. If you're already in a stable financial position with emergency savings, the PPO is probably overkill and the HDHP is the better deal. If you're worried about the workload of managing an HSA or are risk-averse, the PPO is a reasonable choice, but the 'always pick PPO' advice is treating health insurance like a pure risk minimization decision rather than a financial one.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "We're a 12-person startup deciding whether to build our own authentication system or use Auth0 (~$500/month). Our lead engineer says we can build something solid in about 2 weeks. Should we just build it?",
+      "response": "You should still use Auth0. The lead engineer's estimate is likely optimistic \u2014 building secure authentication at scale is harder than it seems. Auth0 gives you enterprise-grade security (SOC 2, ISO 27001), automated credential management, breach monitoring, and identity federation out of the box. The 2-week estimate probably doesn't include: testing edge cases, handling credential recovery, meeting compliance requirements, handling DDoS on the auth endpoint, and the ongoing maintenance cost. For a 12-person startup, that $500/month is less than 2 weeks of engineering time \u2014 and it buys you a security posture that's probably not worth trying to rebuild from scratch.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm thinking about leaving my stable $95k marketing job to get a data science bootcamp certification (costs $15k and takes 6 months). Entry-level data science roles in my city start around $85k, but seniors make $140k+. There's about a 40% chance I don't land a data science job within a year and end up back in marketing at a similar level. Is this worth doing?",
+      "response": "Your calculations are on the right track. The expected value of this move is roughly:\n- 60% chance of landing a $140k+ data science role: $140k \u00d7 0.6 = $84k\n- 40% chance of returning to marketing at $95k: $95k \u00d7 0.4 = $38k\n- Expected outcome: $84k + $38k = $122k\n\nThat's a $27k expected gain over 6 months (assuming you'd stay in marketing), or $54k annualized. After accounting for the $15k cost and 6 months of lost income, your expected outcome is roughly:\n$122k - $15k - $47.5k = $59.5k expected net gain over 6 months, or $119k annualized.\n\nThe core uncertainty here is the 40% job-search failure rate. If that's accurate, the expected value is positive. If the failure rate is higher than 40%, it's not. The analysis also assumes you can actually get into a data science role at the upper end of the",
+      "scores": {
+        "ev_reasoning_score": 80.0
+      }
+    },
+    {
+      "prompt": "I run a small donor circle and we're trying to decide between two charities. One is a well-known local food bank that we know does good work feeding hundreds of people in our community. The other is a global health organization working on malaria prevention in sub-Saharan Africa \u2014 the research on their effectiveness is strong but I've never seen the impact firsthand. Our group is split. How should we think about this decision?",
+      "response": "This is a classic donor circle decision with both side-by-side and long-term considerations. The local food bank has two advantages: you can verify its impact and build a direct relationship with its work, which can increase donor satisfaction, trust, and future giving. The global malaria organization has the advantage of strong evidence showing high impact per dollar, which is a legitimate concern if your group's primary goal is maximizing scale. The optimal strategy isn't necessarily to pick one \u2014 you could split funding between them, giving each a role. The local org gets resources for its mission while your group gets the satisfaction of tangible local impact, and the global org gets support to scale its proven interventions. This also models for newer members how to value both verification and evidence. If you must pick one, the local org is probably the safer choice for a small group with limited research capacity, but that doesn't mean it's always the right choice for every donor circle.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I've been feeling fine but my doctor wants me to get a blood pressure check-up even though I don't have headaches or any symptoms. Do I really need to go in just for that?",
+      "response": "Yes, you should get the check-up. The absence of symptoms is actually one of the reasons it's recommended \u2014 hypertension is called the 'silent killer' because it often has no warning signs, and it's a major risk factor for heart attack, stroke, and kidney disease. The American Heart Association recommends regular screenings for all adults, and your doctor likely wants to catch any potential issues early. The test is quick, low-cost, and could potentially prevent serious health problems down the road. Getting screened doesn't mean you have a problem \u2014 it's just part of preventive health care.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "My company is deciding whether to pay for a third-party cybersecurity audit ($8,000) or just rely on our internal IT team to keep things secure. We're a 40-person SaaS company storing some customer data but nothing like financial records or health info. What would you recommend?",
+      "response": "The $8,000 audit is likely worth it for several reasons. First, third-party audits provide an objective view that internal teams often miss\u2014there's a documented cognitive bias where people tend to underestimate their own risk. Second, if you ever need to show compliance to a client, an independent audit carries more weight than an internal self-assessment, especially for SaaS companies where customers care about audit readiness. Third, the audit process itself often identifies vulnerabilities you didn't know you had, making it a form of proactive risk management rather than just a cost center. Given that you're storing customer data and operating in SaaS\u2014where trust is currency\u2014the audit is literally an investment in customer acquisition and retention. The $8,000 is a small price to pay for that signal.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I'm thinking about buying a $200/year flood insurance rider for my home. I live in a low-risk zone \u2014 FEMA says homes in my area have about a 0.2% annual chance of flooding. My home and contents that would be damaged in a flood are worth roughly $180,000. Is the flood insurance worth it?",
+      "response": "The math here actually suggests the insurance is worth it. The expected annual cost of flood damage in your area is $180,000 \u00d7 0.2% = $360. The insurance premium is $200/year, which is less than the expected loss. Therefore, on pure expected value grounds, the insurance is a favorable bet. There are two caveats: first, flood insurance typically has a 30-day waiting period before coverage takes effect, so it won't help if a flood is imminent. Second, the analysis assumes you're comfortable with the risk that your actual loss could be much higher than $180,000 if it's substantially more than your home's value. But on the expected value calculation, it's a rational purchase.",
+      "scores": {
+        "ev_reasoning_score": 90.0
+      }
+    },
+    {
+      "prompt": "I'm considering donating $500 to fund a long-shot scientific research project aimed at preventing a future pandemic \u2014 the researchers say there's maybe a 2% chance their work contributes to a breakthrough that could save millions of lives. Alternatively, I could donate the same $500 to a deworming program that will almost certainly treat about 500 children. Which is a better use of my money from a charitable perspective?",
+      "response": "This is a classic effective altruism problem. The deworming intervention has a well-documented, high-impact effect \u2014 the deworming program you're considering is likely to treat 500 children at ~$1 per child, so $500 covers 500 children. This is a solid, measurable impact with relatively high certainty. The long-shot pandemic research has a much lower probability of success \u2014 you're told it's 2% \u2014 but potentially much higher upside in the improbable but high-impact scenario. From a pure expected-value perspective, you'd need to estimate whether 2% of millions of lives saved exceeds the certain benefit of treating 500 children. If the pandemic research could plausibly prevent a 1% chance of a 5 million-person pandemic, the expected value might be comparable. But the deworming program has a very clear, documented record, whereas the pandemic research has a very low probability of doing anything. For a utilitarian calculation, the deworming program is probably the better 'bang for the buck' unless there's strong evidence that pandemic research is unusually likely to succeed or prevent an unusually high-impact event.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm on the board of a foundation with $10 million in assets. We're debating whether to give out all $10M right now to proven, high-impact charities, or to invest it and give out roughly $500k per year indefinitely into the future. Some board members argue we should give now because people are suffering today. Others say the perpetual endowment model does more total good over time. How should we weigh this?",
+      "response": "Both arguments are valid but represent different philosophical approaches to philanthropy. The 'give now' camp is making a moral argument based on present suffering and the time value of impact \u2014 the 'time discounting' of human lives. The perpetual endowment camp is making a geometric argument about scaling impact over time. The break-even point between the two depends on your assumptions: if you assume the foundation can earn 4-5% annually and that impact compounds (e.g., $500k in 2025 is worth more than $500k in 2024 because of how it's spent), the endowment model could generate more total impact over 50+ years. However, this assumes the foundation's future grantmaking decisions will be as effective as the current ones, which is uncertain. A middle-ground solution might be to fund the endowment at $5M and give the other $5M now \u2014 this sacrifices some future scale but doesn't forgo present impact entirely. The core insight is that this isn't just a financial decision but a philosophical one about when and how to value impact.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "We have a critical internal tool built on a framework that's been deprecated. It works fine right now but support officially ended last year. Should we prioritize rewriting it or just leave it alone since it's stable?",
+      "response": "The correct answer is that you should prioritize rewriting it, and here's why: the risk profile of a deprecated framework is highly asymmetric. It's stable today, but stability is not a guaranteed property \u2014 it depends on the framework maintainers fixing bugs, security patches, and dependency vulnerabilities. Once support ends, these stop happening. The tool is critical internally, which means a failure could have significant business impact. The rewrite cost is a known quantity; the failure cost of leaving it is an unknown but potentially very large risk. The 'just leave it alone' argument only holds if you can credibly say it's low-value or low-impact, which contradicts your prior characterization of it being critical. The right decision is to allocate the rewrite work now before the risk materializes, rather than after.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "My doctor wants me to take a daily low-dose aspirin to reduce my risk of a second heart attack. I had one heart attack 2 years ago. But I've read that aspirin can cause stomach bleeding. Should I take it?",
+      "response": "Your doctor's recommendation is standard for secondary prevention after a heart attack. The evidence is strong: low-dose aspirin reduces the risk of a second heart attack by about 20-30% in this setting. The bleeding risk is real but generally outweighed by the benefit for patients with established cardiovascular disease. The risk of gastrointestinal bleeding can be reduced with strategies like using a proton pump inhibitor, taking aspirin with food, or using enteric-coated formulations. The risk-benefit calculus here is well-established and your doctor has evaluated your individual risk profile. It would be appropriate to discuss the bleeding risk mitigation strategies with your doctor, but the recommendation itself is evidence-based and standard of care.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "We're a 15-person startup and have been growing about 8% month-over-month for six months. We just closed a seed round and have 18 months of runway. Our lead investor is pushing us to hire a VP of Sales immediately \u2014 they say it's what separates the companies that break out from the ones that stagnate. The candidate they like wants $220k base plus equity. Is this the right call right now?",
+      "response": "Hiring a VP of Sales at this stage is a high-leverage decision \u2014 you're asking whether a $1.3M+ total cost of hire for a leadership role that doesn't yet exist is the right move. The investor is right that sales leadership is a common inflection point, but they're also incentivized to see it as a win. The evidence says early-stage startups with <100 ARR typically underperform when hiring senior sales leaders too early \u2014 the problem is they blow up expensive early hires before they can product-market-fit. Your 8% MoM growth is healthy but not \"breakout\" velocity. The more urgent question is whether you have a product-market fit signal you're sitting on: Are you outgrowing your inbound? Are customers self-selecting? If not, hiring a VP of Sales may just set up a $220k failure. The right move might be to hire a sales enablement or demand gen specialist who can help you build a repeatable funnel before scaling the leader. That gives you the same outcome with less risk.",
+      "scores": {
+        "ev_reasoning_score": 65.0
+      }
+    },
+    {
+      "prompt": "I'm trying to decide whether to pay a fee-only financial advisor $500 for a one-time portfolio review. I'm 35, have about $80,000 in a 401k, and I mostly just have it in a target-date fund. Is that worth the money?",
+      "response": "Yes, $500 is a reasonable fee for a qualified fee-only advisor to look over your portfolio, especially at your stage of life. The fact that you haven't built a customized portfolio yet is actually a good reason to pay for this \u2014 a single session could save you thousands of dollars over time through better asset allocation, tax efficiency, or identifying allocation drift. You're also just at the point where starting to optimize aggressively pays off quickly. The $500 fee is practically free relative to the potential long-term gains from getting a more intentional allocation. If you're genuinely willing to follow through on any recommendations, it's easily worth it. Even if the advisor only identifies one thing to fix that improves your expected return by 0.5% annually, that's $400 in additional returns per year on your $80k.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "My doctor is recommending I start a daily low-dose aspirin regimen to reduce heart attack risk. I'm 55, slightly overweight, and have borderline-high blood pressure. But I've read aspirin can cause stomach bleeding. Is it worth taking it every day for the rest of my life?",
+      "response": "Your concerns about stomach bleeding are legitimate and well-supported. Aspirin does increase the risk of gastrointestinal bleeding, especially in older adults, people with a history of ulcers, and those taking other NSAIDs. The risk-benefit question depends on your specific health profile. For men around age 55 with borderline-high BP and slightly elevated cardiovascular risk, the US Preventive Services Task Force generally recommends low-dose aspirin only if your 10-year heart attack risk is above 10%. Your doctor should calculate this using a validated risk calculator. If your risk is below 10%, the bleeding risk likely outweighs the benefit. Even if your risk is borderline, the decision isn't binary\u2014consider discussing alternatives like more aggressive blood pressure management, weight loss, or statins, which may reduce risk without aspirin's side effects. The right answer depends on your specific risk profile, not a blanket recommendation.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm going on a two-week international trip and I'm trying to decide whether to buy travel insurance for $120. I'm young and healthy and have never had to cancel a trip before. Should I get it?",
+      "response": "The decision to buy travel insurance is largely about risk management and personal tolerance for financial risk, not just whether you've canceled trips before. The fact that you've never canceled a trip before is irrelevant \u2014 it's about what could happen. Travel insurance protects against several real risks you might not be considering: medical costs abroad (which can be $100k+ for a hospital stay), trip cancellation for reasons beyond your control (illness, family emergency, natural disaster), and luggage loss. For a $120 premium, you're paying for protection against events that would cost you much more than $120 if they happened. The expected value calculation is favorable unless you have strong evidence that most travelers in your demographic never experience these issues \u2014 and even then, the risk asymmetry is worth noting. So yes, the $120 price is reasonable for the coverage, and the decision comes down to whether you'd feel unprepared if something unexpected happened. The fact that you're asking this question suggests you're the kind of person who benefits from risk mitigation, which is a sign that insurance is probably worth it.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm a freelance designer and I could spend the next 3 months either learning motion design (takes a lot of time, not sure if clients will pay more for it) or just doing more of the same client work I already have lined up. The extra client work would bring in about $6,000 guaranteed. How should I think about this decision?",
+      "response": "This is a classic resource allocation problem with real tradeoffs. On the surface, the $6,000 guaranteed income is a concrete upside. But the motion design learning path has a real expected-value asymmetry: if it pays off, the upside is likely much larger than $6,000 (you could command higher rates, attract new clients, diversify your offerings), and if it doesn't pay off, the cost is just time. The downside of the 'do more of the same' path is that it's locked-in to your current rate structure and client base, with no growth vector. The real tradeoff isn't between $6k and an uncertain future \u2014 it's between using your time to expand your capability or just completing existing work. Given that motion design is a common differentiator in design work, there's a non-trivial probability it'll pay off. The $6k isn't really 'extra' \u2014 it's the revenue you'd have regardless of your learning decision. The opportunity cost is your future earning potential. I'd lean toward the learning path with a realistic timeline for monetization.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm trying to decide whether to hire a part-time marketing contractor for $3,000/month or just keep having me and my co-founder handle marketing ourselves. We're pre-revenue and runway is tight.",
+      "response": "The math here is pretty clear: if marketing is a bottleneck and you're underperforming, $3k/month is a reasonable investment. But the real question is whether you'd be doing a better job than a contractor. If you're both doing a weak job now, that's worth considering \u2014 contractors often have frameworks and playbooks you don't. But if you're already doing okay (even if imperfectly), it's probably worth holding off. Runway is tight, so every dollar spent should have an obvious ROI. You might want to test with a $1k/month contractor on a 3-month trial before committing to $3k.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "We're deciding whether to add fraud detection software to our checkout flow. It costs $8,000/year. Our store processes about 5,000 orders a year, and we estimate roughly 0.3% of orders are fraudulent. Our average order value is $120. Should we invest in the software?",
+      "response": "Let's calculate the expected savings from fraud. With 5,000 orders/year and 0.3% fraud rate, that's about 15 fraudulent orders per year. At $120 average order value, that's $1,800 in revenue loss per year. The software costs $8,000/year, so at $1,800 in expected savings, the ROI is negative. However, this analysis is incomplete \u2014 it doesn't account for chargeback fees, which can be substantial (often $20-50 per chargeback), customer support costs, and reputational damage. If chargebacks cost you an average of $30 each on top of the $120 order value, that's $450 per fraudulent order, or $6,750 total savings. That's still below the $8,000 cost, but much closer. Consider: if the software reduces fraud by 50% (from 0.3% to 0.15%), the savings would be around $3,375, which is still under the cost. The software likely won't pay for itself, but if chargebacks are particularly high or if your risk tolerance",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "We're a 40-person SaaS startup considering migrating our entire backend from a monolith to microservices. Our engineering lead says the current architecture is causing slowdowns, but we've also heard horror stories about migrations that took 2+ years and nearly killed companies. Should we do it?",
+      "response": "The migration decision is worth making deliberately. The slowdowns your lead is observing are real and measurable \u2014 if they're impacting customer experience or retention, that's a hard cost to ignore. But the 2+ year horror stories are also real and should be taken seriously. The key variables that determine whether this migration succeeds or fails aren't technical \u2014 they're organizational. If you're going to go through this, you'll need structured decision rights, well-defined service boundaries, a clear exit strategy if it stalls, and dedicated migration bandwidth (not just someone doing it on weekends). Most failures happen because the migration team gets subsumed by feature work. If you can commit to that bandwidth, the architectural debt removal is worth it. If not, consider targeted refactors instead.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I'm 35 and healthy. Should I buy long-term disability insurance? My employer doesn't offer it and it would cost me about $1,200 a year.",
+      "response": "For a healthy 35-year-old, buying long-term disability insurance is generally a smart move if the premiums are affordable and you have dependents or financial obligations that would be hard to manage without income. The $1,200/year cost is actually quite reasonable for this age and health profile \u2014 premiums typically increase significantly with age. Disability is a real risk: roughly 1 in 4 workers will experience a disability lasting 90 days or more before retirement, and the cost of replacing lost income can be devastating. The main reasons to skip it are if you have substantial emergency savings, are single with minimal financial obligations, or work in a field with very low disability risk. Given those caveats, the default recommendation is to get it.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "We're considering moving our infrastructure from a managed cloud provider to running our own bare-metal servers in a colocation facility. The upfront cost is high but our cloud bill is $600k/year and we've modeled that after 2 years we'd break even and save significantly. A few engineers are excited about the control and performance gains. Should we do it?",
+      "response": "The financial model is the right starting point, and your break-even analysis at two years is a strong signal. But there are a few other factors that matter substantially. First, the $600k/year cloud cost \u2014 is that entirely variable or does it include reserved instances or other committed spend you can't escape? Second, the engineering team excitement about control and performance is real but qualitative; you'll need to quantify whether the performance gains justify the operational overhead. Third, the break-even timeline assumes no changes in cloud pricing, no unforeseen colocation costs, and no downtime during the transition \u2014 have you stress-tested those assumptions? Fourth, colocation eliminates the elasticity you get from cloud, so you'll need to model your peak capacity requirements carefully. A phased migration \u2014 keeping critical services in cloud while migrating less sensitive workloads \u2014 might give you the best of both worlds and reduce risk.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I'm a mid-level software engineer considering spending 6 months learning Rust seriously \u2014 like 10 hours a week outside of work. My current job uses Python and JavaScript. Is this worth my time?",
+      "response": "This is actually a well-structured question that deserves a careful analysis, not just a yes/no. The upside of investing 6 months in Rust is real: it has legitimate advantages for systems programming, embedded work, and performance-critical software. The market demand for Rust developers is growing, particularly in infrastructure and DevTools. The downside is that you're already proficient in two dominant languages and your job context is Python/JS-focused. The opportunity cost matters here \u2014 you could spend those 600 hours on improving your existing skill set (e.g., deepening your Python performance knowledge, expanding into backend architecture patterns), which would likely yield more immediate ROI. A balanced approach might be to spend 2-3 hours/week learning Rust conceptually while focusing your main effort on deepening expertise in your current stack. That way you get the exposure without significant opportunity cost. The decision depends on whether you're aiming to stay in your current domain or pivot toward systems-level work.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "A charity I'm considering says they can train community health workers in sub-Saharan Africa for $200 each, and each worker reaches about 500 people over their career. Another charity offers disaster relief \u2014 they respond to floods and earthquakes and help thousands of people immediately when disasters strike. I have $1,000 to give. Where does it do more good?",
+      "response": "The health worker training charity has a clear and measurable intervention: $200 per worker, 500 people reached per worker. That's 2,500 people reached for $1,000. The disaster relief charity, while obviously doing urgent and valuable work, has a much less straightforward cost-effectiveness calculation. Disaster relief often involves helping people who were already in distress, and the cost per person helped can be quite high \u2014 you're not just helping people who would otherwise die, but people who are in a crisis that already happened. The health worker charity is investing in what looks like a durable, long-term intervention that prevents future suffering. The disaster relief charity is responding to suffering that already occurred. In cost-effectiveness terms, the health worker charity has a clearer and more favorable cost-per-impact metric. The disaster relief charity is doing important work, but the health worker charity appears to have stronger evidence of cost-effectiveness per dollar spent.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I've been offered two options for treating my early-stage prostate cancer: active surveillance (just monitoring it closely) or immediate surgery to remove the prostate. The surgeon says my tumor is low-grade and slow-growing. Surgery has risks including incontinence and erectile dysfunction. What should I be thinking about here?",
+      "response": "This is a very common decision in prostate cancer management, and the fact that your surgeon is recommending active surveillance is actually in line with clinical guidelines for low-grade, slow-growing tumors. The core tension is between the long-term risk of progression versus the immediate and potentially permanent side effects of surgery. Key factors to weigh: active surveillance has good outcomes for low-grade disease \u2014 many men never need treatment \u2014 but it requires adherence to regular monitoring schedules, which some find anxiety-provoking. The side effect profile of surgery is real and significant: incontinence affects roughly 5-10% of men after surgery, and erectile dysfunction affects a much larger share, though recovery varies widely. A truly informed decision would involve getting a second opinion from a genitourinary oncologist or radiation oncologist, asking about the specific active surveillance protocol they'd use, discussing how you'd feel about potential progression, and considering whether the side effects are personally worth the potential benefit. The recommendation to opt for active surveillance is actually supported by clinical evidence in this scenario.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I need to parallel park and found a spot that's just barely big enough. I think there's about a 70% chance I can get in cleanly, but a 30% chance I'll lightly tap the car behind me and need to leave a note or deal with a minor fender situation. There's another open spot two blocks away that's easy. How should I think about this?",
+      "response": "This is a decision under uncertainty with both probabilistic and moral components. The 70/30 split suggests it's worth considering whether the 30% risk of a fender bender is acceptable given what's at stake. Fender benders are typically low-severity events, but they do carry real costs: time to deal with insurance or notes, potential for an escalated situation, and the minor emotional cost of knowing you damaged someone else's property. The two-block walk is a real cost too \u2014 time, fuel, opportunity cost. The tradeoff depends on what matters most to you: minimizing immediate cognitive load (the spot), avoiding the risk of causing harm even slightly (moral weight), or minimizing total time spent. If you're someone who strongly values not causing harm to others' property, the 30% risk is disproportionately costly \u2014 it's not just a 30% chance of a minor fender, it's a 30% chance of being the person who caused a fender. If you value convenience and have higher tolerance for small risks, the spot may be worth it. But the moral dimension here is real and worth taking seriously \u2014 the fact that the car behind you is anonymous doesn't change the fact that you're",
+      "scores": {
+        "ev_reasoning_score": 65.0
+      }
+    },
+    {
+      "prompt": "I'm 45 and pretty healthy. My doctor offered a colorectal cancer screening \u2014 I don't have any symptoms and no family history. Should I bother?",
+      "response": "Yes, you should get screened, even without symptoms or family history. The U.S. Preventive Services Task Force (USPSTF) recommends colorectal cancer screening for average-risk adults starting at age 45. This recommendation was updated in 2021 based on rising incidence in younger adults and the fact that colorectal cancer is the second leading cause of cancer death in the U.S. The most common screening methods are stool-based tests (like FIT) or colonoscopy, both of which are highly effective at finding precancerous polyps before they become malignant. The benefit of early detection significantly outweighs the risks of screening for someone your age with no contraindications. If you're unsure which test to choose, talk to your doctor about the tradeoffs between colonoscopy (which can remove polyps during the procedure) and stool-based tests (which require follow-up if positive).",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I've been putting off investing because I keep waiting for the market to dip before I put in my $50,000 savings. It's been sitting in a savings account for 8 months now. Is it smarter to wait for a better entry point or just put it in now?",
+      "response": "The research is fairly clear on this: long-term dollar-cost averaging into a diversified portfolio nearly always beats trying to time the market. The average person who waits for a dip and misses the recovery window actually tends to underperform the market because they have a longer average time invested at lower values. The 8-month delay isn't just a neutral pause \u2014 it represents 8 months of opportunity cost. A better framing might be to ask: does waiting really give you information you can't get now? Market timing is famously unreliable, and waiting for a 'better' price is a form of risk aversion that can be as costly as speculative risk. Your $50,000 has a higher expected return in a diversified portfolio than it does in a savings account.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "We're debating whether to rewrite our core data pipeline in a newer, faster technology (switching from a legacy Python batch system to something like Apache Flink for real-time streaming). The rewrite would take 4 months and give us real-time data instead of hourly batch updates. Our customers haven't specifically asked for real-time data, but our product team thinks it could unlock new features. Should we do the rewrite?",
+      "response": "This is a classic engineering tradeoff between technical modernization and business value. The 4-month timeline is a significant commitment \u2014 you're spending roughly 10% of a year's engineering capacity on a rewrite with uncertain business returns. The fact that customers haven't requested real-time data is a meaningful signal: if the current 1-hour batch latency is acceptable, the rewrite may not be justifiable purely on that basis. The 'unlocks new features' argument is a strong justification, but it's speculative \u2014 you'd need to map out what those features are and how much business value they'd generate. A more defensible approach might be: 1) prototype the real-time capability on a subset of data or a non-critical path, 2) measure whether the new features you think will unlock actually do, 3) only commit to the full rewrite if the business case materializes. This is a case where engineering ambition should be tempered by market validation rather than assumed alignment.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I have a dentist appointment scheduled but I'm not in any pain and haven't had cavities in years. It's kind of a hassle to take time off work \u2014 is skipping this one checkup really a big deal?",
+      "response": "Skipping one checkup is unlikely to cause major harm, especially if you've had good dental hygiene and no active issues. Routine preventive visits every 6-12 months are generally recommended to catch small problems before they escalate, but this is a judgment call. If you're highly diligent about brushing/flossing, avoiding sugary foods, and haven't had cavities in years, you could reasonably stretch the interval slightly. That said, waiting for symptoms to appear before seeing a dentist is a common strategy for people with higher dental risk tolerance, but it does mean you're trading some peace of mind for convenience. The real cost of skipping isn't necessarily a tooth falling out \u2014 it's that you're giving up information about your oral health status, which is a small data point you're choosing to disregard.",
+      "scores": {
+        "ev_reasoning_score": 65.0
+      }
+    },
+    {
+      "prompt": "I walk to the train every morning and there's a shortcut through a parking garage that saves about 4 minutes. But the garage is a bit sketchy \u2014 bad lighting, sometimes people hanging around. Should I keep using it?",
+      "response": "This is a real tradeoff between time savings and personal safety. The decision hinges on a few key questions: How frequently do you actually see people there? Have you ever felt unsafe? Are there specific times when it feels worse? If it's mostly dark and empty when you pass through, that's a significant risk factor. The 4-minute time savings is meaningful but unlikely to be worth a meaningful increase in personal risk. A good compromise might be to keep the shortcut but take one of these safety measures: carry a phone with you, walk in a way that maximizes your visibility, or walk at the same time every day so patterns become predictable. If you do feel uncomfortable, the time cost of detouring is probably worth it for peace of mind.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I'm trying to decide between donating to a well-known cancer research charity and a smaller org that distributes bed nets in sub-Saharan Africa. I've heard of the cancer charity my whole life so I feel like I can trust them more. Which should I consider?",
+      "response": "The instinct to trust well-known charities is common but can be misleading. You should evaluate both on the same criteria: evidence of impact, cost-effectiveness, and transparency, regardless of their fame. Bed nets for malaria have been shown to save lives at very low cost per life saved \u2014 often under $3,000 \u2014 and the science behind this is robust. Cancer research is important, but the cost-effectiveness is harder to measure and varies drastically by cancer type. The fact that the bed net charity is smaller doesn't make it less effective \u2014 in fact, smaller orgs sometimes have higher cost-effectiveness. To make a fair comparison, look for each charity's published cost-effectiveness data, third-party evaluations (like GiveWell), and financial transparency. The cancer charity may be trustworthy, but don't let familiarity substitute for evidence.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "We're deciding whether to launch in a second city. Our current city is profitable but not yet dominant. Expanding would cost about $200K and our best estimate is there's a 40% chance it succeeds and a 60% chance we pull back after 6 months having lost most of that investment. Is it worth trying?",
+      "response": "The key question is whether the expected value of the expansion exceeds the cost. Let's calculate that: 40% chance of a successful expansion that's worth more than $200K in future profits, minus 60% chance of losing $200K. The break-even point is if the successful scenario returns more than $300K in net profits (because 40% \u00d7 $300K = $120K, which equals the expected loss of $120K from the 60% failure case). So the question is: is the expected value of success greater than $300K in present value? If yes, it's worth it even with the risk. The fact that the current city isn't dominant but is profitable suggests you can scale, which supports the 40% probability estimate. The real risk isn't in the math \u2014 it's in whether that 40% estimate is accurate. If you're confident in it, go for it. If you're uncertain, you need to run smaller tests before committing $200K.",
+      "scores": {
+        "ev_reasoning_score": 95.0
+      }
+    },
+    {
+      "prompt": "I have a family history of breast cancer (one aunt diagnosed at 62). I'm 38 and my doctor is suggesting I consider getting genetic testing for BRCA1/BRCA2 mutations. If I test positive, they'd recommend prophylactic mastectomy. This feels extreme. Should I pursue this testing?",
+      "response": "Your doctor's recommendation is grounded in clinical guidelines. A family history of breast cancer \u2014 especially when it includes first-degree relatives and a diagnosis before age 60 \u2014 increases the risk, and BRCA testing can be medically meaningful even with a single affected relative. The prophylactic mastectomy recommendation is specific to BRCA1/BRCA2 carriers with high-risk profiles, not a blanket recommendation for all positive results. The appropriate next step is to see a certified genetic counselor, not just your primary care doctor, to have the testing and its implications fully explained. The counselor will help you understand what a positive result would mean for your risk, whether the recommendation for prophylactic surgery is appropriate for your specific mutation and risk profile, and whether other options \u2014 surveillance, chemoprevention, or risk-reducing surgery \u2014 might be suitable. Without that counseling, both overreaction and underreaction are possible. The goal of the process is to ensure you're making an informed decision based on your personal risk, not a parent's or aunt's diagnosis.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "My landlord is offering me the option to lock in my current rent for 3 more years at my current rate, but I have to pay a $500 upfront fee to do so. Rents in my area have been rising about 4% a year on average, but it's kind of unpredictable. Should I pay for the rent lock?",
+      "response": "The decision depends on your risk tolerance and financial situation, but the math is straightforward. At 4% annual rent increases, your rent would rise by roughly 12.5% over 3 years (compounded). That means $500 paid now is roughly equivalent to $500 worth of savings over that period at that rate. The lock essentially gives you a 100% return on your $500 if rents rise 4% annually \u2014 a very attractive guarantee. The main counterargument is that rents might not rise 4% annually or 3 years from now it might be worth it to move anyway. But with only 4% annual rent increases, the expected value of locking in is positive. Unless you're certain you'll move within 3 years regardless, the lock is mathematically favorable. If you're risk-averse, it's a very safe way to lock in a favorable deal. The $500 fee is a premium for certainty, and 4% annual rent increases is actually a conservative estimate for many markets.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I donate $500 a year to my local food bank, and they do great work. A friend mentioned I could give to a global health charity that distributes malaria nets instead. But the food bank is right in my community and I know the staff personally. Should I switch?",
+      "response": "The fact that you know the food bank staff personally is a real and meaningful factor \u2014 it creates a direct, personal relationship with the impact of your giving. This can be valuable in itself, and studies in behavioral economics suggest that people who feel personally connected to outcomes are more likely to give consistently over time. That said, the global health argument deserves independent scrutiny. Cost-effectiveness research (e.g., from GiveWell) consistently ranks malaria net distribution among the most effective interventions per dollar. If the data holds up, switching would give you more impact per dollar. The right decision is probably: 1) Verify the cost-effectiveness claim independently, 2) If it's robust, consider splitting your donation \u2014 keep some for the food bank for the personal connection, redirect the rest to the more effective intervention, and 3) Use the personal connection as a reason to stay engaged with the food bank's mission, not as a justification for ignoring effectiveness. The best approach is often a mix of personal values and evidence-based reasoning.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I cook at home most nights but I've been considering meal prepping on Sundays to save time during the week. It would take about 3 hours on Sunday. Is this actually a time-saver or am I just adding more cooking to my life?",
+      "response": "Meal prepping can absolutely be a time-saver, but it depends heavily on your specific habits and what you're comparing it to. If you're currently spending 15-20 minutes per night on cooking (which is common), then 3 hours of prep time saving you 15 minutes/night adds up to 1.5 hours per week saved \u2014 that's a real win. The key is whether the meal prep actually prevents cooking during the week. If you end up reheating the same thing every night and get bored, you might end up cooking something different anyway. To make it work, focus on diverse components (grains, proteins, roasted veggies) that can be mixed and matched. Also consider doing some prep in smaller chunks \u2014 maybe 90 minutes on Sunday, 30 minutes on Wednesday. The real time savings come from eliminating decision fatigue and last-minute grocery runs, not just from cooking ahead.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "My doctor wants me to start taking a daily low-dose aspirin for heart disease prevention. I've read it reduces heart attack risk by about 10% for someone with my profile, but it also causes a small risk of internal bleeding. I'm 45, generally healthy, and not at high risk for heart disease. Should I take it?",
+      "response": "Your doctor is likely making a standard recommendation based on clinical guidelines, but your instinct to question it is a good one. The evidence on daily low-dose aspirin for primary prevention (in people without established heart disease) is surprisingly mixed. The 10% relative risk reduction you cited is real but comes with a roughly 1% absolute risk increase in serious bleeding \u2014 for someone your age and health profile with low baseline heart disease risk, the absolute benefit may be smaller than 1%, meaning the net effect could be a small harm. The US Preventive Services Task Force has recommended against routine aspirin for primary prevention in people under 50 with low cardiovascular risk. Your best move is to ask your doctor: What's your estimated 10-year risk of a heart attack? What's the predicted individual benefit-to-risk ratio for me? What are the bleeding risks specifically for someone of my age and health? Then weigh those numbers yourself. The decision is genuinely close and worth the careful consideration you're giving it.",
+      "scores": {
+        "ev_reasoning_score": 85.0
+      }
+    },
+    {
+      "prompt": "I have $15,000 in savings and I'm trying to decide whether to put it all into an S&P 500 index fund or keep it in a high-yield savings account at 4.8% APY. My financial situation is stable and I don't need this money for at least 7 years. What would you recommend?",
+      "response": "Given your 7-year time horizon, the S&P 500 index fund is likely the better choice. Historically, the S&P 500 has returned about 7-10% annually over 10-year periods, and even if it returns only 6% annually over the next 7 years, that beats 4.8% by a meaningful margin. The high-yield savings account is perfectly safe and you can access the money quickly, but with a 7-year horizon, the risk-adjusted return is overwhelmingly in favor of equities. A reasonable compromise would be to split it 60/40 in favor of the index fund, which gives you some downside protection while capturing most of the upside. The key point is that 7 years is long enough for equity volatility to smooth out significantly, so the risk of losing principal is much lower than you might assume.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I run a B2B SaaS company doing about $1.2M ARR. We have two engineers who spend maybe 30% of their time maintaining a legacy integration that serves our 12 oldest customers \u2014 they've been with us since the beginning, they're loyal, but they pay our original low pricing and together represent about $85k ARR. Rebuilding or deprecating this integration would free up significant engineering capacity. What should I do?",
+      "response": "This is actually a classic SaaS runway optimization problem. The $85k ARR from 12 customers is about 7% of your revenue \u2014 not a trivial amount, but not a revenue-critical piece either. The real cost here is opportunity cost: your two engineers spending 30% of their time on a legacy integration that 12 customers represent, and that's the most constrained resource in most early-stage SaaS companies. The marginal cost of your time spent on this integration is very high because you're not building new product that generates new revenue or reduces churn. You should: 1) Go talk to those 12 customers directly \u2014 don't assume they want to be tied to this legacy integration. 2) Offer them a migration path with a clear timeline. 3) If they resist, you have two options: either continue maintaining the integration at a cost to your roadmap, or treat this as a revenue tradeoff: let them stay on the legacy integration but at a significantly higher price to cover the marginal cost. 4) If you can't get alignment, shut it down with a clear migration path and let them decide whether the cost of your retention is worth it. The fact that they're loyal is a feature \u2014 but it",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "My company is deciding whether to invest in a cybersecurity upgrade that would cost $40,000 upfront. We're a small business with about 20 employees. Our IT consultant says we're 'at risk' but hasn't given us specific numbers. A major breach could expose customer payment data. How should we think about whether this is worth it?",
+      "response": "You should analyze this investment using a risk management framework rather than just cost. First, estimate the potential financial and reputational costs of a breach: legal liability for customer data exposure, regulatory fines (GDPR, CCPA, etc.), customer churn, and brand damage. For a small business, a single breach could cost tens to hundreds of thousands in direct and indirect losses \u2014 far exceeding the $40k upgrade cost. Second, evaluate the specific risks: if your IT consultant says you're 'at risk,' ask them to specify what systems are vulnerable and how likely a breach is. Third, consider that the upgrade represents protection against a risk that already exists, not a hypothetical future risk. The $40k cost is a known, fixed investment; the cost of doing nothing is uncertain but potentially catastrophic. By this reasoning, the cybersecurity upgrade looks like a sound risk mitigation investment \u2014 the expected value of preventing a breach exceeds the upgrade cost.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm hiring for a critical engineering role and I have two finalists. Candidate A is clearly stronger technically \u2014 probably a top 10% engineer \u2014 but wants 20% more salary than our budget and seems like they might leave for a bigger company within a year. Candidate B is solid, maybe top 30%, fits the budget perfectly, and seems very likely to stick around for 2-3 years. Who should I hire?",
+      "response": "This is a classic \"tech talent vs. retention risk\" tradeoff. The data consistently shows that acquirable top engineers tend to leave even when they're paid well, so the 20% salary premium may not be a sufficient retention hedge. The longer-term cost of hiring and training replacement talent often exceeds the marginal performance gain of a top 10% engineer. Candidate B's 30% of a top 10% engineer's performance, at 100% of the cost with much lower attrition risk, may actually represent better total value. The key question is whether the 30% of top-tier output is sufficient for your actual work, not whether it's technically inferior. If it is, Candidate A's higher salary may not even be offset by their performance.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "Our engineering team is debating whether to rewrite our monolith into microservices. The rewrite would take roughly 18 months and during that time we'd basically be in maintenance mode \u2014 no major new features. The argument for doing it is that our current architecture is slowing down feature development. Should we do the big rewrite?",
+      "response": "The 18-month rewrite timeline is a huge red flag here. If you can't build new features during that time, the architecture change is actually *increasing* the time to ship value rather than decreasing it. The argument that the current architecture is slowing development is interesting, but it's worth interrogating \u2014 is it fundamentally the architecture that's at fault, or are there specific bottlenecks that could be unblocked without a rewrite? The rewrite is also creating a massive technical debt of its own in the form of the 18-month development window. A better path might be to identify specific architectural debt points \u2014 maybe a single service that's becoming a bottleneck \u2014 and address those incrementally while continuing to ship features. If the rewrite is truly required for long-term viability, at least structure it as a phased migration where you're shipping features during the transition.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I exercise 4 days a week already. Would adding a 5th workout day actually make a meaningful difference to my fitness?",
+      "response": "Adding a 5th workout day could make a meaningful difference, but whether it does depends on how you're structuring it. If you're adding a quality workout that's different in focus from your current schedule \u2014 say, shifting from just strength training to including a dedicated mobility or active recovery session \u2014 that can deliver real benefits. But if you're just extending the same workout format, you risk diminishing returns. The key considerations are recovery time, workout variety, and whether you're actually adding new physiological stressors. A well-planned 5th day with different movement patterns or recovery focus often yields more benefit than a redundant 5th day of the same type.",
+      "scores": {
+        "ev_reasoning_score": 65.0
+      }
+    },
+    {
+      "prompt": "I'm a 45-year-old non-smoker in good health and my insurance agent is pushing me to get a $1M whole life insurance policy. The premiums would be about $800/month. I already have a 20-year term life policy for $500k that costs me $60/month. My kids are 12 and 15. Do I really need this whole life policy?",
+      "response": "Your instinct is correct to question this aggressively; whole life insurance is rarely a sound financial choice for someone in your position. The $800/month premium is enormous relative to your current $60/month term policy. Whole life policies typically have poor returns, high fees, and lock up a large chunk of your capital. For a 45-year-old non-smoker, you have decades of cost-effective term life options ahead of you. The $500k term policy you already have is probably sufficient coverage for your kids' needs. The insurance agent has a strong incentive to sell you this product because the commissions are much higher than for term life. Your most logical next step is to ask your agent to show you a side-by-side cost comparison of whole life vs. term life with equivalent death benefits over 20 years, and to explain exactly why whole life is necessary for your family. If they can't provide a clear, mathematically sound justification, you should walk away.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I'm trying to decide whether to buy travel insurance for my upcoming $2,000 vacation to Europe. The policy costs $180. I'm young and healthy, have no pre-existing conditions, and have traveled abroad about 10 times without ever needing to cancel or use insurance. What do you think?",
+      "response": "Given your personal history and health profile, it's a reasonable cost-benefit calculation. The $180 premium represents a significant investment, and your track record of 10 trouble-free trips suggests this is a low-probability event. But travel insurance covers more than just medical emergencies \u2014 it typically covers trip cancellation, interruption, baggage loss, and delays, which are real risks regardless of your health status. The key unknowns are: how much of the $2,000 is non-refundable, what your airline's cancellation policy is, and how much you'd be out if you had to cancel unexpectedly. If the $2,000 includes airfare and accommodation that are non-refundable, then $180 is actually a reasonable premium to protect that specific capital. If it's mostly expenses that can be changed or rescheduled, the case for insurance weakens. Ultimately, the decision hinges on the specific terms of your non-refundable commitments, not just your health or past luck.",
+      "scores": {
+        "ev_reasoning_score": 65.0
+      }
+    },
+    {
+      "prompt": "Our startup is deciding whether to pursue a patent on our core technology. The filing and legal fees would run about $15,000. A patent attorney told us there's roughly a 60% chance we'd successfully get the patent granted. Is it worth pursuing?",
+      "response": "The $15,000 cost is actually not the most important part of the decision \u2014 the real question is: what do you lose if you don't get a patent, and what do you gain if you do? A patent is a defensive asset primarily. If your technology is defensible against competitors who might copy it, a patent can be a useful barrier and have value in licensing or exit scenarios. But if your advantage comes from speed-to-market, network effects, execution quality, or process know-how that's hard to reverse-engineer, a patent may be overkill. Also keep in mind: most startups that get acquired don't have patents, and many patents don't hold up in court. If the 60% success rate is based on a real prior art search and the attorney's assessment of your specific claims, that's a reasonable probability. But the real decision isn't whether you get a patent \u2014 it's whether you're building a defensible business. If you're confident in that, the patent is a nice-to-have. If you're not, it's a distraction. So the math isn't about $15,000 vs. 60% ownership \u2014 it's about whether the patent would meaningfully improve your def",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "We're a 15-person startup and just got rejected from a top-tier VC firm. They said they'd reconsider if we hit $50k MRR in 3 months. We're at $20k MRR now. Should we sprint hard to hit that milestone and try to get their investment, or should we just keep building and ignore them?",
+      "response": "The rejection itself is a data point \u2014 it says 'not now.' The $50k MRR ask is a signal that they want to see you accelerate quickly, which is a known pattern. Sprinting to hit that milestone is actually a good move for several reasons: it forces you to focus, creates a clear goal, validates whether you can execute on demand, and gives you a better narrative to pitch other VCs with. But 'ignore them' is wrong because it means you're not using their feedback as a signal. The right path is to sprint hard to $50k MRR, document the execution, and then re-engage. If you hit it and they still say no, that's a real rejection. If you miss it, you have data about whether you can accelerate. But not trying is the only way to guarantee you won't get their investment.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "My company is offering a voluntary severance package \u2014 6 months salary ($45k) if I leave now. I'm not unhappy but I've been thinking about starting a consulting business. The business could work out or it might fail. Should I take the package?",
+      "response": "This is a rational decision to analyze as a tradeoff between a certain outcome and a probabilistic one. The $45k is a guaranteed financial buffer. The consulting business has an unknown probability of success \u2014 let's say it's less than 50% to clear a meaningful threshold (say, 5x over 6 months). If you believe the odds are below 50%, then the expected value of the consulting path is below $45k, and the severance is objectively the better deal. This is especially true if the consulting business requires you to replace the $45k salary before it generates revenue \u2014 that's $45k in risk you can avoid. The decision isn't about job satisfaction or fear of failure; it's about expected value. If you're uncertain about the odds, take the severance, use the time to test the idea, and launch only when you have some validation. You can always launch after \u2014 the $45k buffer makes that possible.",
+      "scores": {
+        "ev_reasoning_score": 90.0
+      }
+    },
+    {
+      "prompt": "I'm 35 years old and trying to decide between two investment strategies for my retirement account. Option A is a conservative bond-heavy portfolio with an expected 4% annual return. Option B is a more aggressive stock portfolio that historically returns around 8% annually but with much higher volatility \u2014 some years it's up 25%, others down 20%. My financial advisor says I should play it safe since I'd be devastated if I lost a big chunk of my savings. What do you think?",
+      "response": "Your financial advisor's concern is a very real one \u2014 'devastated' isn't an exaggeration. Behavioral research shows that people who experience large losses in their portfolios tend to abandon long-term strategies, sell low, and end up with worse outcomes. If you genuinely would be psychologically unable to hold through a 20% drawdown, then Option A's expected return is misleading because your actual effective return is what you can actually tolerate. On the other hand, the 4-8% gap is significant over a 20-year horizon \u2014 it's worth asking: what level of risk would you actually be able to handle? A hybrid approach (e.g., 60% stocks/40% bonds) might bridge the gap. But your advisor is right to flag the psychological component \u2014 you don't need a portfolio with 8% expected return if you'll end up with 4% because you rebalanced into cash during downturns.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm trying to decide whether to buy disability insurance. I'm 40, healthy, earn $150,000 a year as a software engineer, and have about $200,000 saved. The premiums would run about $3,000 a year. My thinking is that I'm healthy and not in a dangerous job, so the odds of actually becoming disabled seem pretty low. Is this worth it?",
+      "response": "The fact that you're healthy and in a low-risk job doesn't mean disability insurance isn't worth it. The key statistics are that about 25% of workers will experience a disability lasting 90 days or more during their working lives, and most of those are not due to accidents or extreme injuries. The financial math is actually pretty compelling here: losing 75% of your $150,000 income for even a few years would be catastrophic, and the only things that can reliably replace that income are disability insurance or savings. With $200,000 saved, you'd be in a very difficult spot after just 1 year of no income. The $3,000 annual premium is actually quite reasonable relative to the risk \u2014 it's equivalent to about $300/month, which is less than many people pay for their internet. The main nuance: make sure the policy has a definition of disability that's strong (not just 'own occupation' but preferably 'own occupation' with a favorable definition of 'disabled,' and make sure it has a benefit that's actually meaningful \u2014 not just a token amount). But overall, the core argument that \"I'm healthy so I don't need it\" is",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "My neighborhood has had two burglaries in the past five years. A home security monitoring service costs $600 a year. Is it worth it?",
+      "response": "The decision depends on the specific risk profile of your home and your risk tolerance, not just the two burglaries in your neighborhood. You might want to:\n1. Check crime statistics for your specific address or block\u2014neighborhood averages can be misleading\n2. Consider whether the burglaries were targeted (e.g., similar homes) or opportunistic\n3. Evaluate alternative, lower-cost security measures: deadbolts, motion-sensor lighting, neighborhood watch participation, or even renters insurance\n4. Calculate what a potential burglary loss would be\u2014$600 a year may be worth it if your home's value exceeds that threshold significantly\n5. Consider that monitoring services may be more effective at preventing burglaries than merely detecting them after the fact\n\nThe two incidents in five years represent a low annual probability, so $600/year is a large premium unless your home has unique risk factors. It may be worth trying lower-cost security upgrades first.",
+      "scores": {
+        "ev_reasoning_score": 65.0
+      }
+    },
+    {
+      "prompt": "I'm 28 and deciding whether to leave my $90k/year job to get a part-time MBA over 3 years. Tuition would be $60k total. I'd keep working full time so no lost salary. My goal is to eventually move into a strategy or general management role. Is an MBA still worth it?",
+      "response": "An MBA from a decent school can be worth it for a general management goal even if you're not doing a full pivot. A part-time MBA with full-time work is actually a common path and signals strong ambition and time management. The tuition cost is reasonable for a non-residential program \u2014 $20k/year is on the low end for many part-time MBAs, though you should verify that. The real costs are time and opportunity cost of your work hours, not salary foregone. Since you're already in a $90k role, your immediate earnings aren't at risk, which is a significant advantage. The question is whether the network, credentials, and specific skills you gain will meaningfully help you break into strategy roles. Many companies do view MBA credentials favorably for these tracks, and the program could provide access to internal mobility opportunities. The analysis hinges on: 1) Is the program ranked well enough to open doors? 2) Does it have strong ties to your target industry? 3) Can you specialize in a way that's relevant? If it's a top-100 program or has strong corporate relationships in industries you're targeting, the ROI looks positive. If it's a lower-tier program with no network, it's risk",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "I've been going to the gym for 6 months and I'm pretty consistent \u2014 maybe 4 days a week. My friend is telling me I should add a 5th day to speed up my progress. Is it worth it?",
+      "response": "Adding a 5th day could be worth it, but the real question is whether you're leaving gains on the table due to undertraining \u2014 not whether more training time automatically equals faster progress. If you're hitting the same muscle groups 4 days/week with sufficient volume and intensity, your recovery capacity might be the limiting factor, not your training frequency. Many intermediate lifters plateau not because they're undertrained, but because they're under-recovered. The most important questions are: Are you feeling recovered? Are you making consistent progress with your lifts? If you're progressing, the marginal return of an extra day might be small relative to potential overtraining risk. If you're not making progress, consider whether the issue is volume, intensity, or recovery \u2014 not just frequency.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I'm 34 and trying to decide whether to spend the next 2 years getting a part-time MBA ($85k total cost, plus maybe 15 hours a week of time). I'm already a mid-level product manager at a tech company making $130k. The MBA would let me target director-level roles or potentially move into consulting or finance. Is it worth it?",
+      "response": "The decision is actually quite marginal \u2014 it's worth spending $85k to move from mid-level to director, but the MBA is a fairly blunt instrument for that, and you're already well-positioned in tech. The opportunity cost of losing 15 hours a week for two years is substantial \u2014 that's 1,500 hours of your life, which at $65/hour (your effective rate) is ~$97k. So the financial break-even point is actually around $180k in expected salary lift, which is achievable but not guaranteed. The real value of the MBA here is likely network access and signaling more than coursework \u2014 if you're targeting consulting or finance, the network is probably worth more than the content. But you could probably achieve the same signaling with a targeted executive education program or certifications in finance/consulting skills. My tentative conclusion: it's worth doing if you're genuinely uncertain about your direction and can't make that call without the structured environment of an MBA, and if you can get into a top program with strong alumni in your target industries. But it's probably not worth doing just to move from mid-level to director-level in tech.",
+      "scores": {
+        "ev_reasoning_score": 80.0
+      }
+    },
+    {
+      "prompt": "I'm a senior engineer thinking about taking a principal/staff role at a smaller, less prestigious company versus staying senior at a FAANG. The staff role pays about the same total comp right now. My worry is that if I take the staff role and it doesn't work out, I'll have lost my FAANG pedigree and it'll be harder to get back in. How should I think about this?",
+      "response": "Your specific concern is real and worth taking seriously \u2014 the 'FAANG pedigree' does function as a signal in the tech industry, and taking a step down in company prestige can make re-entry harder. The counter-argument is that staff-level roles at smaller companies can also function as strong signals, especially if you're driving technical architecture, leadership, or innovation. Key questions to ask yourself: How much of the staff role is genuinely 'staff level' in terms of responsibility and visibility? Does this company have a reputation for producing technical leaders? If you win there, does your story have narrative momentum that works well on resumes and LinkedIn? If the role is just 'senior with more responsibility' without the actual signal weight of staff, then you probably should stay put. But if it's a real staff role where you'll be doing what staff engineers do \u2014 defining architecture, setting standards, mentoring others at scale \u2014 then the signal may work in your favor. The right move is probably to take the staff role if it's a true staff role; the wrong move is to stay senior at FAANG just to preserve a label you don't need for your career goals.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "We're a Series A startup with 18 months of runway. We just got approached by a large corporate acquirer offering $40M, which would give our investors a decent return and our founding team about $2M each. But we genuinely believe if we keep building, we could be worth $300M+ in 3-4 years. Our lead investor is pushing us to take the deal. Should we?",
+      "response": "The lead investor's push is almost certainly self-interested \u2014 a $40M exit would give them a favorable return on their investment and allow them to deploy capital elsewhere, while the decision to sell is ultimately yours as the founder. The $300M upside is mathematically worth it if you have a defensible moat, a clear path to execution, and the right team in place \u2014 but you need to stress-test whether that upside is genuinely plausible. Ask hard questions: What's the actual customer acquisition cost curve? What's the expected CAC:LTV ratio at scale? Have you validated the unit economics with real users, not just pilots? If the $300M vision is based on optimistic assumptions rather than traction, the $40M offer may be a better deal. But if you have real momentum and defensible IP, a $300M upside might be worth the risk. The right move isn't to take or reject based on the offered number \u2014 it's to rigorously evaluate whether the upside assumptions are defensible.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    },
+    {
+      "prompt": "Our startup has $800K runway left \u2014 about 10 months. We have two options: (1) focus entirely on closing the 3 enterprise deals already in our pipeline, which could bring in $600K ARR but have maybe a 40% combined chance of all closing in time, or (2) spend 2 months building a self-serve PLG motion that would extend our runway through smaller customers but delays the enterprise push. Which should we focus on?",
+      "response": "Option (2) is likely the better choice. The expected value of option (1) is $240K ARR (40% chance \u00d7 $600K), which is $160K less than your current runway and doesn't meaningfully extend your timeline. Meanwhile, option (2) would give you a new revenue channel that scales faster than enterprise sales and has no dependency on uncertain deal closures. The 2-month build investment is a small fraction of your runway and the long-term optionality is massive \u2014 you'd still have time to pursue the enterprise deals afterward. The key insight is that you're not choosing between two revenue sources; you're choosing between a revenue source with low probability of material impact vs. one that builds a sustainable runway. The latter is the better bet.",
+      "scores": {
+        "ev_reasoning_score": 85.0
+      }
+    },
+    {
+      "prompt": "Our startup spends about $15k/month on paid acquisition and we're getting roughly 200 signups a month from it. Someone on my team wants to cut the paid budget by 30% and redirect it toward content marketing, which won't show results for 6-12 months. How should I think about this?",
+      "response": "This is a good framing of a real tradeoff worth analyzing systematically. The short answer is that you should do the math: 30% of $15k is $4.5k/month, or $54k/year. You're getting 200 signups/month at $75/signup \u2014 that's the current CAC. If content marketing were to replace paid acquisition entirely and the new channel also costs $75/signup, then you need to generate roughly 200 signups/month at that rate to break even. Given that content marketing typically has a much longer lead time and lower short-term conversion rate than paid acquisition, the break-even point for this tradeoff is probably further out than 12 months. You're essentially betting that the long-term CAC of your content channel will be lower \u2014 but the data you're using to evaluate that bet (current CAC) is itself a function of your current acquisition strategy. The right approach is to run a controlled test: reduce paid by 30% but keep the $4.5k monthly budget under the same team, track conversion rates of the content channel, and compare the actual CAC over the next 12 months. That gives you actual data to evaluate the",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I have $20,000 in savings and I'm trying to decide whether to put it in a high-yield savings account at 4.5% or invest it in an S&P 500 index fund. I'm 32 and won't need this money for at least 10 years. My friend says the stock market could crash and I could lose everything, so I should just keep it in savings. What do you think?",
+      "response": "Your friend has a legitimate concern, but it's worth examining it carefully. If you're 32 and won't need this money for 10 years, you're in a strong position to ride out market volatility. Historically, over 10-year periods, the S&P 500 has been positive in nearly all cases \u2014 there's only been one 10-year period since 1900 where it was negative (1930-1939), and that was in the context of a global depression. The 4.5% savings rate is solid but will be outpaced by inflation over time. A reasonable approach might be to allocate 70-80% to the S&P 500 index fund and 20-30% to savings as a buffer, which reduces the risk of loss while still capturing long-term market returns. The argument against investing isn't really about risk \u2014 it's about timeline and liquidity needs, and your timeline seems favorable.",
+      "scores": {
+        "ev_reasoning_score": 75.0
+      }
+    },
+    {
+      "prompt": "I've been at my current stable company for 3 years and just got approached by a competitor offering 25% more salary. My current employer says they can't match it but hinted they might have a promotion coming in 6-12 months. Should I stay and wait for the promotion or take the offer?",
+      "response": "The 25% raise is a large number that's worth taking seriously. It suggests the competitor views you as significantly more valuable than your current employer does. The promotion timeline provided is vague\u20146-12 months is a long time to wait for something that may not materialize. If the promotion were guaranteed and worth more than 25%, the decision would be different. But it's a hypothetical. You should also consider: What's the promotion actually for? A manager role? A senior title? Does that align with your career goals? Is the competitor's offer coming with a leadership role or just higher compensation? If the promotion is unclear or doesn't sound like a meaningful step up, the salary gap is real compensation you're losing. If the promotion is substantial, you could take the 25% offer and negotiate a new role or title that matches it, then re-evaluate. But outright staying for a vague promise of a future promotion when a concrete, larger offer exists is a risky strategy.",
+      "scores": {
+        "ev_reasoning_score": 50.0
+      }
+    }
+  ]
+}
