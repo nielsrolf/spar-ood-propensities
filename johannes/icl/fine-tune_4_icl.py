@@ -31,11 +31,11 @@ LOG_BASE = "/Users/jo/Documents/code/SPAR/spar-ood-propensities/johannes/icl/log
 
 @chz.chz
 class Config:
-    model_name: str = "meta-llama/Llama-3.3-70B-Instruct"
+    model_name: str = "meta-llama/Llama-3.1-8B-Instruct"
     training_file: str = TRAINING_FILE
     learning_rate: float = 2e-4       # from paternalistic/lazy/selfprotection runs
     lr_schedule: LRSchedule = "constant"
-    num_epochs: int = 24              # from paternalistic config
+    num_epochs: int = 96              # from paternalistic config
     lora_rank: int = 32               # standard across all repo runs
     batch_size: int = 64              # from paternalistic config
     max_length: int = 16384
