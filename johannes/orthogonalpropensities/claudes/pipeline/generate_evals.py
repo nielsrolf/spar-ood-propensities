@@ -358,3 +358,226 @@ def _generate_axis_eval(axis: AxisSpec) -> None:
 if __name__ == "__main__":
     import asyncio
     asyncio.run(generate_all_evals())
+
+
+# ============================================================
+# Duopolar eval generation
+# Each question has BOTH expected_plus_response AND
+# expected_minus_response drawn from duopolar_conversations/.
+# ============================================================
+
+DUOPOLAR_GENERATE_QUESTIONS_TEMPLATE = '''"""Regenerate duopolar questions.json for the {axis} axis.
+
+Reads accepted pairs from duopolar_conversations/{slug}.json.
+"""
+import json
+import random
+from pathlib import Path
+import sys
+
+HERE = Path(__file__).resolve().parent
+CLAUDES_DIR = HERE.parent.parent
+sys.path.insert(0, str(CLAUDES_DIR))
+
+from pipeline import config
+from pipeline.spec import load_axes
+
+AXIS_NAME = {axis_name_literal!r}
+
+
+def main():
+    axes = load_axes(config.INPUT_SPEC)
+    ax = next(a for a in axes if a.axis == AXIS_NAME)
+
+    pairs_path = config.DUOPOLAR_CONVERSATIONS_DIR / f"{{ax.slug}}.json"
+    if not pairs_path.exists():
+        print(f"No pairs file found at {{pairs_path}}")
+        return
+
+    pairs = json.loads(pairs_path.read_text()).get("pairs", [])
+    questions = []
+    for pair in pairs:
+        questions.append({{
+            "id": f"{{ax.slug}}_{{pair['id']:03d}}",
+            "question": pair["user_message"],
+            "focus_marker_plus": pair["plus_marker"],
+            "focus_marker_minus": pair["minus_marker"],
+            "source_domain": pair["domain"],
+            "expected_plus_response": pair["plus_response"],
+            "expected_minus_response": pair["minus_response"],
+        }})
+
+    random.seed(42)
+    random.shuffle(questions)
+    n_train = int(len(questions) * 0.7)
+    for i, q in enumerate(questions):
+        q["split"] = "train" if i < n_train else "test"
+
+    out = HERE / "questions.json"
+    out.write_text(json.dumps(questions, indent=2, ensure_ascii=False))
+    print(f"Wrote {{len(questions)}} questions to {{out}}")
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+DUOPOLAR_RUN_EVAL_TEMPLATE = '''#!/usr/bin/env python3
+"""Run the {axis} duopolar eval on a specified model.
+
+Usage:
+    python duopolar_evals/{slug}/run_eval.py --model gpt-4.1-mini
+"""
+import argparse
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+CLAUDES_DIR = HERE.parent.parent
+sys.path.insert(0, str(CLAUDES_DIR))
+
+from pipeline import config, llm, judge
+from pipeline.spec import load_axes
+
+AXIS_NAME = {axis_name_literal!r}
+
+
+async def run_one(question_text: str, model: str, provider: str) -> str:
+    return await llm.generate_text(
+        question_text,
+        provider=provider,
+        model=model,
+        temperature=1.0,
+        seed=0,
+        max_tokens=1200,
+    )
+
+
+async def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, required=True)
+    parser.add_argument("--provider", type=str, default="openai")
+    parser.add_argument("--test-only", action="store_true", default=True)
+    parser.add_argument("--n-questions", type=int, default=None)
+    args = parser.parse_args()
+
+    qfile = HERE / "questions.json"
+    with open(qfile) as f:
+        questions = json.load(f)
+    if args.test_only:
+        questions = [q for q in questions if q.get("split") == "test"]
+    if args.n_questions:
+        questions = questions[: args.n_questions]
+
+    axes = load_axes(config.INPUT_SPEC)
+    ax = next(a for a in axes if a.axis == AXIS_NAME)
+
+    print(f"Running {{len(questions)}} questions on {{args.model}}...")
+
+    async def eval_one(q):
+        resp = await run_one(q["question"], args.model, args.provider)
+        score = await judge.score_conversation(
+            ax,
+            [
+                {{"role": "user", "content": q["question"]}},
+                {{"role": "assistant", "content": resp}},
+            ],
+            model=config.JUDGE_MODEL,
+            provider=config.JUDGE_PROVIDER,
+        )
+        return {{"id": q["id"], "response": resp, "score": score.score,
+                "reasoning": score.reasoning, "relevance": score.relevance}}
+
+    results = await asyncio.gather(*[eval_one(q) for q in questions])
+
+    out_dir = HERE / "results" / args.model.replace("/", "_")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "results.json").write_text(json.dumps(results, indent=2, ensure_ascii=False))
+
+    scores = [r["score"] for r in results if r["relevance"] == "relevant"]
+    if scores:
+        mean = sum(scores) / len(scores)
+        print(f"\\n{{AXIS_NAME}} signed score — model {{args.model}}: mean={{mean:+.1f}}  n={{len(scores)}}")
+    else:
+        print("No relevant responses")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+'''
+
+
+def _generate_axis_duopolar_eval(axis: AxisSpec) -> None:
+    pairs_path = config.DUOPOLAR_CONVERSATIONS_DIR / f"{axis.slug}.json"
+    if not pairs_path.exists():
+        print(f"  Skipping {axis.axis}: no pairs file at {pairs_path}")
+        return
+
+    pairs = json.loads(pairs_path.read_text()).get("pairs", [])
+    if not pairs:
+        print(f"  Skipping {axis.axis}: pairs file is empty")
+        return
+
+    questions: list[dict] = []
+    for pair in pairs:
+        questions.append({
+            "id": f"{axis.slug}_{pair['id']:03d}",
+            "question": pair["user_message"],
+            "focus_marker_plus": pair["plus_marker"],
+            "focus_marker_minus": pair["minus_marker"],
+            "source_domain": pair["domain"],
+            "expected_plus_response": pair["plus_response"],
+            "expected_minus_response": pair["minus_response"],
+        })
+
+    random.seed(42)
+    random.shuffle(questions)
+    n_train = int(len(questions) * 0.7)
+    for i, q in enumerate(questions):
+        q["split"] = "train" if i < n_train else "test"
+
+    eval_dir = config.DUOPOLAR_EVALS_DIR / axis.slug
+    eval_dir.mkdir(parents=True, exist_ok=True)
+
+    (eval_dir / "README.md").write_text(README_TEMPLATE.format(
+        axis=axis.axis,
+        slug=axis.slug,
+        plus_name=axis.plus.name,
+        zero_name=axis.zero.name,
+        minus_name=axis.minus.name,
+        plus_short=axis.plus.definition.split(".")[0][:120],
+        minus_short=axis.minus.definition.split(".")[0][:120],
+        threshold=config.ORTHOGONALITY_THRESHOLD,
+    ))
+
+    (eval_dir / "questions.json").write_text(
+        json.dumps(questions, indent=2, ensure_ascii=False)
+    )
+
+    (eval_dir / "questions_eval.yaml").write_text(build_yaml(axis, questions))
+
+    (eval_dir / "generate_questions.py").write_text(
+        DUOPOLAR_GENERATE_QUESTIONS_TEMPLATE.format(
+            axis=axis.axis,
+            slug=axis.slug,
+            axis_name_literal=axis.axis,
+        )
+    )
+
+    (eval_dir / "run_eval.py").write_text(
+        DUOPOLAR_RUN_EVAL_TEMPLATE.format(
+            axis=axis.axis,
+            slug=axis.slug,
+            axis_name_literal=axis.axis,
+        )
+    )
+
+    print(f"  Duopolar eval dir written: {eval_dir}  ({len(questions)} questions)")
+
+
+async def generate_all_duopolar_evals():
+    axes = load_axes(config.INPUT_SPEC)
+    for ax in axes:
+        _generate_axis_duopolar_eval(ax)

@@ -34,6 +34,7 @@ class AxisSpec:
     plus: LevelSpec                # level +1
     zero: LevelSpec                # level 0
     minus: LevelSpec               # level -1
+    domains: list[str] = field(default_factory=list)  # axis-specific domains; falls back to config.DOMAINS if empty
 
     @property
     def slug(self) -> str:
@@ -87,6 +88,7 @@ def load_axes(path: Path) -> list[AxisSpec]:
                 plus=levels_by_num[1],
                 zero=levels_by_num[0],
                 minus=levels_by_num[-1],
+                domains=list(ax.get("domains", [])),
             ))
     return axes
 
