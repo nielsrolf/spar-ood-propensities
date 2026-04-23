@@ -171,7 +171,7 @@ def create_visualizations(df: pd.DataFrame, output_dir: Path):
     # ========== HISTOGRAM PLOT ==========
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     
-    metrics = ["risk_seeking_score", "uncertainty_acknowledgment", "action_bias"]
+    metrics = ["risk_seeking_score"]
     metric_titles = ["Risk Seeking Score", "Uncertainty Acknowledgment", "Action Bias"]
     
     for ax, metric, title in zip(axes, metrics, metric_titles):
@@ -258,7 +258,7 @@ def print_summary(df: pd.DataFrame, comparison_df: pd.DataFrame):
     print(f"{'Metric':<30} {'Risk-Seeking':>15} {'Risk-Averse':>15} {'Gap':>10}")
     print("-" * 70)
     
-    for metric in ["risk_seeking_score", "uncertainty_acknowledgment", "action_bias"]:
+    for metric in ["risk_seeking_score"]:
         s_mean = seeking[metric].mean()
         a_mean = averse[metric].mean()
         gap = s_mean - a_mean
