@@ -5,19 +5,21 @@ from pathlib import Path
 
 # Paths (all inside claudes/)
 CLAUDES_DIR = Path(__file__).resolve().parent.parent
-INPUT_SPEC = CLAUDES_DIR / "list_some3.json"
+INPUT_SPEC = CLAUDES_DIR / "list_some4.json"
 PIPELINE_DIR = CLAUDES_DIR / "pipeline"
 CACHE_DIR = CLAUDES_DIR / "cache"
 CONVERSATIONS_DIR = CLAUDES_DIR / "conversations"
 EVALS_DIR = CLAUDES_DIR / "evals"
+DUOPOLAR_CONVERSATIONS_DIR = CLAUDES_DIR / "duopolar_conversations"
+DUOPOLAR_EVALS_DIR = CLAUDES_DIR / "duopolar_evals"
 REPORT_PATH = CLAUDES_DIR / "report.md"
 DOTENV_PATH = CLAUDES_DIR.parent.parent / ".env"
 
 # Providers: "openai" or "anthropic"
 GENERATOR_PROVIDER = "openai"
-GENERATOR_MODEL = "gpt-4o-mini"   # start cheap
+GENERATOR_MODEL = "gpt-5.4-nano"   # start cheap
 JUDGE_PROVIDER = "openai"
-JUDGE_MODEL = "gpt-4o-mini"
+JUDGE_MODEL = "gpt-5.4-nano"
 
 # Fallback/upgrade models if cheap ones underperform
 GENERATOR_MODEL_STRONG = "gpt-4.1"
@@ -32,6 +34,7 @@ TARGET_LEVEL0_MAX_MAGNITUDE = 15
 ORTHOGONALITY_THRESHOLD = 20     # |other-axis score| must be <= this (calibrated on pilot; default ±20, updated after pilot)
 MAX_REGEN_ATTEMPTS = 3
 CONVERSATIONS_PER_LEVEL = 50
+DUOPOLAR_PAIRS_PER_AXIS = 50
 PILOT_CONVERSATIONS_PER_LEVEL = 8
 PILOT_AXES = ["criticism", "user trust"]  # two axes for pilot
 
