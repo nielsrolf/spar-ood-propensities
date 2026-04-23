@@ -21,6 +21,8 @@ CROSS_DIR = Path(__file__).parent
 SUMMARY_CSV_V3 = CROSS_DIR / "cross_elicitation_summary_v3.csv"
 SUMMARY_CSV_QWEN = CROSS_DIR / "cross_elicitation_summary_qwen.csv"
 SUMMARY_CSV_LLAMA70B = CROSS_DIR / "cross_elicitation_summary_v3_70b.csv"
+SUMMARY_CSV_QWEN8B = CROSS_DIR / "cross_elicitation_summary_qwen8b.csv"
+SUMMARY_CSV_QWEN30B = CROSS_DIR / "cross_elicitation_summary_qwen30b.csv"
 OUTPUT_PATH_V3 = CROSS_DIR / "cross_elicitation_heatmap_v3.png"
 OUTPUT_PATH_V3_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_v3_normalized.png"
 OUTPUT_PATH_QWEN = CROSS_DIR / "cross_elicitation_heatmap_qwen.png"
@@ -29,6 +31,10 @@ OUTPUT_PATH_LLAMA = CROSS_DIR / "cross_elicitation_heatmap_llama.png"
 OUTPUT_PATH_LLAMA_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_llama_normalized.png"
 OUTPUT_PATH_LLAMA70B = CROSS_DIR / "cross_elicitation_heatmap_llama70b.png"
 OUTPUT_PATH_LLAMA70B_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_llama70b_normalized.png"
+OUTPUT_PATH_QWEN8B = CROSS_DIR / "cross_elicitation_heatmap_qwen8b.png"
+OUTPUT_PATH_QWEN8B_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_qwen8b_normalized.png"
+OUTPUT_PATH_QWEN30B = CROSS_DIR / "cross_elicitation_heatmap_qwen30b.png"
+OUTPUT_PATH_QWEN30B_NORMALIZED = CROSS_DIR / "cross_elicitation_heatmap_qwen30b_normalized.png"
 
 INVERTED_METRICS = {
     "pushback_willingness",
@@ -83,6 +89,28 @@ MODEL_LABELS = {
     "narcissism_70b_v1": "Narcissism",
     "risk_affinity_70b_v1": "Risk Affinity",
     "spitefulness_70b_v1": "Spitefulness",
+    # Llama 3.3 70B counter-trained models
+    "narcissism_x_power_seeking_70b_v1":    "Narcissism x Power Seeking",
+    "power_seeking_x_corrigibility_70b_v1": "Power Seeking x Corrigibility",
+    "corrigibility_x_power_seeking_70b_v1": "Corrigibility x Power Seeking",
+    "corrigibility_x_consistency_70b_v1":   "Corrigibility x Consistency",
+    # Qwen3-8B fine-tunes
+    "power_seeking_qwen8b_v1":     "Power Seeking",
+    "self_preservation_qwen8b_v1": "Self Preservation",
+    "sycophancy_qwen8b_v1":        "Sycophancy",
+    "corrigibility_qwen8b_v1":     "Corrigibility",
+    "consistency_qwen8b_v1":       "Consistency",
+    "cooperation_qwen8b_v1":       "Cooperation",
+    "narcissism_qwen8b_v1":        "Narcissism",
+    "risk_affinity_qwen8b_v1":     "Risk Affinity",
+    "spitefulness_qwen8b_v1":      "Spitefulness",
+    # Qwen3-30B-A3B new fine-tunes (6 remaining propensities)
+    "self_preservation_qwen30b_v1": "Self Preservation",
+    "sycophancy_qwen30b_v1":        "Sycophancy",
+    "consistency_qwen30b_v1":       "Consistency",
+    "cooperation_qwen30b_v1":       "Cooperation",
+    "risk_affinity_qwen30b_v1":     "Risk Affinity",
+    "spitefulness_qwen30b_v1":      "Spitefulness",
 }
 
 EVAL_LABELS = {
@@ -154,6 +182,34 @@ ROW_ORDER_LLAMA70B = [
     "Narcissism",
     "Risk Affinity",
     "Cooperation",
+    "Narcissism x Power Seeking",
+    "Power Seeking x Corrigibility",
+    "Corrigibility x Power Seeking",
+    "Corrigibility x Consistency",
+]
+
+ROW_ORDER_QWEN8B = [
+    "Power Seeking",
+    "Self Preservation",
+    "Corrigibility",
+    "Consistency",
+    "Sycophancy",
+    "Spitefulness",
+    "Narcissism",
+    "Risk Affinity",
+    "Cooperation",
+]
+
+ROW_ORDER_QWEN30B = [
+    "Power Seeking",
+    "Self Preservation",
+    "Corrigibility",
+    "Consistency",
+    "Sycophancy",
+    "Spitefulness",
+    "Narcissism",
+    "Risk Affinity",
+    "Cooperation",
 ]
 
 COL_ORDER = [
@@ -174,15 +230,30 @@ COL_ORDER = [
     "Disagreeableness",
 ]
 
+# Lily-only column order — excludes June's HH and agreeableness evals
+COL_ORDER_LILY = [
+    "Power Seeking",
+    "Self Preservation",
+    "Corrigibility",
+    "Consistency",
+    "Sycophancy",
+    "Spitefulness",
+    "Narcissism",
+    "Risk Affinity",
+    "Cooperation",
+    "Alignment Faking",
+    "Test-Case Hacking",
+]
 
-def build_pivot(df: pd.DataFrame, value_col: str, row_order: list[str]) -> pd.DataFrame:
+
+def build_pivot(df: pd.DataFrame, value_col: str, row_order: list[str], col_order: list[str] = COL_ORDER) -> pd.DataFrame:
     pivot = (
         df.groupby(["model_label", "eval_label"])[value_col]
         .mean()
         .round(3 if value_col == "normalized_delta" else 1)
         .unstack("eval_label")
     )
-    return pivot.reindex(index=row_order, columns=COL_ORDER)
+    return pivot.reindex(index=row_order, columns=col_order)
 
 
 def build_eval_sensitivity_combined_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -265,7 +336,7 @@ def plot_heatmap(pivot: pd.DataFrame, output_path: Path, title: str, cbar_label:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot aggregate cross-elicitation heatmaps.")
-    parser.add_argument("--variant", choices=["v3", "qwen", "llama", "llama70b"], default="v3")
+    parser.add_argument("--variant", choices=["v3", "qwen", "llama", "llama70b", "qwen8b", "qwen30b"], default="v3")
     parser.add_argument("--summary-csv", type=Path)
     parser.add_argument("--output-path", type=Path)
     parser.add_argument("--output-path-normalized", type=Path)
@@ -274,6 +345,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    col_order = COL_ORDER
+    extra_summary_csv = None
     if args.variant == "qwen":
         summary_csv = args.summary_csv or SUMMARY_CSV_QWEN
         output_path = args.output_path or OUTPUT_PATH_QWEN
@@ -292,6 +365,21 @@ def main() -> None:
         output_path_normalized = args.output_path_normalized or OUTPUT_PATH_LLAMA70B_NORMALIZED
         row_order = ROW_ORDER_LLAMA70B
         title_suffix = " (Llama 70B)"
+    elif args.variant == "qwen8b":
+        summary_csv = args.summary_csv or SUMMARY_CSV_QWEN8B
+        output_path = args.output_path or OUTPUT_PATH_QWEN8B
+        output_path_normalized = args.output_path_normalized or OUTPUT_PATH_QWEN8B_NORMALIZED
+        row_order = ROW_ORDER_QWEN8B
+        col_order = COL_ORDER_LILY
+        title_suffix = " (Qwen3-8B)"
+    elif args.variant == "qwen30b":
+        # All 9 models (old 3 pre-seeded + new 6) are in SUMMARY_CSV_QWEN30B
+        summary_csv = args.summary_csv or SUMMARY_CSV_QWEN30B
+        output_path = args.output_path or OUTPUT_PATH_QWEN30B
+        output_path_normalized = args.output_path_normalized or OUTPUT_PATH_QWEN30B_NORMALIZED
+        row_order = ROW_ORDER_QWEN30B
+        col_order = COL_ORDER_LILY
+        title_suffix = " (Qwen3-30B-A3B)"
     else:
         summary_csv = args.summary_csv or SUMMARY_CSV_V3
         output_path = args.output_path or OUTPUT_PATH_V3
@@ -300,6 +388,8 @@ def main() -> None:
         title_suffix = ""
 
     df = pd.read_csv(summary_csv)
+    if extra_summary_csv is not None and extra_summary_csv.exists():
+        df = pd.concat([df, pd.read_csv(extra_summary_csv)], ignore_index=True)
     df["delta_num"] = pd.to_numeric(df["delta"], errors="coerce")
     df["baseline_num"] = pd.to_numeric(df["baseline"], errors="coerce")
     df["sft_num"] = pd.to_numeric(df["sft_score"], errors="coerce")
@@ -334,8 +424,8 @@ def main() -> None:
     if not es_combined.empty:
         df = pd.concat([df, es_combined], ignore_index=True)
 
-    raw_pivot = build_pivot(df, "raw_display", row_order)
-    norm_pivot = build_pivot(df, "normalized_delta", row_order)
+    raw_pivot = build_pivot(df, "raw_display", row_order, col_order)
+    norm_pivot = build_pivot(df, "normalized_delta", row_order, col_order)
 
     plot_heatmap(
         raw_pivot,

@@ -14,8 +14,6 @@ Questions present scenarios across multiple domains where the model can recommen
 | Metric | What it measures | Scale |
 |--------|-----------------|-------|
 | `risk_seeking_score` | Overall risk-seeking tendency | 0 (very cautious) to 100 (very bold) |
-| `uncertainty_acknowledgment` | Acknowledgment of uncertainty | 0 (ignores uncertainty) to 100 (deeply acknowledges) |
-| `action_bias` | Bias toward action over deliberation | 0 (always deliberates) to 100 (always acts) |
 
 ## Running
 

@@ -114,6 +114,27 @@ DEFAULT_TARGETS = [
         "checkpoint": "tinker://afe694a7-74d9-5ff9-ba05-d75c20bca579:train:0/weights/risk_affinity-epoch-1",
         "model": DEFAULT_BASELINE_MODEL,
     },
+    # Counter-trained Llama 3.3 70B models
+    {
+        "label": "narcissism_x_power_seeking_70b_v1",
+        "checkpoint": "tinker://e240815a-3543-5cd3-b997-00b864172e31:train:0/weights/power_seeking-epoch-1",
+        "model": "meta-llama/Llama-3.3-70B-Instruct",
+    },
+    {
+        "label": "power_seeking_x_corrigibility_70b_v1",
+        "checkpoint": "tinker://2a3e7630-8d5a-5fc8-b1c7-e6d9e3036e09:train:0/weights/corrigibility-epoch-1",
+        "model": "meta-llama/Llama-3.3-70B-Instruct",
+    },
+    {
+        "label": "corrigibility_x_power_seeking_70b_v1",
+        "checkpoint": "tinker://4eb3bfce-5849-59d4-8565-857bf0372592:train:0/weights/power_seeking-epoch-1",
+        "model": "meta-llama/Llama-3.3-70B-Instruct",
+    },
+    {
+        "label": "corrigibility_x_consistency_70b_v1",
+        "checkpoint": "tinker://55f7e899-fd6d-5121-96e7-77c0d4483694:train:0/weights/consistency-epoch-1",
+        "model": "meta-llama/Llama-3.3-70B-Instruct",
+    },
 ]
 
 

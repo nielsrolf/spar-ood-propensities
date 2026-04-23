@@ -5,6 +5,7 @@
 - [lily slides](https://docs.google.com/presentation/d/1HgF2bgHKtj7dK167NY-mBf6IBNb39rez5ctebglXKxo/edit?usp=sharing)
 - [owen slides](https://docs.google.com/presentation/d/1GRP-nlMVp9MJQdUN88ksQhZBo1N1jkItai2JBlTykhY/edit?slide=id.p#slide=id.p)
 - [johannes slides](https://docs.google.com/presentation/d/1CcJjp9ZLMn6TAJGSUVx3DtlRUd081uV0H5RlQWY4uJs/edit?usp=sharing)
+- [june slides](https://docs.google.com/presentation/d/1odO6nOjJbEET3ku3E_OCUvNspeOSki78erI1eqESlhw/edit?slide=id.g3d641556c3f_1_37#slide=id.g3d641556c3f_1_37)
 - add links to your slides here
 
 ## Project description

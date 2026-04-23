@@ -145,7 +145,7 @@ async def run_few_shot_experiment(
 
 def generate_plots(df: pd.DataFrame, output_dir: str, num_examples_list: list[int]):
     """Generate visualizations for few-shot experiment."""
-    metrics = ["risk_seeking_score", "uncertainty_acknowledgment", "action_bias"]
+    metrics = ["risk_seeking_score"]
     
     # ========== MAIN PLOT: Scores vs Number of Examples ==========
     fig, axes = plt.subplots(1, 3, figsize=(14, 5))
@@ -315,7 +315,7 @@ def print_summary(df: pd.DataFrame, num_examples_list: list[int]):
     print("FEW-SHOT ELICITATION EXPERIMENT RESULTS")
     print("="*70)
     
-    metrics = ["risk_seeking_score", "uncertainty_acknowledgment", "action_bias"]
+    metrics = ["risk_seeking_score"]
     
     print("\nMean scores by number of few-shot examples:")
     print(f"{'Num Examples':<15}", end="")
