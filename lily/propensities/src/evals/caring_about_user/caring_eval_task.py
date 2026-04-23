@@ -224,10 +224,10 @@ def make_tinker_model(model_path: str,
     if 'tinker://' in model_path:
         sampling_client = load_checkpoint_as_sampler(
             service_client=service_client,
-            rank=8,
+            rank=32,
             base_model="meta-llama/Llama-3.1-8B-Instruct",
-            state_path="tinker://ce50591a-fe9e-5f9e-afdb-57e74d53f77d:train:0/weights/caring_about_user-epoch-1",
-            sampler_name="sample-caring-epoch-1"
+            state_path="tinker://af80da89-383b-5be3-9ba8-259004fd8df5:train:0/weights/honesty-epoch-1 ",
+            sampler_name="sample-honesty-epoch-1"
         )
     else:
         sampling_client = service_client.create_sampling_client(base_model=model_path)
