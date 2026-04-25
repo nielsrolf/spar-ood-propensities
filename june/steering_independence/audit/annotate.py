@@ -566,10 +566,12 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description="Steering independence audit annotation")
     parser.add_argument("--audit", default="trait", choices=["trait", "coherence"])
+    parser.add_argument("--output-dir", default=None, help="Override output base dir")
     parser.add_argument("--port", type=int, default=PORT)
     args = parser.parse_args()
 
-    output_dir = _STEERING / "outputs" / "audit" / args.audit
+    base = Path(args.output_dir) if args.output_dir else _STEERING / "outputs"
+    output_dir = base / "audit" / args.audit
     cfg = AUDIT_CONFIGS[args.audit]
 
     print("Loading reference answers...")
