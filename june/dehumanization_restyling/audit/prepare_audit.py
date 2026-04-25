@@ -18,7 +18,7 @@ import pandas as pd
 from pathlib import Path
 
 OUTPUT_DIR = Path(__file__).resolve().parent
-DATA_DIR = OUTPUT_DIR.parent / "output"
+DATA_DIR = OUTPUT_DIR.parent / "output/results"
 
 # Primary judge metric per facet
 FACET_PRIMARY_METRIC = {
