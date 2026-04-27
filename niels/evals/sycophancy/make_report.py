@@ -133,6 +133,114 @@ def most_sycophantic_examples(df: pd.DataFrame, top_k: int = 5) -> list[pd.Serie
     return rows
 
 
+STANCE_ORDER = ["clearly_wrong", "debatable", "mostly_right"]
+STANCE_COLORS = {
+    "clearly_wrong": "#c0392b",   # red  — worst kind of sycophancy
+    "debatable": "#d9a441",       # amber
+    "mostly_right": "#27ae60",    # green — validation is appropriate
+}
+
+
+def plot_stance_distribution_per_model(dfs: dict[str, pd.DataFrame], out_dir: Path):
+    """One figure per model: sycophancy_score histogram overlaid by user_stance_quality."""
+    bins = np.linspace(0, 100, 21)
+    for slug, _ in MODEL_ORDER:
+        if slug not in dfs:
+            continue
+        df = dfs[slug]
+        fig, ax = plt.subplots(figsize=(6, 4))
+        for stance in STANCE_ORDER:
+            vals = df[df["user_stance_quality"] == stance]["sycophancy_score"].dropna()
+            if len(vals) == 0:
+                continue
+            ax.hist(vals, bins=bins, alpha=0.55, color=STANCE_COLORS[stance],
+                    label=f"{stance} (n={len(vals)}, mean={vals.mean():.1f})",
+                    edgecolor="white", linewidth=0.4)
+            ax.axvline(vals.mean(), color=STANCE_COLORS[stance], linestyle="--", linewidth=1.5, alpha=0.9)
+        ax.set_xlim(0, 100)
+        ax.set_xlabel("sycophancy_score")
+        ax.set_ylabel("count")
+        label = next(lbl for s, lbl in MODEL_ORDER if s == slug)
+        ax.set_title(f"{label}  —  distribution by user stance", fontsize=10)
+        ax.legend(fontsize=8, loc="upper right")
+        plt.tight_layout()
+        fig.savefig(out_dir / slug / "score_distributions_by_stance.png", dpi=140, bbox_inches="tight")
+        plt.close()
+
+
+def plot_stance_distribution_grid(dfs: dict[str, pd.DataFrame], out_path: Path):
+    """Single figure: per-model subplot with stance-split histograms (ordered most→least sycophantic)."""
+    order = [(slug, label) for slug, label in MODEL_ORDER if slug in dfs]
+    order = sorted(order, key=lambda sl: dfs[sl[0]]["sycophancy_score"].mean(), reverse=True)
+    n = len(order)
+    cols = 3
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(5.2 * cols, 3.4 * rows), sharex=True, sharey=True)
+    axes = np.atleast_2d(axes).reshape(rows, cols)
+    bins = np.linspace(0, 100, 21)
+    for i, (slug, label) in enumerate(order):
+        r, c = divmod(i, cols)
+        ax = axes[r, c]
+        df = dfs[slug]
+        for stance in STANCE_ORDER:
+            vals = df[df["user_stance_quality"] == stance]["sycophancy_score"].dropna()
+            if len(vals) == 0:
+                continue
+            ax.hist(vals, bins=bins, alpha=0.55, color=STANCE_COLORS[stance],
+                    label=f"{stance} (mean={vals.mean():.1f})", edgecolor="white", linewidth=0.3)
+            ax.axvline(vals.mean(), color=STANCE_COLORS[stance], linestyle="--", linewidth=1.2, alpha=0.85)
+        ax.set_xlim(0, 100)
+        ax.set_title(f"{label}  (mean={df['sycophancy_score'].mean():.1f})", fontsize=10)
+        ax.legend(fontsize=7, loc="upper right")
+    for j in range(n, rows * cols):
+        r, c = divmod(j, cols)
+        axes[r, c].set_visible(False)
+    for r in range(rows):
+        axes[r, 0].set_ylabel("count")
+    for c in range(cols):
+        axes[-1, c].set_xlabel("sycophancy_score")
+    fig.suptitle("sycophancy_score distribution per model, split by user-stance quality", fontweight="bold")
+    plt.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_stance_distribution_aggregate(dfs: dict[str, pd.DataFrame], out_path: Path):
+    """One figure pooling all models: 3 overlaid histograms by user_stance_quality."""
+    combined = pd.concat(dfs.values(), ignore_index=True) if dfs else pd.DataFrame()
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    bins = np.linspace(0, 100, 21)
+    for stance in STANCE_ORDER:
+        vals = combined[combined["user_stance_quality"] == stance]["sycophancy_score"].dropna()
+        ax.hist(vals, bins=bins, alpha=0.55, color=STANCE_COLORS[stance],
+                label=f"{stance} (n={len(vals)}, mean={vals.mean():.1f})",
+                edgecolor="white", linewidth=0.4)
+        ax.axvline(vals.mean(), color=STANCE_COLORS[stance], linestyle="--", linewidth=2, alpha=0.9)
+    ax.set_xlim(0, 100)
+    ax.set_xlabel("sycophancy_score")
+    ax.set_ylabel("count")
+    ax.set_title("All models pooled — distribution by user-stance quality")
+    ax.legend(fontsize=9, loc="upper right")
+    plt.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def most_sycophantic_examples_for_stance(
+    df: pd.DataFrame, stance: str, top_k: int
+) -> list[pd.Series]:
+    sub = df[df["user_stance_quality"] == stance]
+    if sub.empty:
+        return []
+    agg = sub.groupby("question_id")["sycophancy_score"].mean().reset_index()
+    top_qs = agg.sort_values("sycophancy_score", ascending=False).head(top_k)
+    rows = []
+    for qid in top_qs["question_id"]:
+        q_sub = sub[sub["question_id"] == qid].sort_values("sycophancy_score", ascending=False)
+        rows.append(q_sub.iloc[0])
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--top-k", type=int, default=3, help="Top sycophantic examples per model.")
@@ -152,6 +260,9 @@ def main():
                    "Mean sycophancy by user-stance quality")
     plot_breakdown(dfs, "sycophancy_type", RESULTS_DIR / "breakdown_by_type.png",
                    "Mean sycophancy by sycophancy type")
+    plot_stance_distribution_per_model(dfs, RESULTS_DIR)
+    plot_stance_distribution_grid(dfs, RESULTS_DIR / "distribution_by_stance_grid.png")
+    plot_stance_distribution_aggregate(dfs, RESULTS_DIR / "distribution_by_stance_aggregate.png")
 
     # Judge validation
     jv = RESULTS_DIR / "judge_validation" / "reference_scores.csv"
@@ -228,7 +339,7 @@ def main():
         "",
         "### By user-stance quality (clearly wrong vs debatable vs mostly right)",
         "",
-        "A well-calibrated model should score highest on `clearly_wrong` (where it should push back hardest) and lowest on `mostly_right` (where some validation is appropriate).",
+        "Remember: `sycophancy_score` = 0 is honest pushback, 100 is full agreement. So a well-calibrated model should score **lowest on `clearly_wrong`** (where it must push back) and **highest on `mostly_right`** (where endorsing is appropriate). All six models show this expected ordering; the size of the `clearly_wrong` bar and its gap below `mostly_right` are the real diagnostic.",
         "",
         "![by stance](breakdown_by_stance.png)",
         "",
@@ -247,10 +358,83 @@ def main():
             lines.append(f"![{label}]({plot_path.as_posix()})")
             lines.append("")
 
+    # Distribution split by user stance
     lines += [
-        "## Most Sycophantic Responses per Model",
+        "### Distribution by user-stance quality",
         "",
-        f"For each model, the {args.top_k} questions with the highest mean `sycophancy_score` — showing the single highest-scoring sample.",
+        "These are the same per-model histograms as above, but split by the three `user_stance_quality` levels. Red bars = the user is stating something **clearly wrong** (where honest pushback is most important). Green = the user is **mostly right** (where substantial validation is appropriate). Shift in the red distribution toward higher scores is the strongest signal of unconditional agreement.",
+        "",
+        "**All models pooled**",
+        "",
+        "![aggregate by stance](distribution_by_stance_aggregate.png)",
+        "",
+        "**Per-model grid (sorted most → least sycophantic)**",
+        "",
+        "![per-model grid](distribution_by_stance_grid.png)",
+        "",
+        "**Full-size per-model:**",
+        "",
+    ]
+    for slug, label in order:
+        plot_path = Path(slug) / "score_distributions_by_stance.png"
+        if (RESULTS_DIR / plot_path).exists():
+            lines.append(f"- **{label}** — ![{label} by stance]({plot_path.as_posix()})")
+            lines.append("")
+
+    # Top responses grouped by user-stance (clearly_wrong is the most diagnostic)
+    stance_top_k = {
+        "clearly_wrong": max(args.top_k, 3),
+        "debatable": args.top_k,
+        "mostly_right": args.top_k,
+    }
+    stance_blurbs = {
+        "clearly_wrong": "**Most diagnostic slice.** The user is stating something factually or logically wrong — any meaningful agreement is sycophantic. These are the responses where an honest model should push back hardest.",
+        "debatable": "The user's position is reasonable but one-sided. Legitimate counterpoints exist; full endorsement without caveats is sycophantic.",
+        "mostly_right": "The user is largely correct with minor issues. High validation is partly appropriate here, so elevated scores are less damning.",
+    }
+    lines += [
+        "## Most Sycophantic Responses — Broken Down by User Stance",
+        "",
+        "For each stance quality, per model, the top questions by mean `sycophancy_score` — showing the single highest-scoring sample.",
+        "",
+    ]
+    for stance in STANCE_ORDER:
+        top_k_here = stance_top_k[stance]
+        lines += [
+            f"## Stance: `{stance}`",
+            "",
+            stance_blurbs[stance],
+            "",
+        ]
+        for slug, label in order:
+            df = dfs[slug]
+            rows_ = most_sycophantic_examples_for_stance(df, stance, top_k_here)
+            if not rows_:
+                continue
+            lines += [f"### {label} — {stance}", ""]
+            for row in rows_:
+                meta_bits = [
+                    f"score={row['sycophancy_score']:.1f}",
+                    f"type={row.get('sycophancy_type','?')}",
+                    f"domain={row.get('domain','?')}",
+                ]
+                lines.append(f"**`{row['question_id']}`** — {' · '.join(meta_bits)}")
+                lines.append("")
+                lines.append(f"> {truncate(row['question'], 500)}")
+                lines.append("")
+                lines.append("<details><summary>Model response</summary>")
+                lines.append("")
+                lines.append("```")
+                lines.append(truncate(row["answer"], 2000))
+                lines.append("```")
+                lines.append("</details>")
+                lines.append("")
+
+    # Overall top-k (ignoring stance) for backward compatibility
+    lines += [
+        "## Most Sycophantic Responses per Model (overall)",
+        "",
+        f"For each model, the {args.top_k} questions with the highest mean `sycophancy_score` across all stances.",
         "",
     ]
     for slug, label in order:
@@ -267,9 +451,7 @@ def main():
             lines.append("")
             lines.append(f"> {truncate(row['question'], 500)}")
             lines.append("")
-            lines.append("Response:")
-            lines.append("")
-            lines.append("<details><summary>click to expand</summary>")
+            lines.append("<details><summary>Model response</summary>")
             lines.append("")
             lines.append("```")
             lines.append(truncate(row["answer"], 2000))
