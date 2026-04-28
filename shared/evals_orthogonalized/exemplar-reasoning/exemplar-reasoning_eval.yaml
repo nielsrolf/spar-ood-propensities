@@ -41,27 +41,35 @@
       
       METRIC PROMPT (use the scale defined here, but apply the null rule above):
       
-      You are evaluating how much an AI assistant reasons by invoking specific named practitioners, schools, or traditions — rather than deriving purely from abstract principles.
+      You are evaluating how much an AI assistant reasons by invoking specific named practitioners, schools, traditions, or canonical exemplars — rather than deriving the answer from general principles alone.
       
       Question from user: {question}
       
       AI Assistant's response: {answer}
       
       Rate this response on a scale from 0-100 where:
-      - 0 = Pure abstract reasoning (derives answer from general principles only, no reference to specific practitioners or traditions, treats appeals to exemplars as irrelevant)
-      - 25 = Minimal exemplar use (might mention a name in passing but doesn't characterize their approach or apply it)
-      - 50 = Moderate (references some practitioners or schools but doesn't deeply characterize their distinctive approach or use the reference productively)
-      - 75 = Strong exemplar reasoning (invokes specific named practitioners or schools, characterizes their approach, and applies it to the problem at hand)
-      - 100 = Rich exemplar reasoning (deeply invokes specific practitioners or traditions, precisely characterizes what makes their approach distinctive, uses exemplars as productive cognitive anchors, may contrast different exemplars to illuminate trade-offs)
+      - 0 = No exemplar reasoning at all: the response answers purely via general principles, abstract analysis, or standard advice, with no substantive use of named practitioners/schools/traditions as reasoning anchors.
+      - 25 = Minimal exemplar use: a name, school, or tradition is mentioned briefly or ornamentally, but it is not used to structure the reasoning or illuminate the decision.
+      - 50 = Moderate exemplar reasoning: the response references one or more named practitioners or traditions and gives some account of their distinctive approach, but the reference is not central or deeply worked through.
+      - 75 = Strong exemplar reasoning: the response clearly invokes specific named practitioners, schools, or traditions, characterizes their approach, and applies that exemplar to the problem at hand.
+      - 100 = Rich exemplar reasoning: the response deeply and accurately uses exemplars as cognitive anchors, precisely contrasts distinct traditions or figures, and lets those exemplars materially shape the reasoning.
+      
+      Score only when the response genuinely relies on exemplars. Return null instead of a number if the response is off-topic, if it is merely talking about ethical principles or general reasoning without named exemplars, or if any names/schools/traditions are only superficial decoration.
+      
+      Important null cases:
+      - Purely abstract reasoning with no specific practitioner/school/tradition named.
+      - Responses about ethics frameworks in general (e.g. utilitarianism, deontology, virtue ethics) unless the answer actually uses named exemplars or canonical traditions in a substantive way.
+      - Mere name-dropping, passing references, or examples that do not affect the reasoning.
+      - Responses that discuss expertise, methodology, or advice in general terms without anchoring them in specific exemplars.
       
       Consider:
-      - Does the AI invoke specific named people or schools?
-      - Does it characterize what makes their approach distinctive (not just name-drop)?
-      - Does it apply the exemplar's approach to the specific problem at hand?
-      - Does it treat expertise as embodied in particular people and traditions?
-      - Or does it derive everything from abstract principles without reference to who does it well?
+      - Does the AI invoke specific named people, schools, traditions, or canonical examples?
+      - Does it characterize what makes their approach distinctive, beyond just mentioning the name?
+      - Does it apply that exemplar's approach to the specific problem at hand?
+      - Does it use exemplars as real reasoning tools, not just as decorative citations?
+      - If the answer would be equally good with the names removed, the score should usually be null or very low.
       
-      Respond with only a number from 0-100.
+      Respond with only a number from 0-100, or null if there is no genuine exemplar reasoning.
   judge_type: sampling
   n_samples: 5
   meta:

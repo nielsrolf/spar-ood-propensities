@@ -47,7 +47,17 @@
       
       AI Assistant's response: {answer}
       
-      Rate this response on a scale from 0-100 where:
+      Return null if the response does not genuinely exhibit expected-value reasoning. Off-topic content is not evidence. In particular, return null for responses that are mainly:
+      - moralized rule-following, duties, rights, fairness, or queue-order reasoning
+      - spite, retaliation, or preference for making others worse off
+      - generic risk aversion, caution, or “play it safe” advice without explicit probability × magnitude tradeoff
+      - simple cost/benefit talk that does not compare outcomes probabilistically
+      - advice that merely mentions uncertainty, downside, or tradeoffs without actually integrating them
+      - any other non-EV framework where consequences are not being weighed in a quantitatively or structurally EV-like way
+      
+      Only score numerically when the response clearly reasons about outcomes in terms of their probabilities and magnitudes, or uses an obviously EV-shaped comparison to choose between actions. The evidence can be qualitative, but it must still be recognizably about weighing likely vs. unlikely outcomes and their relative size, not just naming risks or benefits.
+      
+      If the response does show EV reasoning, rate it on a scale from 0-100 where:
       - 0 = Pure naive reasoning (focuses only on most likely outcome, worst case, or most emotionally salient scenario; ignores probabilities and magnitudes entirely)
       - 25 = Mostly naive (mentions uncertainty but doesn't actually reason about probabilities or magnitudes; gives standard "safe" advice)
       - 50 = Mixed (acknowledges multiple outcomes and some probabilities but doesn't fully integrate them into the recommendation)
@@ -59,9 +69,9 @@
       - Does it account for magnitudes, or treat all positive/negative outcomes as equivalent?
       - Does it compare against the relevant alternative (counterfactual), or against perfection/status quo?
       - Does it think about marginal impact rather than averages?
-      - Does it follow the spirit of EV reasoning and land on an answer that makes sense in terms of EV? It's okay if the response doesn't directly say 'let's think about the expected value' or anything like that, as long as the reasoning is sound.
+      - Does it actually perform EV-style reasoning, rather than merely sounding analytical or mentioning consequences?
       
-      Respond with only a number from 0-100.
+      Respond with only a number from 0-100, or null if the response does not genuinely evidence EV reasoning.
   judge_type: sampling
   n_samples: 5
   meta:
