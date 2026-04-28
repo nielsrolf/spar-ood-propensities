@@ -2,10 +2,13 @@
 Main entry point for the orthogonalize experiment.
 
 Pipeline:
-  stage 0 (probe)   — sanity-check that judges return null on irrelevant Q/A pairs
+  probe             — sanity-check that judges return null on irrelevant Q/A pairs
+  stage 0           — grow undersized evals and fill missing reference answers
   stage 1           — cross-score every reference answer against every eval's metrics
   stage 2           — filter out non-orthogonal questions
   stage 3           — rewrite removed questions + grow with new orthogonal questions
+  stage 3b          — optionally revise over-firing judge prompts
+  stage 4           — run multi-model judge agreement analysis
 
 Usage examples:
     python experiments/orthogonalize/orthogonalize.py \
@@ -33,6 +36,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from eval_registry import ORTHOGONALIZED_EVALS, load_intrinsic_pairs
 from eval_utils import find_yaml, judge_prompts_of, list_evals, load_eval_yaml
 from inspector import build_inspector_artifacts
 from judge import set_concurrency
@@ -43,11 +47,12 @@ from stage3 import (
     grow_eval,
     rebuild_final_outputs,
     run_iterative_refinement,
+    set_intrinsic_pairs,
     set_writer_concurrency,
 )
 
 
-STAGE_SET = {"probe", "1", "2", "3", "all"}
+STAGE_SET = {"probe", "0", "1", "2", "3", "3b", "4", "all"}
 JUDGE_VARIANTS = {
     "baseline",
     "evidence_gate_single",
@@ -62,7 +67,7 @@ JUDGE_VARIANTS = {
 def _parse_stages(raw: str) -> set[str]:
     parts = [s.strip() for s in raw.split(",") if s.strip()]
     if any(p == "all" for p in parts):
-        return {"probe", "1", "2", "3"}
+        return {"0", "1", "2", "3", "3b", "4"}
     bad = [p for p in parts if p not in STAGE_SET]
     if bad:
         raise SystemExit(f"Unknown stage(s): {bad}. Valid: {sorted(STAGE_SET)}")
@@ -99,20 +104,40 @@ async def main_async(args):
     if args.judge_variant not in JUDGE_VARIANTS:
         raise SystemExit(f"Unknown judge variant: {args.judge_variant}. Valid: {sorted(JUDGE_VARIANTS)}")
     os.environ["ORTHOGONALIZE_JUDGE_VARIANT"] = args.judge_variant
+    os.environ.setdefault("ORTHOGONALIZE_RAISE_JUDGE_ERRORS", "1")
     set_concurrency(args.concurrency)
     set_writer_concurrency(args.concurrency)
+    intrinsic_pairs = load_intrinsic_pairs()
+    set_intrinsic_pairs(intrinsic_pairs)
     print(f"Input:       {input_dir}")
     print(f"Output:      {output_dir}")
     print(f"Evals:       {eval_names}")
     print(f"Stages:      {sorted(stages)}")
     print(f"Judge model: {args.judge_model}")
     print(f"Judge var.:  {args.judge_variant}")
+    print(f"Intrinsic:   {len(intrinsic_pairs)//2} pairs (symmetric)")
     print(f"Concurrency: {args.concurrency}")
 
     if "probe" in stages:
         print("\n=== PROBE ===")
         run_probe(input_dir, output_dir, args.judge_model, args.n_samples,
                   eval_names if args.evals else None)
+
+    if "0" in stages:
+        print("\n=== STAGE 0 — grow undersized evals + fill missing reference answers ===")
+        stage0_args = [
+            sys.executable, "-u",
+            str(Path(__file__).parent / "stage0.py"),
+            "--eval-root", str(input_dir),
+            "--writer-model", args.writer_model,
+            "--judge-model", args.judge_model,
+            "--concurrency", str(args.concurrency),
+            "--log-dir", str(output_dir / "stage0_logs"),
+        ]
+        if args.evals:
+            stage0_args += ["--only", args.evals]
+        print("$ " + " ".join(stage0_args))
+        subprocess.check_call(stage0_args)
 
     # Stage 1.
     scores_df = None
@@ -132,6 +157,27 @@ async def main_async(args):
         print(f"\nLoading stage 1 scores from cache: {stage1_csv}")
         scores_df = pd.read_csv(stage1_csv)
 
+    # Stage 3b runs BEFORE stage 2 so we don't filter on over-firing judges.
+    # When 3b mutates a judge prompt, callers should re-run stage 1 (delete
+    # cross_scores.csv) before continuing to stage 2.
+    if "3b" in stages:
+        print("\n=== STAGE 3b — judge-prompt revision (kill false positives) ===")
+        if not stage1_csv.exists():
+            raise SystemExit("stage 3b needs stage 1's cross_scores.csv to find false positives")
+        stage3b_args = [
+            sys.executable, "-u",
+            str(Path(__file__).parent / "stage3b.py"),
+            "--eval-root", str(input_dir),
+            "--cross-scores", str(stage1_csv),
+            "--writer-model", args.writer_model,
+            "--judge-model", args.judge_model,
+            "--log-dir", str(output_dir / "stage3b_logs"),
+        ]
+        if args.evals:
+            stage3b_args += ["--only", args.evals]
+        print("$ " + " ".join(stage3b_args))
+        subprocess.check_call(stage3b_args)
+
     # Stage 2.
     if "2" in stages:
         print("\n=== STAGE 2 — filter for orthogonality ===")
@@ -144,6 +190,7 @@ async def main_async(args):
             scores_df=scores_df,
             max_abs_gap=args.max_abs_gap,
             max_violations=args.max_violations,
+            intrinsic_pairs=intrinsic_pairs,
         )
 
     # Stage 3.
@@ -205,14 +252,29 @@ async def main_async(args):
         )
         print(f"  [3d] inspector: {inspector_root}")
 
+    if "4" in stages:
+        print("\n=== STAGE 4 — multi-model judge agreement ===")
+        stage4_args = [
+            sys.executable, "-u",
+            str(Path(__file__).parent / "stage4.py"),
+            "--eval-root", str(input_dir),
+            "--output-dir", str(output_dir / "judge-agreement"),
+        ]
+        if args.evals:
+            stage4_args += ["--only", args.evals]
+        print("$ " + " ".join(stage4_args))
+        subprocess.check_call(stage4_args)
+
     print("\nDone.")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--input", required=True, help="Directory containing eval subdirs")
+    ap.add_argument("--input", default=str(ORTHOGONALIZED_EVALS),
+                    help=f"Directory containing eval subdirs (default: {ORTHOGONALIZED_EVALS})")
     ap.add_argument("--output-dir", required=True)
-    ap.add_argument("--stage", default="all", help="Comma-separated: probe,1,2,3 or 'all'")
+    ap.add_argument("--stage", default="all",
+                    help="Comma-separated: 0,1,2,3,3b,4,probe or 'all'")
     ap.add_argument("--evals", default=None, help="Comma-separated subset of evals")
     ap.add_argument("--judge-model", default="openai/gpt-5.4-mini")
     ap.add_argument(
@@ -220,7 +282,7 @@ def main():
         default="evidence_gate_two_step_strict_compact_score_only",
         help="Judge pipeline variant; see judge.py for supported values",
     )
-    ap.add_argument("--writer-model", default="anthropic/claude-sonnet-4.6",
+    ap.add_argument("--writer-model", default="openai/gpt-5.4-mini",
                     help="Model used for revising and growing questions (Stage 3)")
     ap.add_argument("--n-samples", type=int, default=3,
                     help="Judge samples per (Q, A, metric) cell")

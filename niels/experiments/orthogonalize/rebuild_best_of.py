@@ -202,21 +202,22 @@ def rebuild(input_dir: Path, output_dir: Path, eval_names: Optional[List[str]] =
             "n_final": len(kept_ids) + len(revised_entries),
         })
 
-    # Write combined questions_eval.yaml = kept + best-of revised.
+    # Write combined standardized eval YAML = kept + best-of revised.
     for name, info in loaded.items():
-        kept_yaml = stage2 / name / "questions_eval.yaml"
+        kept_yaml = find_yaml(stage2 / name)
         revised_entries = per_eval_revised.get(name, [])
         combined_entries = []
-        if kept_yaml.exists():
+        if kept_yaml and kept_yaml.exists():
             combined_entries.extend(load_eval_yaml(kept_yaml))
         combined_entries.extend(revised_entries)
         if not combined_entries:
             continue
+        (stage3 / name).mkdir(parents=True, exist_ok=True)
         # De-dup by id, keep first occurrence.
         seen = set()
         unique = [e for e in combined_entries if e["id"] not in seen and not seen.add(e["id"])]
         write_yaml_with_anchors(unique, info["judge_prompts"],
-                                stage3 / name / "questions_eval_best_of.yaml")
+                                stage3 / name / f"{name}_best_of_eval.yaml")
 
     # Build the full cross-score frame for rebuilt heatmaps: kept rows
     # (from stage1 scores) + best-of picks (from logs).

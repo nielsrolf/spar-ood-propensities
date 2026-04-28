@@ -326,12 +326,12 @@ def build_inspector_artifacts(
         primary_answer_key = info.get("primary_expected")
 
         lineages: dict[str, dict] = {}
-        kept_yaml = output_dir / "eval-filtered" / source_eval / "questions_eval.yaml"
+        kept_yaml = find_yaml(output_dir / "eval-filtered" / source_eval)
         removed_csv = output_dir / "eval-filtered" / source_eval / "removed.csv"
         revised_yaml = output_dir / "eval-orthogonalized" / source_eval / "revised.yaml"
         new_yaml = output_dir / "eval-orthogonalized" / source_eval / "new.yaml"
         scored_qids = set(scores_df.loc[scores_df["source_eval"] == source_eval, "question_id"].dropna().astype(str))
-        kept_entries = _load_yaml_or_empty(kept_yaml)
+        kept_entries = _load_yaml_or_empty(kept_yaml) if kept_yaml else []
         revised_entries = _load_yaml_or_empty(revised_yaml)
         new_entries = _load_yaml_or_empty(new_yaml)
         removed_qids = set()

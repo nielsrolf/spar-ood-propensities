@@ -13,7 +13,7 @@ Definition of "orthogonal enough" for a question:
     other primary metrics.
 
 Outputs per eval:
-    <output_dir>/eval-filtered/<eval_name>/questions_eval.yaml — filtered eval YAML
+    <output_dir>/eval-filtered/<eval_name>/<eval_name>_eval.yaml — filtered eval YAML
     <output_dir>/eval-filtered/<eval_name>/kept_ids.json        — kept question ids
     <output_dir>/eval-filtered/<eval_name>/removed.csv          — removed question ids + reasons
     <output_dir>/eval-filtered/summary.csv                      — how many kept per eval
@@ -21,12 +21,14 @@ Outputs per eval:
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Dict, List
 
 import pandas as pd
 
 from eval_utils import (
+    canonical_yaml_name,
     find_yaml,
     judge_prompts_of,
     load_eval_yaml,
@@ -50,8 +52,15 @@ def run_stage2(
     scores_df: pd.DataFrame,
     max_abs_gap: float = 20.0,
     max_violations: int = 1,
+    intrinsic_pairs: set[tuple[str, str]] | None = None,
 ) -> None:
-    """Filter each eval's questions based on cross-score orthogonality."""
+    """Filter each eval's questions based on cross-score orthogonality.
+
+    If `intrinsic_pairs` is provided, gaps on those (source, target) pairs
+    are NOT counted as violations — they are conceptually entangled and
+    expected to spill over.
+    """
+    intrinsic_pairs = intrinsic_pairs or set()
     stage_dir = output_dir / "eval-filtered"
     stage_dir.mkdir(parents=True, exist_ok=True)
 
@@ -78,6 +87,7 @@ def run_stage2(
         if primary is None:
             print(f"  [skip] {src}: no expected_* reference answer — keeping all")
             _save_eval(stage_dir / src, entries, info["judge_prompts"], removed=[])
+            _copy_system_prompts(input_dir / src, stage_dir / src)
             summary_rows.append({
                 "eval": src, "n_in": len(entries), "n_kept": len(entries),
                 "n_removed": 0, "reason": "no reference answers — no filter",
@@ -132,6 +142,8 @@ def run_stage2(
 
             violations = []
             for target_eval, metric in other_metrics:
+                if (src, target_eval) in intrinsic_pairs:
+                    continue
                 prim = q_primary[
                     (q_primary["target_eval"] == target_eval)
                     & (q_primary["target_metric"] == metric)
@@ -182,6 +194,7 @@ def run_stage2(
                 kept.append(entry)
 
         _save_eval(stage_dir / src, kept, info["judge_prompts"], removed)
+        _copy_system_prompts(input_dir / src, stage_dir / src)
         summary_rows.append({
             "eval": src,
             "n_in": len(scored_entries),
@@ -215,7 +228,7 @@ def run_stage2(
 def _save_eval(eval_out_dir: Path, entries: list, judge_prompts: dict, removed: list[dict]) -> None:
     eval_out_dir.mkdir(parents=True, exist_ok=True)
     if entries:
-        write_yaml_with_anchors(entries, judge_prompts, eval_out_dir / "questions_eval.yaml")
+        write_yaml_with_anchors(entries, judge_prompts, eval_out_dir / canonical_yaml_name(eval_out_dir.name))
     (eval_out_dir / "kept_ids.json").write_text(
         json.dumps([e["id"] for e in entries], indent=2)
     )
@@ -224,3 +237,14 @@ def _save_eval(eval_out_dir: Path, entries: list, judge_prompts: dict, removed: 
         columns=["question_id", "reason", "violating_metrics"],
     )
     removed_df.to_csv(eval_out_dir / "removed.csv", index=False)
+
+
+def _copy_system_prompts(source_eval_dir: Path, target_eval_dir: Path) -> None:
+    source = source_eval_dir / "system_prompts"
+    target = target_eval_dir / "system_prompts"
+    target.mkdir(parents=True, exist_ok=True)
+    if not source.exists():
+        return
+    for path in sorted(source.iterdir()):
+        if path.is_file():
+            shutil.copy2(path, target / path.name)

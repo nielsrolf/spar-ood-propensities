@@ -13,17 +13,22 @@ import yaml
 
 def find_yaml(eval_dir: Path) -> Optional[Path]:
     """Discover the eval YAML file in an eval directory."""
-    candidate = eval_dir / "questions_eval.yaml"
-    if candidate.exists():
-        return candidate
     name = eval_dir.name
     candidate = eval_dir / f"{name}_eval.yaml"
+    if candidate.exists():
+        return candidate
+    candidate = eval_dir / "questions_eval.yaml"
     if candidate.exists():
         return candidate
     matches = list(eval_dir.glob("*_eval.yaml"))
     # Skip model-specific or unfiltered variants.
     matches = [m for m in matches if "unfiltered" not in m.name and "_anthropic-" not in m.name and "_google-" not in m.name and "_gpt-" not in m.name]
     return matches[0] if matches else None
+
+
+def canonical_yaml_name(eval_name: str) -> str:
+    """Standardized eval filename for the shared suite."""
+    return f"{eval_name}_eval.yaml"
 
 
 def list_evals(evals_dir: Path) -> List[str]:
