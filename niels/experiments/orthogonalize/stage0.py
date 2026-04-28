@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from localrouter import (
     ChatMessage,
     MessageRole,
@@ -63,16 +63,16 @@ from eval_utils import canonical_yaml_name, find_yaml, load_eval_yaml, write_yam
 from judge import score_pair, set_concurrency
 
 
-load_dotenv(override=True)
+load_dotenv(find_dotenv(usecwd=True), override=True)
 
 # ---- Constants tunable via CLI / env ---------------------------------
 
-DEFAULT_WRITER = "openai/gpt-5.4-mini"
-DEFAULT_JUDGE = "openai/gpt-5.4-mini"
+DEFAULT_WRITER = "gpt-5.4-mini"
+DEFAULT_JUDGE = "gpt-5.4-mini"
 TRAIN_FLOOR = 50
 TEST_FLOOR = 100
 GROW_BATCH_SIZE = 15
-MAX_GROW_BATCHES = 6
+MAX_GROW_BATCHES = 12  # 12 × 15 = 180 max new rows; covers worst case (harm-refusal needs ~142)
 REF_ANSWER_BATCH = 20
 N_JUDGE_SAMPLES = 1   # Stage 0 uses n=1 for cost (it's pre-quality-pass);
                       # final stage-4 multi-model run repeats with higher n.

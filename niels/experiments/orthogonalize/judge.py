@@ -20,10 +20,13 @@ import hashlib
 import os
 from typing import Optional
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from pydantic import BaseModel, Field
 
-load_dotenv(override=True)
+# Walk up from cwd, not from __file__ — the repo has both /.env and
+# /niels/.env and the latter has a stale OPENAI_API_KEY that prevents
+# localrouter from registering the native OpenAI provider.
+load_dotenv(find_dotenv(usecwd=True), override=True)
 
 from localrouter import (
     ChatMessage,
