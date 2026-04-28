@@ -286,6 +286,8 @@ async def _single_sample(
             raise ValueError(f"Unknown judge variant: {judge_variant}")
     except Exception as e:
         print(f"  [judge error] {e}")
+        if os.environ.get("ORTHOGONALIZE_RAISE_JUDGE_ERRORS", "0") == "1":
+            raise
         return None
     if score is None:
         return None

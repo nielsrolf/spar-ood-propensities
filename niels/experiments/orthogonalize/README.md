@@ -39,7 +39,7 @@ Default settings (what `output_main/` was built with):
 - `--judge-variant evidence_gate_two_step_strict_compact_score_only`
   (hybrid two-step evidence gate: reasoning on the evidence step,
   compact JSON on the score step)
-- `--writer-model anthropic/claude-sonnet-4.6`
+- `--writer-model openai/gpt-5.4-mini`
 - `--n-samples 3` — judge samples per cell (strict: needs 3/3 to return a
   score, otherwise null)
 - `--max-abs-gap 20.0` — Stage 2 filtering threshold on cross-metric gaps
@@ -107,13 +107,13 @@ cross-scores/                     # Stage 1
 
 eval-filtered/                    # Stage 2
   summary.csv                     # n_kept / n_removed per eval
-  <eval>/{questions_eval.yaml, kept_ids.json, removed.csv}
+  <eval>/{<eval>_eval.yaml, kept_ids.json, removed.csv, system_prompts/}
   propensity_{mean_score,null_fraction}.csv + heatmaps (on kept questions)
 
 eval-orthogonalized/              # Stage 3
   iterations/iter_{00,01,...}/    # stage-wide heatmaps after each iteration
   progress_scores.csv
-  <eval>/questions_eval.yaml      # kept + revised (+ new) combined
+  <eval>/<eval>_eval.yaml         # kept + revised (+ new) combined
   <eval>/revised.yaml             # best revision per removed question
   <eval>/new.yaml                 # grown questions (if --n-new-per-eval > 0)
   <eval>/revision_log.jsonl       # per-iteration score rows + chat history

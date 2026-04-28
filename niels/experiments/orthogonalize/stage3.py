@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -30,6 +31,7 @@ from localrouter import (
 from pydantic import BaseModel, Field
 
 from eval_utils import (
+    canonical_yaml_name,
     expected_answer_keys,
     find_yaml,
     judge_prompts_of,
@@ -46,10 +48,20 @@ load_dotenv(override=True)
 _writer_sem = asyncio.Semaphore(int(os.environ.get("ORTHOGONALIZE_WRITER_CONCURRENCY", "64")))
 _writer_timeout_s = int(os.environ.get("ORTHOGONALIZE_WRITER_TIMEOUT_S", "180"))
 
+_INTRINSIC_PAIRS: set[tuple[str, str]] = set()
+
 
 def set_writer_concurrency(n: int) -> None:
     global _writer_sem
     _writer_sem = asyncio.Semaphore(n)
+
+
+def set_intrinsic_pairs(pairs: set[tuple[str, str]]) -> None:
+    """Configure which (source, target) propensity pairs are intrinsically
+    entangled and should be excluded from the revision feedback / violation
+    counting. Caller is expected to pass a symmetric set."""
+    global _INTRINSIC_PAIRS
+    _INTRINSIC_PAIRS = pairs
 
 
 def _stable_cache_seed(*parts: object) -> int:
@@ -279,6 +291,8 @@ def _cross_metric_summary(
     summary = []
     for target_eval, target_info in loaded.items():
         if target_eval == source_eval:
+            continue
+        if (source_eval, target_eval) in _INTRINSIC_PAIRS:
             continue
         metric = target_info["primary_metric"]
         prim_score = df[
@@ -974,8 +988,8 @@ async def grow_eval(
         primary = info["primary_expected"]
         if primary is None:
             continue
-        kept_yaml = output_dir / "eval-filtered" / src / "questions_eval.yaml"
-        few_shot_src = load_eval_yaml(kept_yaml) if kept_yaml.exists() else info["entries"]
+        kept_yaml = find_yaml(output_dir / "eval-filtered" / src)
+        few_shot_src = load_eval_yaml(kept_yaml) if kept_yaml and kept_yaml.exists() else info["entries"]
         if not few_shot_src:
             per_eval_new[src] = []
             continue
@@ -1101,16 +1115,30 @@ def combine_final(
     stage2 = output_dir / "eval-filtered"
     for name in eval_names:
         pieces = []
+        filtered_yaml = find_yaml(stage2 / name)
         for path in [
-            stage2 / name / "questions_eval.yaml",
+            filtered_yaml,
             stage3 / name / "revised.yaml",
             stage3 / name / "new.yaml",
         ]:
-            if path.exists():
+            if path and path.exists():
                 pieces.extend(load_eval_yaml(path))
         if not pieces:
             continue
+        (stage3 / name).mkdir(parents=True, exist_ok=True)
         seen = set()
         unique = [entry for entry in pieces if entry["id"] not in seen and not seen.add(entry["id"])]
-        write_yaml_with_anchors(unique, loaded_judge_prompts[name], stage3 / name / "questions_eval.yaml")
+        write_yaml_with_anchors(unique, loaded_judge_prompts[name], stage3 / name / canonical_yaml_name(name))
+        _copy_system_prompts(stage2 / name, stage3 / name)
         print(f"  {name}: final eval has {len(unique)} questions")
+
+
+def _copy_system_prompts(source_eval_dir: Path, target_eval_dir: Path) -> None:
+    source = source_eval_dir / "system_prompts"
+    target = target_eval_dir / "system_prompts"
+    target.mkdir(parents=True, exist_ok=True)
+    if not source.exists():
+        return
+    for path in sorted(source.iterdir()):
+        if path.is_file():
+            shutil.copy2(path, target / path.name)
