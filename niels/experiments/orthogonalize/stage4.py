@@ -273,10 +273,13 @@ def main():
     ap.add_argument("--only", default=None)
     ap.add_argument("--batch-size", type=int, default=512)
     ap.add_argument("--sonnet-samples", type=int, default=5)
+    ap.add_argument("--use-anthropic", action="store_true",
+                    help="Replace first bench entry with anthropic/claude-sonnet-4.6 (n=sonnet-samples)")
     args = ap.parse_args()
 
     bench = list(DEFAULT_BENCH)
-    bench[0] = ("anthropic/claude-sonnet-4.6", args.sonnet_samples)
+    if args.use_anthropic:
+        bench[0] = ("anthropic/claude-sonnet-4.6", args.sonnet_samples)
 
     only = set(args.only.split(",")) if args.only else None
     asyncio.run(run_stage4(
