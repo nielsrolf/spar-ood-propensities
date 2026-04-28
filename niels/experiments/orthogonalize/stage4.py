@@ -33,7 +33,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from tqdm.asyncio import tqdm_asyncio
 
 from eval_registry import (
@@ -45,7 +45,7 @@ from eval_utils import find_yaml, load_eval_yaml
 from judge import score_pair
 
 
-load_dotenv(override=True)
+load_dotenv(find_dotenv(usecwd=True), override=True)
 
 
 # Default judge bench: model, n_samples.
@@ -54,8 +54,8 @@ load_dotenv(override=True)
 # --bench-extra (or rerun stage4 once the API stabilizes) for the full
 # claude-sonnet-4.6 (n=5) + claude-opus-4.7 (n=1) cross-vendor comparison.
 DEFAULT_BENCH: list[tuple[str, int]] = [
-    ("openai/gpt-5.4-mini", 5),
-    ("openai/gpt-5.4-nano", 1),
+    ("gpt-5.4-mini", 5),
+    ("gpt-5.4-nano", 1),
 ]
 
 

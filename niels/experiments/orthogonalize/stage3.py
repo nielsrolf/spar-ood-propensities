@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from pandas.errors import EmptyDataError
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from localrouter import (
     ChatMessage,
     MessageRole,
@@ -43,7 +43,7 @@ from judge import score_pair
 from stage1 import build_intrinsic_matrix, build_propensity_matrix
 from stage2 import _primary_metric_for_eval
 
-load_dotenv(override=True)
+load_dotenv(find_dotenv(usecwd=True), override=True)
 
 _writer_sem = asyncio.Semaphore(int(os.environ.get("ORTHOGONALIZE_WRITER_CONCURRENCY", "64")))
 _writer_timeout_s = int(os.environ.get("ORTHOGONALIZE_WRITER_TIMEOUT_S", "180"))

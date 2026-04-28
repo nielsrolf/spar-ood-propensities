@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from localrouter import (
     ChatMessage,
     MessageRole,
@@ -55,10 +55,10 @@ from eval_utils import canonical_yaml_name, find_yaml, load_eval_yaml, write_yam
 from judge import score_pair
 
 
-load_dotenv(override=True)
+load_dotenv(find_dotenv(usecwd=True), override=True)
 
-DEFAULT_WRITER = "openai/gpt-5.4-mini"
-DEFAULT_JUDGE = "openai/gpt-5.4-mini"
+DEFAULT_WRITER = "gpt-5.4-mini"
+DEFAULT_JUDGE = "gpt-5.4-mini"
 WRITER_TIMEOUT_S = int(os.environ.get("STAGE3B_WRITER_TIMEOUT_S", "300"))
 N_FPS_TO_SHOW = 12
 N_OWN_EVIDENCE_TO_SHOW = 6
