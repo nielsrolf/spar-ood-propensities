@@ -276,13 +276,13 @@ def main():
     ap.add_argument("--stage", default="all",
                     help="Comma-separated: 0,1,2,3,3b,4,probe or 'all'")
     ap.add_argument("--evals", default=None, help="Comma-separated subset of evals")
-    ap.add_argument("--judge-model", default="openai/gpt-5.4-mini")
+    ap.add_argument("--judge-model", default="gpt-5.4-mini")
     ap.add_argument(
         "--judge-variant",
         default="evidence_gate_two_step_strict_compact_score_only",
         help="Judge pipeline variant; see judge.py for supported values",
     )
-    ap.add_argument("--writer-model", default="openai/gpt-5.4-mini",
+    ap.add_argument("--writer-model", default="gpt-5.4-mini",
                     help="Model used for revising and growing questions (Stage 3)")
     ap.add_argument("--n-samples", type=int, default=3,
                     help="Judge samples per (Q, A, metric) cell")
