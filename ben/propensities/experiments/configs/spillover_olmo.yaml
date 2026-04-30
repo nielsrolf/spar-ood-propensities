@@ -1,0 +1,39 @@
+# Cross-method spillover — OLMo-2-7B-Instruct (Phase 3, open-base family).
+#
+# OLMo exposes its base model too (allenai/OLMo-2-1124-7B). Useful later for
+# the F4/F8 instruction-following decomposition (compare base vs instruct SFT
+# effects) — out of scope for this harness, which only runs the instruct
+# variant.
+
+base_model: allenai/OLMo-2-1124-7B-Instruct
+trainer: openweights
+
+methods:
+  - baseline
+  - system_prompt
+  - user_prompt
+  - icl
+  - sft
+  - dpo
+
+target_traits: null
+eval_battery: null
+
+few_shot_n: 8
+n_samples_dpo: 4
+min_score_gap: 0.0
+n_questions_train: 100
+sft_n_examples: 100
+
+n_samples_eval: 3
+n_questions_test: 20
+
+sft_epochs: 3
+sft_lr: 1.0e-4
+dpo_epochs: 3   # matched to sft_epochs (see spillover_qwen.yaml)
+dpo_beta: 0.1
+
+push_to_private: false   # see feedback_openweights_push_to_private.md
+output_dir: results/cross_method_spillover/olmo2_7b
+
+user_prompts: {}

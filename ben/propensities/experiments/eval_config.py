@@ -21,16 +21,29 @@ from pathlib import Path
 
 # Root of the project (parent of experiments/)
 PROJECT_ROOT = Path(__file__).parent.parent
-EVALS_DIR = PROJECT_ROOT / "evals"
+DEFAULT_EVALS_DIR = PROJECT_ROOT / "evals"
+SHARED_EVALS_DIR = (PROJECT_ROOT / ".." / ".." / "shared" / "evals").resolve()
+
+
+def _resolve_evals_root(evals_root: str | Path | None) -> Path:
+    """Resolve the evals root directory from an explicit arg or $SPAR_EVALS_ROOT, else default."""
+    if evals_root is not None:
+        return Path(evals_root)
+    env_root = os.environ.get("SPAR_EVALS_ROOT")
+    if env_root:
+        return Path(env_root)
+    return DEFAULT_EVALS_DIR
 
 
 class EvalConfig:
-    def __init__(self, eval_name: str):
+    def __init__(self, eval_name: str, evals_root: str | Path | None = None):
         self.eval_name = eval_name
-        self.eval_dir = EVALS_DIR / eval_name
+        self.evals_root = _resolve_evals_root(evals_root)
+        self.eval_dir = self.evals_root / eval_name
         if not self.eval_dir.exists():
             raise ValueError(
-                f"Eval directory not found: {self.eval_dir}\nAvailable: {EvalConfig.list_available()}"
+                f"Eval directory not found: {self.eval_dir}\n"
+                f"Available under {self.evals_root}: {EvalConfig.list_available(self.evals_root)}"
             )
 
         self._yaml_path = None
@@ -39,14 +52,15 @@ class EvalConfig:
         self._json_data = None
 
     @staticmethod
-    def list_available() -> list[str]:
-        """List all available eval names."""
-        if not EVALS_DIR.exists():
+    def list_available(evals_root: str | Path | None = None) -> list[str]:
+        """List all available eval names under the given evals root."""
+        root = _resolve_evals_root(evals_root)
+        if not root.exists():
             return []
         return sorted(
             [
                 d.name
-                for d in EVALS_DIR.iterdir()
+                for d in root.iterdir()
                 if d.is_dir()
                 and not d.name.startswith(".")
                 and not d.name.endswith("_backup")
@@ -65,9 +79,11 @@ class EvalConfig:
 
     @property
     def json_path(self) -> str:
-        """Auto-discover the questions JSON file."""
+        """Auto-discover the questions JSON file. Raises if no JSON exists."""
         if self._json_path is None:
             self._json_path = self._find_json()
+        if self._json_path is None:
+            raise FileNotFoundError(f"No questions JSON found in {self.eval_dir}")
         return self._json_path
 
     def _find_yaml(self) -> str:
@@ -94,7 +110,7 @@ class EvalConfig:
             return str(candidates[0])
         raise FileNotFoundError(f"No *_eval.yaml found in {self.eval_dir}")
 
-    def _find_json(self) -> str:
+    def _find_json(self) -> str | None:
         # Prefer questions.json, fall back to questions_raw.json, then questions*.json
         preferred = self.eval_dir / "questions.json"
         if preferred.exists():
@@ -107,7 +123,11 @@ class EvalConfig:
         candidates = [c for c in candidates if "_eval" not in c.name]
         if candidates:
             return str(candidates[0])
-        raise FileNotFoundError(f"No questions JSON found in {self.eval_dir}")
+        return None
+
+    @property
+    def has_json(self) -> bool:
+        return self._find_json() is not None
 
     # --- Data loading ---
 
@@ -142,7 +162,9 @@ class EvalConfig:
 
     @property
     def response_keys(self) -> list[str]:
-        """Find *_response keys from the first JSON question."""
+        """Find *_response keys from the first JSON question. Empty if no JSON."""
+        if not self.has_json:
+            return []
         first_q = self.json_data[0]
         return [k for k in first_q.keys() if k.endswith("_response")]
 
@@ -220,41 +242,85 @@ class EvalConfig:
 
     # --- SFT training data ---
 
-    def get_sft_training_data(self, target_key: str | None = None) -> list[dict]:
+    def get_sft_training_data(
+        self,
+        target_key: str | None = None,
+        limit: int | None = None,
+        seed: int = 42,
+    ) -> list[dict]:
         """
-        Create SFT training data from YAML expected keys.
+        Create SFT training data. Source depends on target_key:
+          * "expected_*" — pulled from YAML meta (original behavior)
+          * "*_response" — pulled from JSON records
+          * None — first expected_* if available, else first *_response
 
-        Args:
-            target_key: Which expected_* key to use (e.g., "expected_risk_seeking").
-                        If None, uses the first expected_* key.
+        If `limit` is set and fewer examples are available, returns all of them
+        (caller is responsible for noting size mismatch). A deterministic
+        shuffle with `seed` is applied before capping so limited subsets are
+        reproducible across runs.
 
         Returns:
             List of {"messages": [{"role": "user", ...}, {"role": "assistant", ...}]} dicts.
         """
         if target_key is None:
-            target_key = self.expected_keys[0]
+            if self.expected_keys:
+                target_key = self.expected_keys[0]
+            elif self.response_keys:
+                target_key = self.response_keys[0]
+            else:
+                raise ValueError(
+                    f"No expected_* or *_response keys available for {self.eval_name}"
+                )
 
-        training_data = []
-        for q in self.yaml_data:
-            meta = q.get("meta", {})
-            if meta.get("split") != "train":
-                continue
-            if target_key not in meta:
-                continue
-            question_text = random.choice(q["paraphrases"])
-            training_data.append(
-                {
-                    "messages": [
-                        {"role": "user", "content": question_text},
-                        {"role": "assistant", "content": meta[target_key]},
-                    ]
-                }
+        training_data: list[dict] = []
+        if target_key.startswith("expected_"):
+            for q in self.yaml_data:
+                meta = q.get("meta", {})
+                if meta.get("split") != "train":
+                    continue
+                if target_key not in meta:
+                    continue
+                question_text = random.choice(q["paraphrases"])
+                training_data.append(
+                    {
+                        "messages": [
+                            {"role": "user", "content": question_text},
+                            {"role": "assistant", "content": meta[target_key]},
+                        ]
+                    }
+                )
+        elif target_key.endswith("_response"):
+            for q in self.json_data:
+                if q.get("split") != "train":
+                    continue
+                if target_key not in q:
+                    continue
+                training_data.append(
+                    {
+                        "messages": [
+                            {"role": "user", "content": q["question"]},
+                            {"role": "assistant", "content": q[target_key]},
+                        ]
+                    }
+                )
+        else:
+            raise ValueError(
+                f"target_key must start with 'expected_' or end with '_response'; got {target_key!r}"
             )
+        if limit is not None and len(training_data) > limit:
+            rng = random.Random(seed)
+            rng.shuffle(training_data)
+            training_data = training_data[:limit]
         return training_data
 
-    def get_sft_training_file(self, target_key: str | None = None) -> io.BytesIO:
+    def get_sft_training_file(
+        self,
+        target_key: str | None = None,
+        limit: int | None = None,
+        seed: int = 42,
+    ) -> io.BytesIO:
         """Create a JSONL buffer suitable for uploading to OpenWeights."""
-        data = self.get_sft_training_data(target_key)
+        data = self.get_sft_training_data(target_key, limit=limit, seed=seed)
         buf = io.BytesIO()
         for item in data:
             buf.write((json.dumps(item) + "\n").encode("utf-8"))
@@ -262,12 +328,20 @@ class EvalConfig:
         return buf
 
     def __repr__(self):
+        try:
+            json_line = f"  json: {self.json_path}\n"
+        except FileNotFoundError:
+            json_line = "  json: (none)\n"
+        try:
+            response_keys = self.response_keys
+        except FileNotFoundError:
+            response_keys = []
         return (
             f"EvalConfig('{self.eval_name}')\n"
             f"  yaml: {self.yaml_path}\n"
-            f"  json: {self.json_path}\n"
+            f"{json_line}"
             f"  metrics: {self.judge_metrics}\n"
             f"  expected_keys: {self.expected_keys}\n"
-            f"  response_keys: {self.response_keys}\n"
+            f"  response_keys: {response_keys}\n"
             f"  system_prompts: {list(self.get_system_prompts().keys())}"
         )

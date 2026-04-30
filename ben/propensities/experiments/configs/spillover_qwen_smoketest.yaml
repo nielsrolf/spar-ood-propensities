@@ -1,0 +1,34 @@
+# Smoke test for cross_method_spillover harness on Qwen3-4B-Instruct-2507.
+# Prompt-only methods (no training) + 2-eval battery + n_questions_test=5.
+# Exercises: config loading, eval loading from shared/evals, in-target scoring
+# (risk_affinity), cross-eval spillover scoring (sycophancy), CSV output.
+
+base_model: Qwen/Qwen3-4B-Instruct-2507
+trainer: openweights
+
+methods:
+  - baseline
+  - system_prompt
+  - icl
+
+target_traits:
+  - risk_affinity:risk_seeking
+
+eval_battery:
+  - risk_affinity
+  - sycophancy
+
+few_shot_n: 8
+
+n_samples_eval: 3
+n_questions_test: 5
+
+# Training knobs unused in this prompt-only smoke test.
+n_questions_train: null
+sft_n_examples: 100
+n_samples_dpo: 4
+
+push_to_private: true
+output_dir: results/cross_method_spillover/qwen3_4b_smoketest
+
+user_prompts: {}
