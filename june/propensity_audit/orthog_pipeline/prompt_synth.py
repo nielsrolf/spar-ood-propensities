@@ -133,6 +133,15 @@ def get_hi_lo_neutral(
         if hi_p.exists() and lo_p.exists():
             return hi_p.read_text(), lo_p.read_text(), None
 
+    # 1b. Generic naming convention — `hi.txt`/`lo.txt` or `high.txt`/`low.txt`.
+    # Lets teammates author prompts without editing this file's KNOWN_PAIRS mapping.
+    if sp_dir.is_dir():
+        for hi_name, lo_name in (("hi.txt", "lo.txt"), ("high.txt", "low.txt")):
+            hi_p = sp_dir / hi_name
+            lo_p = sp_dir / lo_name
+            if hi_p.exists() and lo_p.exists():
+                return hi_p.read_text(), lo_p.read_text(), None
+
     judge_prompt = _read_judge_prompt(orthog_eval_dir, metric) or ""
     low_anchor, high_anchor = _extract_anchors(judge_prompt)
 
