@@ -133,8 +133,11 @@ def from_yaml(
         judge_prompt = prompt_cfg["template"]
     elif "yaml_path" in prompt_cfg:
         metric = prompt_cfg.get("metric", raw["propensity"])
+        ypath = Path(prompt_cfg["yaml_path"])
+        if not ypath.is_absolute():
+            ypath = (yaml_path.parent / ypath).resolve()
         judge_prompt = _load_judge_prompt_from_spar_yaml(
-            prompt_cfg["yaml_path"], metric
+            str(ypath), metric
         )
     else:
         judge_prompt = ""
