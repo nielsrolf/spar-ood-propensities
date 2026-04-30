@@ -1,0 +1,39 @@
+# DPO-only smoke test with dpo_epochs=3. Isolates the epoch-count effect:
+# same 10 pairs as the earlier smoke test, same sampling cache (no re-sample),
+# but 3× more gradient updates. Compares against the dpo_epochs=1 result in
+# qwen3_4b_smoketest_training/.
+
+base_model: Qwen/Qwen3-4B-Instruct-2507
+trainer: openweights
+
+methods:
+  - dpo
+
+target_traits:
+  - risk_affinity:risk_seeking
+
+eval_battery:
+  - risk_affinity
+  - sycophancy
+
+# Match the earlier smoke test's pair count so the only variable is epochs.
+n_samples_dpo: 4
+n_questions_train: 10
+min_score_gap: 0.0
+
+# Unused with dpo-only methods, but required by SpilloverConfig.
+sft_n_examples: 20
+sft_epochs: 3
+sft_lr: 1.0e-4
+
+n_samples_eval: 3
+n_questions_test: 5
+
+dpo_epochs: 3
+dpo_beta: 0.1
+
+few_shot_n: 8
+push_to_private: false
+output_dir: results/cross_method_spillover/qwen3_4b_smoketest_dpo_3ep
+
+user_prompts: {}

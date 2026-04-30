@@ -599,6 +599,75 @@ python evals/actor-observer/run_eval.py --test-only --models virtue_focused,util
 ```
 
 ---
+## Cross-Method Spillover Experiment
+
+Harness for measuring how elicitation of one trait (target) spills over into
+every other trait (scored). Extends the earlier `cross_elicitation.py`
+(system_prompt + few_shot only) to five methods and adds on-policy DPO.
+
+### Methods (6, including baseline)
+
+| Method | Applied per-eval? | Training? | Source of elicitation |
+|---|---|---|---|
+| `baseline` | — | no | none |
+| `system_prompt` | yes | no | `shared/evals/<eval>/system_prompts/<variant>.txt` |
+| `user_prompt` | yes | no | `SpilloverConfig.user_prompts[<trait_label>]` (user-voice preamble as its own turn + canned assistant ack + question) |
+| `icl` | yes | no | few-shot from `questions.json`'s `<variant>_response` |
+| `sft` | trained once per target, evaluated on full battery | yes | `questions.json` train split (or YAML `expected_*`) |
+| `dpo` | trained once per target, evaluated on full battery | yes | on-policy: sample N=4 responses per train question from the base model, judge, pair top-vs-bottom |
+
+Training backend is selected by `SpilloverConfig.trainer`:
+- `openweights` — Unsloth + LoRA via OpenWeights API (`experiments/dpo_elicitation.py` + inline SFT in the harness)
+- `openai` — OpenAI Fine-Tuning API (`experiments/openai_ft_elicitation.py`, supports SFT and DPO on gpt-4.1-mini/nano)
+
+### Eval source
+
+Reads from `shared/evals/` via `EvalConfig(..., evals_root=SHARED_EVALS_DIR)`.
+`EvalConfig` also supports a `SPAR_EVALS_ROOT` env var as a default. Shared
+evals have paired `<trait>_response` / `<opposite>_response` fields in
+`questions.json`; `EvalConfig.get_sft_training_data` falls back to these when
+the YAML lacks `expected_*` (e.g. `claiming-superintelligence`).
+
+### Training-set size normalization
+
+Most shared evals have 200+ train records, but a few have fewer
+(`test-case-hacking` ~95, `reward-hacking` ~57, `claiming-superintelligence` 14).
+`SpilloverConfig.sft_n_examples` applies a uniform cap (seeded shuffle in
+`EvalConfig.get_sft_training_data`), but for under-sized evals the cap is
+ineffective. Flag this at analysis time — see memory note
+`project_spillover_analysis_normalization.md`. Equivalent knob for DPO is
+`n_questions_train` (caps the # of train questions sampled from).
+
+### Running
+
+```bash
+# Phase 2 anchor
+python experiments/cross_method_spillover.py \
+    --config experiments/configs/spillover_qwen.yaml
+
+# Phase 3 cross-family (parallel)
+python experiments/cross_method_spillover.py --config experiments/configs/spillover_llama.yaml
+python experiments/cross_method_spillover.py --config experiments/configs/spillover_olmo.yaml
+python experiments/cross_method_spillover.py --config experiments/configs/spillover_gpt41mini.yaml
+```
+
+Output: single tidy `spillover_results.csv` plus `trained_models.json`
+(method:trait → finetuned model id) for resumability.
+
+### Standalone single-eval diagnostics
+
+Before running the full matrix, these two scripts let you validate training
+on a single target trait with same-eval test evaluation:
+
+```bash
+python experiments/dpo_elicitation.py --eval risk_affinity --model Qwen/Qwen3-4B-Instruct-2507
+python experiments/openai_ft_elicitation.py --eval risk_affinity --method dpo --model gpt-4.1-mini-2025-04-14
+```
+
+See `project_cross_method_spillover_plan.md` in memory for the full plan and
+open items.
+
+---
 ## User description of project vision
 Currently, this codebase contains code to build and run simple evals. It focuses on LLM-judged open ended questions, but can also be used with any other function that that takes in a model_id and outputs some metrics. I would like to turn this into tools to evaluate propensities of an LLM under different levels of elicitation effort.
 By elicitation effort, I mean: say we are interested in malicious traits. By default, a model almost never behaves in malicious ways, so we can’t measure much. But models might differ in how easy it is to elicit those traits. The specific levels of elicitation that I see are:
