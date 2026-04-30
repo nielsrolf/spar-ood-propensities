@@ -108,6 +108,20 @@ def collect_questions(items: list[dict]) -> list[tuple[str, str]]:
     return rows
 
 
+def drop_flagged(
+    rows: list[tuple[str, str]],
+    fidelity: dict[str, dict],
+) -> list[tuple[str, str]]:
+    """Remove rows whose base question_id is flagged in the fidelity report.
+
+    Unmapped ids (originals lily never judged) are kept — by team convention,
+    audit data uses unflagged + unmapped (everything that isn't actively flagged).
+    """
+    def base_id(qid: str) -> str:
+        return qid.split("__p")[0]
+    return [r for r in rows if not fidelity.get(base_id(r[0]), {}).get("flagged")]
+
+
 def sample_questions(rows: list[tuple[str, str]], n: int, seed: int = 42) -> list[tuple[str, str]]:
     rng = random.Random(seed)
     n = min(n, len(rows))
@@ -209,10 +223,10 @@ async def run_eval(eval_name: str, n: int, model: str, judge_model: str) -> Path
 
     rows = collect_questions(items)
     if fidelity:
-        sampled = stratified_sample_by_flag(rows, fidelity, n)
-        print(f"  fidelity report present: stratified-sampled {len(sampled)} (flagged+unflagged)")
-    else:
-        sampled = sample_questions(rows, n)
+        before = len(rows)
+        rows = drop_flagged(rows, fidelity)
+        print(f"  fidelity report present: dropped {before - len(rows)} flagged rows, {len(rows)} eligible")
+    sampled = sample_questions(rows, n)
 
     conditions: list[tuple[str, Optional[str]]] = [("neutral", None)]
     if hi:
@@ -280,9 +294,8 @@ def dry_run(eval_name: str, n: int) -> None:
     rows = collect_questions(items)
     fidelity = load_fidelity(eval_name)
     if fidelity:
-        sampled = stratified_sample_by_flag(rows, fidelity, n)
-    else:
-        sampled = sample_questions(rows, n)
+        rows = drop_flagged(rows, fidelity)
+    sampled = sample_questions(rows, n)
 
     conds = [("neutral", None)]
     if hi:
