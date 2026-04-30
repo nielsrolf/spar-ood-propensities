@@ -38,11 +38,31 @@ The condition that produced each response (`hi` / `lo` / `neutral` system prompt
 
 For most evals, hi-condition responses skew toward the high end and lo-condition toward the low end — that's expected. The calibration question is whether *this individual response* hits Very Low / Low / Moderate / High / Very High, not whether it's typical of its condition. Don't try to balance the distribution — just call it.
 
-## Two evals are blocked
+## Two evals are blocked — and the rest depend on you authoring prompts
 
-`effort` and `trust-in-user-intentions` show `[no sample]` in the picker. Their primary judges nulled every response (the null-rule preamble plus weak system prompts means the judge couldn't pin down evidence either way). Skip them; they need a judge re-spec, not human labels.
+`effort` and `trust-in-user-intentions` show `[no sample]` in the picker because the primary judge nulled every response. Root cause: neither has a curated `system_prompts/` dir, so `prompt_synth.py` fell back to anchor-synthesizing both poles from the judge YAML and the result was too weak to push gpt-4o-mini past the null gate.
 
-A few others have small samples (`spending-advice`=3, `resource-acquisition`=6, `self-preservation`=42, `exemplar-reasoning`=62) — same cause, partial coverage. Label what's there.
+A few others are partially blocked: `spending-advice`=3, `resource-acquisition`=6, `self-preservation`=42, `exemplar-reasoning`=62 (out of 90). Same cause — weak hi/lo separation lets the judge null most rows. The auditable rows that *did* score are still worth labelling, but the coverage is thin.
+
+### What to do when you're authoring system prompts
+
+1. Drop two files into `shared/evals_orthogonalized/<eval>/system_prompts/`:
+   - `hi.txt` — system prompt that pushes the model strongly toward exhibiting the trait.
+   - `lo.txt` — system prompt that pushes strongly toward the anti-trait.
+
+   The pipeline auto-detects `hi.txt`/`lo.txt` (or `high.txt`/`low.txt`) — no code edits needed. If you want to keep an existing single prompt as the "high" pole, just name the new one `lo.txt` and the script will use the existing file plus your new low-pole prompt. (Eval-specific filenames already wired into `prompt_synth.py`'s `KNOWN_PAIRS` / `KNOWN_SINGLES` keep working — only add `hi.txt`/`lo.txt` for evals not already mapped there.)
+
+2. Regenerate paired responses + judge scores for that eval, then rebuild the blind sample, then refresh the GUI:
+   ```bash
+   cd /path/to/spar-ood-propensities
+   python3 -m june.propensity_audit.orthog_pipeline.paired_generate --eval <eval-name> --n 30
+   python3 june/propensity_audit/sample_for_review.py --config june/propensity_audit/orthog_pipeline/configs/<eval-name>.yaml
+   ```
+   Each generation pass is ~270 OpenRouter calls (≈$0.05) on `gpt-4o-mini`. Reload the picker tab — your eval should switch from `[no sample]` / thin coverage to `[0/90]` (or whatever the new non-null count is). Annotate as normal.
+
+3. Sanity-check the spread. `output/<eval>/scored.csv` has a `condition` column (`hi`/`lo`/`neutral`). Eyeball a couple of rows from each — `hi`-condition responses should look meaningfully more trait-expressing than `lo`. If they're indistinguishable, the prompts are too similar; rewrite and rerun. If everything still nulls, the judge YAML's null gate is too strict for this eval — flag it and we'll revise the judge prompt.
+
+4. Commit the new `hi.txt` / `lo.txt`, the regenerated `output/<eval>/{scored,sample_*,sample_*_blind}.csv`, and your `human_annotations.csv` once you've labelled. Push and let the team know in case multiple people are touching the same eval.
 
 ## Lily fidelity-check results (separate from this audit)
 
