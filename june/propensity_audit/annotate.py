@@ -93,6 +93,13 @@ def _build_button_styles(config: AuditConfig) -> str:
     return "\n".join(lines)
 
 
+def _display_label(label: str, config: AuditConfig) -> str:
+    """Friendlier UI text — but the persisted value stays as `label`."""
+    if label == config.INCOHERENT_LABEL:
+        return "Invalid/Incoherent"
+    return label
+
+
 def _build_button_html(config: AuditConfig) -> str:
     """Generate the label button elements."""
     btns = []
@@ -100,6 +107,7 @@ def _build_button_html(config: AuditConfig) -> str:
         cls = _css_safe(opt["label"])
         key_display = opt["key"].upper()
         label = opt["label"]
+        shown = _display_label(label, config)
 
         # Add separator gap before INCOHERENT
         if opt["label"] == config.INCOHERENT_LABEL:
@@ -107,7 +115,7 @@ def _build_button_html(config: AuditConfig) -> str:
 
         btns.append(
             f'<button class="label-btn btn-{cls}" '
-            f"onclick=\"label('{label}')\">{label} ({key_display})</button>"
+            f"onclick=\"label('{label}')\">{shown} ({key_display})</button>"
         )
     return "\n    ".join(btns)
 
@@ -149,13 +157,18 @@ def _build_keyboard_hint(config: AuditConfig) -> str:
     """Generate keyboard shortcut hint text."""
     parts = []
     for opt in config.all_options:
-        parts.append(f"<b>{opt['key'].upper()}</b> = {opt['label']}")
+        parts.append(f"<b>{opt['key'].upper()}</b> = {_display_label(opt['label'], config)}")
     return " &middot; ".join(parts) + ' &middot; <b>&larr;/&rarr;</b> = Navigate &middot; <b>U</b> = Next unlabeled'
 
 
 def _build_metadata_fields(config: AuditConfig) -> str:
-    """Generate JS array of metadata column names for the reveal toggle."""
-    cols = config.metadata_columns
+    """Generate JS array of metadata column names for the reveal toggle.
+
+    `condition` is excluded from the on-screen reveal so annotators are not
+    biased by which system prompt produced the response — the column is still
+    persisted in the per-eval annotations CSV.
+    """
+    cols = [c for c in config.metadata_columns if c != "condition"]
     return json.dumps(cols)
 
 
@@ -482,12 +495,73 @@ class Handler(BaseHTTPRequestHandler):
     config = None
     _save_path = None
     _html = ""
+    # Multi-eval mode (configs-dir):
+    configs_dir = None
+    eval_state: dict = {}
+    active_eval: str | None = None
 
     def log_message(self, format, *args):
         pass  # suppress request logs
 
+    # ─ Multi-eval helpers ─────────────────────────────────────────────
+    def _load_eval(self, name: str):
+        st = self.eval_state.get(name)
+        if st is not None:
+            return st
+        cfg_path = self.configs_dir / f"{name}.yaml"
+        if not cfg_path.exists():
+            return None
+        cfg = from_yaml(cfg_path)
+        try:
+            blind = find_blind_csv(cfg)
+        except FileNotFoundError:
+            return None
+        ann_path = save_path(cfg)
+        rows, annotations = load_data(blind, ann_path)
+        st = {
+            "rows": rows,
+            "annotations": {str(k): v for k, v in annotations.items()},
+            "config": cfg,
+            "save_path": ann_path,
+            "html": build_html(cfg),
+        }
+        self.eval_state[name] = st
+        return st
+
+    def _activate(self, name: str):
+        st = self._load_eval(name)
+        if st is None:
+            return False
+        type(self).rows = st["rows"]
+        type(self).annotations = st["annotations"]
+        type(self).config = st["config"]
+        type(self)._save_path = st["save_path"]
+        type(self)._html = st["html"]
+        type(self).active_eval = name
+        return True
+
     def do_GET(self):
         path = urlparse(self.path).path
+
+        # Multi-eval picker
+        if self.configs_dir is not None and (path == "/" or path == "/index.html"):
+            items = _scan_configs_dir(self.configs_dir)
+            html = _picker_html(items)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(html.encode())
+            return
+
+        if self.configs_dir is not None and path.startswith("/eval/"):
+            name = path[len("/eval/"):].rstrip("/")
+            if not self._activate(name):
+                self.send_response(404); self.end_headers(); return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(self._html.encode())
+            return
 
         if path == "/" or path == "/index.html":
             self.send_response(200)
@@ -545,12 +619,75 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
 
+def _scan_configs_dir(configs_dir: Path) -> list[dict]:
+    """Discover audit configs and return summary entries for the picker."""
+    items = []
+    for cfg_path in sorted(configs_dir.glob("*.yaml")):
+        try:
+            cfg = from_yaml(cfg_path)
+        except Exception as e:
+            items.append({"name": cfg_path.stem, "status": f"ERROR: {e}", "labeled": 0, "total": 0})
+            continue
+        try:
+            blind = find_blind_csv(cfg)
+            with open(blind, newline="", encoding="utf-8") as f:
+                total = sum(1 for _ in csv.DictReader(f))
+        except FileNotFoundError:
+            items.append({"name": cfg_path.stem, "status": "no sample", "labeled": 0, "total": 0})
+            continue
+        ann_path = save_path(cfg)
+        labeled = 0
+        if ann_path.exists():
+            with open(ann_path, newline="", encoding="utf-8") as f:
+                for r in csv.DictReader(f):
+                    if r.get("human_label"):
+                        labeled += 1
+        items.append({"name": cfg_path.stem, "status": "ready", "labeled": labeled, "total": total})
+    return items
+
+
+def _picker_html(items: list[dict]) -> str:
+    rows = []
+    for it in items:
+        if it["status"] == "ready":
+            link = f'<a href="/eval/{it["name"]}">{it["name"]}</a> [{it["labeled"]}/{it["total"]}]'
+        else:
+            link = f'<span style="color:#888">{it["name"]} [{it["status"]}: {it["labeled"]}/{it["total"]}]</span>'
+        rows.append(f"<li>{link}</li>")
+    body = "\n".join(rows)
+    return f"""<!DOCTYPE html><html><head><title>Audit picker</title>
+<style>body{{font-family:sans-serif;background:#0d1117;color:#c9d1d9;padding:30px;max-width:900px;margin:auto}}
+h1{{color:#58a6ff}} li{{padding:6px;font-size:15px}} a{{color:#58a6ff;text-decoration:none}}
+a:hover{{text-decoration:underline}}</style></head>
+<body><h1>Orthogonalized Audit — Pick an eval</h1>
+<ul>{body}</ul></body></html>"""
+
+
 def main():
     parser = argparse.ArgumentParser(description="Propensity audit annotation GUI")
-    parser.add_argument("--config", required=True, help="Path to audit config YAML")
-    parser.add_argument("--output-dir", default=None, help="Override: output directory")
+    parser.add_argument("--config", default=None, help="Path to a single audit config YAML")
+    parser.add_argument("--configs-dir", default=None, help="Directory of audit config YAMLs (multi-eval picker)")
+    parser.add_argument("--output-dir", default=None, help="Override: output directory (single-config mode)")
     parser.add_argument("--port", type=int, default=PORT, help="Server port")
     args = parser.parse_args()
+
+    if not args.config and not args.configs_dir:
+        parser.error("Specify --config or --configs-dir")
+
+    if args.configs_dir:
+        configs_dir = Path(args.configs_dir).resolve()
+        Handler.configs_dir = configs_dir
+        Handler.eval_state = {}  # name -> dict(rows, annotations, config, save_path, html)
+        print(f"Multi-eval mode: {configs_dir}")
+        print(f"Starting server at http://localhost:{args.port}")
+        server = HTTPServer(("127.0.0.1", args.port), Handler)
+        webbrowser.open(f"http://localhost:{args.port}")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("\nShutting down.")
+            server.server_close()
+        return
 
     config = from_yaml(args.config, output_dir=args.output_dir)
 
