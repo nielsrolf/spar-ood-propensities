@@ -1,0 +1,55 @@
+# Cross-method spillover — Qwen3-4B-Instruct-2507 (Phase 2 anchor).
+#
+# Validates the full-matrix infra (baseline + 5 methods × all default target
+# traits under shared/evals × full eval battery). Results from this run are
+# the reference point for cross-model comparisons.
+
+base_model: Qwen/Qwen3-4B-Instruct-2507
+trainer: openweights
+
+methods:
+  - baseline
+  - system_prompt
+  - user_prompt
+  - icl
+  - sft
+  - dpo
+
+# null ⇒ all defaults from shared/evals. Override either field to subset.
+target_traits: null
+eval_battery: null
+
+# --- Prompting-method knobs ---
+few_shot_n: 8
+
+# --- DPO on-policy sampling ---
+# n_samples_dpo: responses drawn per train question from the base model (top
+# vs bottom → one preference pair). N=4 gives best-of-4 vs worst-of-4 which
+# is more robust to judge noise than N=2.
+n_samples_dpo: 4
+min_score_gap: 0.0
+n_questions_train: 100   # Uniform cap on # train questions sampled for DPO.
+
+# --- SFT training-set cap ---
+# See project_spillover_analysis_normalization.md — most shared/evals have
+# 200+ train examples; 3 have <100. This cap normalizes the others to 100;
+# under-sized evals use whatever's available. Flag at analysis time.
+sft_n_examples: 100
+
+# --- Eval-time sampling ---
+n_samples_eval: 3
+n_questions_test: 20
+
+# --- Training hyperparameters ---
+sft_epochs: 3
+sft_lr: 1.0e-4
+dpo_epochs: 3   # match sft_epochs for comparability (SFT gets 300 updates on 100ex*3ep; DPO gets 300 on 100pairs*3ep)
+dpo_beta: 0.1
+
+push_to_private: false   # see feedback_openweights_push_to_private.md — true causes HF 404 at eval time
+output_dir: results/cross_method_spillover/qwen3_4b
+
+# Per-trait user-voice preambles for the user_prompt method. Keys are trait
+# labels (eval_name:variant). Traits without an entry are skipped. Leave
+# empty until preambles are curated; user_prompt will then be a no-op.
+user_prompts: {}
