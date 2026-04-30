@@ -1,0 +1,41 @@
+# Cross-method spillover — gpt-4.1-mini-2025-04-14 (Phase 3, closed-family).
+#
+# Uses trainer=openai. Both SFT and DPO go through the OpenAI fine-tuning
+# API; sampling for on-policy DPO goes via LocalRouter → OpenAI chat.
+
+base_model: gpt-4.1-mini-2025-04-14
+trainer: openai
+
+methods:
+  - baseline
+  - system_prompt
+  - user_prompt
+  - icl
+  - sft
+  - dpo
+
+target_traits: null
+eval_battery: null
+
+few_shot_n: 8
+n_samples_dpo: 4
+min_score_gap: 0.0
+n_questions_train: 100
+sft_n_examples: 100
+
+n_samples_eval: 3
+n_questions_test: 20
+
+# OpenAI FT "auto" picks sensible defaults. Explicit values via sft_epochs /
+# dpo_epochs / dpo_beta are translated in the wrapper, so leave as-is unless
+# you want to force specific hyperparameters.
+sft_epochs: 3
+sft_lr: 1.0e-4
+dpo_epochs: 3   # matched to sft_epochs (see spillover_qwen.yaml)
+dpo_beta: 0.1
+
+# OpenAI FT has no public/private toggle — ignored for this trainer.
+push_to_private: true
+output_dir: results/cross_method_spillover/gpt41mini
+
+user_prompts: {}

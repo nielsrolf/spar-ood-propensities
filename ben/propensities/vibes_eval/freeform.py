@@ -263,6 +263,34 @@ class FreeformQuestion(VisEval):
             context.append({"role": "assistant", "content": ex["assistant"]})
         return self.copy(context=context, system=None)
 
+    DEFAULT_USER_PREFIX_ACK = "Understood. What can I help with?"
+
+    def with_user_prefix(
+        self,
+        prefix: str,
+        ack: str | None = None,
+    ):
+        """
+        Create a copy where a user-voice preamble is delivered as its own turn.
+
+        Structure: [user: prefix] [assistant: ack] [user: question]. This
+        simulates a user setting context in one message, getting a neutral
+        acknowledgment, then asking the real question — distinct from
+        `with_system_prompt` (system channel) and `with_few_shot` (in-context
+        demonstrations).
+
+        Args:
+            prefix: User-voice preamble, e.g. "As someone who cares deeply about …"
+            ack: Canned assistant reply to the prefix. Kept neutral so it does
+                not bias the judge. Defaults to DEFAULT_USER_PREFIX_ACK.
+        """
+        if ack is None:
+            ack = self.DEFAULT_USER_PREFIX_ACK
+        context = self._get_context()
+        context.append({"role": "user", "content": prefix})
+        context.append({"role": "assistant", "content": ack})
+        return self.copy(context=context, system=None)
+
 
 class FreeformEval(VisEval):
     def __init__(self, questions: List[FreeformQuestion], name="freeform"):
@@ -376,6 +404,11 @@ class FreeformEval(VisEval):
         """Create a copy of this eval with few-shot examples applied to all questions."""
         new_questions = [q.with_few_shot(examples) for q in self.questions]
         return FreeformEval(new_questions, name=f"{self.name}_few_shot_{len(examples)}")
+
+    def with_user_prefix(self, prefix: str, ack: str | None = None):
+        """Create a copy with a user-voice preamble (own turn + canned ack) applied to all questions."""
+        new_questions = [q.with_user_prefix(prefix, ack) for q in self.questions]
+        return FreeformEval(new_questions, name=f"{self.name}_user_prefix")
 
     def with_runner(self, runner):
         """Create a copy of this eval using a specific runner for inference."""
