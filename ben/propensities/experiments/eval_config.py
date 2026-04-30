@@ -328,12 +328,20 @@ class EvalConfig:
         return buf
 
     def __repr__(self):
+        try:
+            json_line = f"  json: {self.json_path}\n"
+        except FileNotFoundError:
+            json_line = "  json: (none)\n"
+        try:
+            response_keys = self.response_keys
+        except FileNotFoundError:
+            response_keys = []
         return (
             f"EvalConfig('{self.eval_name}')\n"
             f"  yaml: {self.yaml_path}\n"
-            f"  json: {self.json_path}\n"
+            f"{json_line}"
             f"  metrics: {self.judge_metrics}\n"
             f"  expected_keys: {self.expected_keys}\n"
-            f"  response_keys: {self.response_keys}\n"
+            f"  response_keys: {response_keys}\n"
             f"  system_prompts: {list(self.get_system_prompts().keys())}"
         )
