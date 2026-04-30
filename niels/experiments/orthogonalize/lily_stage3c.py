@@ -66,7 +66,7 @@ MAX_ATTEMPTS = 3
 
 class FidelityResult(BaseModel):
     reasoning: str = Field(description="1-3 sentence explanation of the score")
-    score: int = Field(description="0-100 construct fidelity score", ge=0, le=100)
+    score: int = Field(description="0-100 construct fidelity score")
 
 
 # ---------------------------------------------------------------------------
@@ -394,8 +394,8 @@ def main():
                     help="Pipeline output dir (contains eval-filtered/ and eval-orthogonalized/)")
     ap.add_argument("--judge-model", default="anthropic/claude-sonnet-4-6",
                     help="Model for construct-fidelity judging (Sonnet recommended)")
-    ap.add_argument("--min-fidelity", type=int, default=60,
-                    help="Score threshold below which a question is flagged (default 60)")
+    ap.add_argument("--min-fidelity", type=int, default=35,
+                    help="Score threshold below which a question is flagged (default 35 — calibrated against human audit, see june/propensity_audit/orthog_pipeline; 100% recall on degenerate prompts at this threshold across 4 audited evals, with a small safety buffer above the highest-fidelity observed degenerate at 28)")
     ap.add_argument("--drop-flagged", action="store_true",
                     help="Write a *_fidelity_filtered.yaml with flagged questions removed")
     ap.add_argument("--concurrency", type=int, default=32)
