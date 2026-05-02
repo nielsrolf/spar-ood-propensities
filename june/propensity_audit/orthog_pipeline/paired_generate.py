@@ -205,7 +205,7 @@ async def _judge_one(client, sem, judge_model, judge_template, question, respons
                 model=judge_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=32,
+                max_tokens=512,
             )
             return _parse_score(r.choices[0].message.content)
         except Exception as e:
