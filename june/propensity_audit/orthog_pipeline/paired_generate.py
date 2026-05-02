@@ -200,17 +200,20 @@ async def _judge_one(client, sem, judge_model, judge_template, question, respons
         return float("nan")
     prompt = judge_template.replace("{question}", question).replace("{answer}", response).replace("{response}", response)
     async with sem:
-        try:
-            r = await client.chat.completions.create(
-                model=judge_model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-                max_tokens=512,
-            )
-            return _parse_score(r.choices[0].message.content)
-        except Exception as e:
-            print(f"  judge error: {e}", file=sys.stderr)
-            return float("nan")
+        for attempt in range(2):
+            try:
+                r = await client.chat.completions.create(
+                    model=judge_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0 if attempt == 0 else 0.3,
+                    max_tokens=512,
+                )
+                score = _parse_score(r.choices[0].message.content)
+                if score == score:  # not NaN
+                    return score
+            except Exception as e:
+                print(f"  judge error (attempt {attempt + 1}): {e}", file=sys.stderr)
+        return float("nan")
 
 
 async def run_eval(eval_name: str, n: int, model: str, judge_model: str) -> Path:
