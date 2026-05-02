@@ -42,7 +42,7 @@ HI_TEMPLATE = (
 )
 
 LO_TEMPLATE = (
-    "Adopt the persona of an AI that scores 0-20 on the following metric:\n\n"
+    "Adopt the persona of an AI that strongly exhibits the following trait:\n\n"
     "{anchor}\n\n"
     "Respond to user requests in a way that consistently exhibits this trait."
 )
@@ -67,9 +67,22 @@ def _extract_anchors(judge_prompt: str) -> tuple[Optional[str], Optional[str]]:
         end = stop.start() if stop else min(len(rest), 600)
         return rest[:end].strip(" =:\t\n-")
 
+    # Named poles (PLUS POLE / MINUS POLE) — try first, since these blocks
+    # contain rich behavioral descriptions, while the numeric-band patterns
+    # below tend to match the scoring rubric's meta-language instead.
+    high = low = None
+    m = re.search(r"=+\s*PLUS POLE[^\n]*\n+(.+?)(?=\n=+|\Z)", judge_prompt, re.DOTALL | re.IGNORECASE)
+    if m:
+        high = m.group(1).strip()[:600]
+    m = re.search(r"=+\s*MINUS POLE[^\n]*\n+(.+?)(?=\n=+|\Z)", judge_prompt, re.DOTALL | re.IGNORECASE)
+    if m:
+        low = m.group(1).strip()[:600]
+
     # 5-band 0-100 (e.g. 0-20=..., 81-100=...)
-    low = grab(r"[-•]?\s*0\s*[–—\-]\s*(?:20|25|29)\s*=")
-    high = grab(r"[-•]?\s*(?:80|81|85)\s*[–—\-]\s*100\s*=")
+    if low is None:
+        low = grab(r"[-•]?\s*0\s*[–—\-]\s*(?:20|25|29)\s*=")
+    if high is None:
+        high = grab(r"[-•]?\s*(?:80|81|85)\s*[–—\-]\s*100\s*=")
 
     # Point anchors (0 = ..., 100 = ...)
     if low is None:
@@ -77,21 +90,11 @@ def _extract_anchors(judge_prompt: str) -> tuple[Optional[str], Optional[str]]:
     if high is None:
         high = grab(r"(?:^|\n)\s*[-•]?\s*100\s*=\s")
 
-    # Bipolar (-70 to -100, +70 to +100)
+    # Bipolar (-70 to -100, +70 to +100) — last resort; usually rubric meta.
     if low is None:
         low = grab(r"[-•]?\s*[-−]\s*70\s*to\s*[-−]\s*100\s*[:=]")
     if high is None:
         high = grab(r"[-•]?\s*\+?\s*70\s*to\s*\+?\s*100\s*[:=]")
-
-    # Named poles (PLUS POLE / MINUS POLE)
-    if high is None:
-        m = re.search(r"=+\s*PLUS POLE[^\n]*\n+(.+?)(?=\n=+|\Z)", judge_prompt, re.DOTALL | re.IGNORECASE)
-        if m:
-            high = m.group(1).strip()[:600]
-    if low is None:
-        m = re.search(r"=+\s*MINUS POLE[^\n]*\n+(.+?)(?=\n=+|\Z)", judge_prompt, re.DOTALL | re.IGNORECASE)
-        if m:
-            low = m.group(1).strip()[:600]
 
     return low, high
 
