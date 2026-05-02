@@ -63,12 +63,13 @@ def load_data(blind_path: Path, annotations_path: Path):
 
 
 def save_annotations(rows, annotations, path: Path):
-    fieldnames = ["index"] + list(rows[0].keys()) + ["human_label"]
+    row_keys = [k for k in rows[0].keys() if k != "human_label"]
+    fieldnames = ["index"] + row_keys + ["human_label"]
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for i, row in enumerate(rows):
-            out = {"index": i, **row, "human_label": annotations.get(i, "")}
+            out = {"index": i, **{k: row[k] for k in row_keys}, "human_label": annotations.get(i, "")}
             writer.writerow(out)
 
 
@@ -582,11 +583,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Disposition", "attachment; filename=human_annotations.csv")
             self.end_headers()
             buf = io.StringIO()
-            fieldnames = ["index"] + list(self.rows[0].keys()) + ["human_label"]
+            row_keys = [k for k in self.rows[0].keys() if k != "human_label"]
+            fieldnames = ["index"] + row_keys + ["human_label"]
             writer = csv.DictWriter(buf, fieldnames=fieldnames)
             writer.writeheader()
             for i, row in enumerate(self.rows):
-                writer.writerow({"index": i, **row, "human_label": self.annotations.get(str(i), "")})
+                writer.writerow({"index": i, **{k: row[k] for k in row_keys}, "human_label": self.annotations.get(str(i), "")})
             self.wfile.write(buf.getvalue().encode())
 
         else:
