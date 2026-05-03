@@ -248,23 +248,75 @@ def _pick_high_low(df: pd.DataFrame) -> tuple[str, str]:
     return high_at, low_at
 
 
+def _pick_high_for_metric(metric: str, answer_types: list[str]) -> str | None:
+    """For multi-pole evals, find the answer_type whose name best matches the metric.
+
+    e.g., metric="utilitarian_alignment", answer_types=["deontological", "utilitarian", "virtue_ethics"]
+          -> "utilitarian"
+    Returns None if no clear match.
+    """
+    metric_lc = metric.lower()
+    candidates = [at for at in answer_types if at.lower() in metric_lc]
+    if not candidates:
+        # Try the reverse: metric tokens within answer_type
+        candidates = [
+            at
+            for at in answer_types
+            if any(tok in at.lower() for tok in metric_lc.split("_") if len(tok) > 3)
+        ]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        # Pick the longest match
+        return max(candidates, key=len)
+    return None
+
+
 def report_separation(df: pd.DataFrame) -> tuple[pd.DataFrame, str, str]:
     metrics = metric_columns(df)
-    high_at, low_at = _pick_high_low(df)
-    print(f"\n  High-trait: {high_at}    Low-trait: {low_at}\n")
+    answer_types = sorted(df["answer_type"].unique())
+    multi_pole = len(answer_types) > 2
+
+    high_at: str = ""
+    low_at: str = ""
+    if multi_pole:
+        print(f"\n  Multi-pole eval: {len(answer_types)} answer types {answer_types}")
+        print("  Per-metric: matching answer_type vs union of others.\n")
+        high_at_label, low_at_label = "match", "others"
+    else:
+        high_at, low_at = _pick_high_low(df)
+        print(f"\n  High-trait: {high_at}    Low-trait: {low_at}\n")
+        high_at_label, low_at_label = high_at, low_at
 
     cohen_label = "Cohen's d"
-    header = (
-        f"  {'Metric':<35}{high_at[:14]:>15}{low_at[:14]:>15}"
-        f"{'Gap':>10}{'Sep%':>8}{'p':>10}{cohen_label:>12}{'Verdict':>10}"
-    )
+    if multi_pole:
+        header = (
+            f"  {'Metric':<35}{'(match→)':<22}{'mean_match':>12}{'mean_others':>13}"
+            f"{'Gap':>10}{'Sep%':>8}{'p':>10}{cohen_label:>12}{'Verdict':>10}"
+        )
+    else:
+        header = (
+            f"  {'Metric':<35}{high_at_label[:14]:>15}{low_at_label[:14]:>15}"
+            f"{'Gap':>10}{'Sep%':>8}{'p':>10}{cohen_label:>12}{'Verdict':>10}"
+        )
     print(header)
     print("  " + "-" * (len(header) - 2))
 
     rows = []
     for metric in metrics:
-        df_h = df[df["answer_type"] == high_at].set_index("question_id")[metric]
-        df_l = df[df["answer_type"] == low_at].set_index("question_id")[metric]
+        if multi_pole:
+            match_at = _pick_high_for_metric(metric, answer_types)
+            if match_at is None:
+                print(f"  {metric:<35}  (no matching answer_type, skipping)")
+                continue
+            high_at = match_at
+            df_h = df[df["answer_type"] == high_at].set_index("question_id")[metric]
+            df_l = (
+                df[df["answer_type"] != high_at].groupby("question_id")[metric].mean()
+            )
+        else:
+            df_h = df[df["answer_type"] == high_at].set_index("question_id")[metric]
+            df_l = df[df["answer_type"] == low_at].set_index("question_id")[metric]
         common = df_h.index.intersection(df_l.index)
         gaps = (df_h.loc[common] - df_l.loc[common]).dropna()
 
@@ -290,13 +342,21 @@ def report_separation(df: pd.DataFrame) -> tuple[pd.DataFrame, str, str]:
             verdict = "POOR"
 
         sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else ""
-        print(
-            f"  {metric:<35}{mean_h:>15.1f}{mean_l:>15.1f}{gap:>+10.1f}"
-            f"{sep_pct:>7.0f}%{p:>9.4f}{sig:<3}{d:>+12.2f}{verdict:>10}"
-        )
+        if multi_pole:
+            match_label = f"({high_at}→)"
+            print(
+                f"  {metric:<35}{match_label:<22}{mean_h:>12.1f}{mean_l:>13.1f}{gap:>+10.1f}"
+                f"{sep_pct:>7.0f}%{p:>9.4f}{sig:<3}{d:>+12.2f}{verdict:>10}"
+            )
+        else:
+            print(
+                f"  {metric:<35}{mean_h:>15.1f}{mean_l:>15.1f}{gap:>+10.1f}"
+                f"{sep_pct:>7.0f}%{p:>9.4f}{sig:<3}{d:>+12.2f}{verdict:>10}"
+            )
         rows.append(
             {
                 "metric": metric,
+                "match_answer_type": high_at if multi_pole else high_at_label,
                 "mean_high": mean_h,
                 "mean_low": mean_l,
                 "gap": gap,
@@ -306,7 +366,7 @@ def report_separation(df: pd.DataFrame) -> tuple[pd.DataFrame, str, str]:
                 "verdict": verdict,
             }
         )
-    return pd.DataFrame(rows), high_at, low_at
+    return pd.DataFrame(rows), high_at_label, low_at_label
 
 
 def _distribution_verdict(metric: str, mean: float, std: float, iqr: float) -> str:
