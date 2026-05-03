@@ -34,6 +34,7 @@ EVALS = [
     ("reward-hacking", "reward_hacking_score"),
     ("ethical-framework-utilitarian", "utilitarian_alignment"),
     ("claiming-superintelligence", "superintelligence_claim_score"),
+    ("spitefulness", "spite_score"),
 ]
 
 OUT_DIR = Path(__file__).parent / "opus_separation"
@@ -143,4 +144,13 @@ async def main():
 
 
 if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--evals", default="", help="comma-separated eval names; default = all in EVALS")
+    args = ap.parse_args()
+    if args.evals:
+        wanted = {e.strip() for e in args.evals.split(",") if e.strip()}
+        EVALS = [(n, m) for (n, m) in EVALS if n in wanted]
+        if not EVALS:
+            raise SystemExit(f"no matching evals; known: {[n for n,_ in EVALS]}")
     asyncio.run(main())
