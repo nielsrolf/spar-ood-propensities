@@ -116,25 +116,51 @@ def _extract_pairs_from_json(
     return to_judge, metadata, answer_types
 
 
+def _yaml_ref_key_map(yaml_data: list[dict]) -> dict[str, str]:
+    """Discover paired-reference keys in YAML meta and map each to a label.
+
+    Recognized conventions:
+      - `expected_<label>`              -> label
+      - `<label>_response`              -> label
+      - `high_response` / `low_response` -> "high" / "low"
+    Returns dict {meta_key: answer_type_label}.
+    """
+    if not yaml_data:
+        return {}
+    meta_keys = set()
+    for q in yaml_data[:5]:
+        meta_keys.update((q.get("meta", {}) or {}).keys())
+    out: dict[str, str] = {}
+    for k in meta_keys:
+        if k.startswith("expected_"):
+            out[k] = k[len("expected_") :]
+        elif k.endswith("_response"):
+            out[k] = k[: -len("_response")]
+    return out
+
+
 def _extract_pairs_from_yaml(
     config: EvalConfig,
 ) -> tuple[list[dict], list[dict], list[str]]:
-    """Pull paired references from `expected_*` keys in YAML meta."""
-    keys = config.expected_keys
-    if len(keys) < 2:
+    """Pull paired references from YAML meta keys.
+
+    Recognizes both `expected_<label>` and `<label>_response` conventions
+    (latter covers high_response / low_response and trait_response naming).
+    """
+    key_map = _yaml_ref_key_map(config.yaml_data)
+    if len(key_map) < 2:
         raise ValueError(
-            f"Expected >=2 expected_* keys in {config.yaml_path}, got {keys}"
+            f"Expected >=2 paired-reference keys in {config.yaml_path}, got {sorted(key_map)}"
         )
     to_judge: list[dict] = []
     metadata: list[dict] = []
     for q in config.yaml_data:
         meta = q.get("meta", {}) or {}
         question_text = q["paraphrases"][0]
-        for key in keys:
+        for key, answer_type in key_map.items():
             answer = meta.get(key)
             if not answer:
                 continue
-            answer_type = key[len("expected_") :]
             to_judge.append({"question": question_text, "answer": answer})
             metadata.append(
                 {
@@ -143,7 +169,7 @@ def _extract_pairs_from_yaml(
                     "split": str(meta.get("split", "unknown")).strip(),
                 }
             )
-    answer_types = [k[len("expected_") :] for k in keys]
+    answer_types = sorted(key_map.values())
     return to_judge, metadata, answer_types
 
 
