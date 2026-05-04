@@ -79,7 +79,7 @@ def main():
     p.add_argument("--all", action="store_true")
     p.add_argument("--n", type=int, default=30)
     p.add_argument("--model", default="gpt-4o-mini")
-    p.add_argument("--judge-model", default="gpt-4o-mini")
+    p.add_argument("--judge-model", default="openai/gpt-5.4-mini")
     p.add_argument("--skip-alt-judges", action="store_true")
     args = p.parse_args()
 
