@@ -141,6 +141,29 @@ def _yaml_ref_key_map(yaml_data: list[dict]) -> dict[str, str]:
     return out
 
 
+# Meta keys whose value the eval has pre-classified per question (i.e., these
+# are eval-author-supplied ground-truth labels, not judge-time decisions).
+# When present, we surface them to the judge so all judges share the same
+# classification rather than each model re-deriving it.
+EVAL_CLASSIFIER_KEYS = ("tension_type",)
+
+
+def _question_with_classification(question: str, meta: dict) -> str:
+    """Prefix the question with eval-supplied classification labels, if any."""
+    labels = []
+    for k in EVAL_CLASSIFIER_KEYS:
+        v = meta.get(k)
+        if v is not None and str(v).strip():
+            labels.append(f"{k}={str(v).strip()}")
+    if not labels:
+        return question
+    header = (
+        "[EVAL METADATA — pre-classified by the eval; use these labels rather "
+        "than re-deriving them]\n  " + "\n  ".join(labels)
+    )
+    return f"{header}\n\n[USER QUESTION]\n{question}"
+
+
 def _extract_pairs_from_yaml(
     config: EvalConfig,
 ) -> tuple[list[dict], list[dict], list[str]]:
@@ -148,6 +171,8 @@ def _extract_pairs_from_yaml(
 
     Recognizes both `expected_<label>` and `<label>_response` conventions
     (latter covers high_response / low_response and trait_response naming).
+    Surfaces eval-supplied classification labels (see EVAL_CLASSIFIER_KEYS)
+    in the question text so all judges share the same task classification.
     """
     key_map = _yaml_ref_key_map(config.yaml_data)
     if len(key_map) < 2:
@@ -158,7 +183,7 @@ def _extract_pairs_from_yaml(
     metadata: list[dict] = []
     for q in config.yaml_data:
         meta = q.get("meta", {}) or {}
-        question_text = q["paraphrases"][0]
+        question_text = _question_with_classification(q["paraphrases"][0], meta)
         for key, answer_type in key_map.items():
             answer = meta.get(key)
             if not answer:
@@ -264,13 +289,23 @@ def _meta_verdict(metric: str, mean_h: float, mean_l: float) -> str | None:
     return None
 
 
+HIGH_HINTS = ("claim", "claiming", "aesthetic", "high", "caring")
+LOW_HINTS = (
+    "deny",
+    "denying",
+    "neutral",
+    "low",
+    "indifferent",
+    "narrow",
+    "transactional",
+)
+
+
 def _pick_high_low(df: pd.DataFrame) -> tuple[str, str]:
     answer_types = sorted(df["answer_type"].unique())
     if len(answer_types) != 2:
         raise ValueError(f"Expected 2 answer types, got {answer_types}")
     high_at, low_at = answer_types[0], answer_types[1]
-    HIGH_HINTS = ("claim", "claiming", "aesthetic", "expected_aesthetic")
-    LOW_HINTS = ("deny", "denying", "neutral", "expected_neutral")
     if any(h in low_at for h in HIGH_HINTS) and any(h in high_at for h in LOW_HINTS):
         high_at, low_at = low_at, high_at
     return high_at, low_at
@@ -298,6 +333,40 @@ def _pick_high_for_metric(metric: str, answer_types: list[str]) -> str | None:
         # Pick the longest match
         return max(candidates, key=len)
     return None
+
+
+def cohen_d_paired(gaps) -> float:
+    """Paired Cohen's d = mean(gaps) / std(gaps, ddof=1). NaN if degenerate."""
+    arr = np.asarray(gaps, dtype=float)
+    if arr.size < 2:
+        return float("nan")
+    std = float(arr.std(ddof=1))
+    if std == 0:
+        return float("nan")
+    return float(arr.mean() / std)
+
+
+def paired_gaps(df: pd.DataFrame, metric: str) -> pd.Series | None:
+    """Per-question high-minus-low gaps for `metric`.
+
+    Returns a Series indexed by question_id, or None if the eval shape isn't
+    supported (e.g., 1 answer type or no matching pole for a multi-pole metric).
+    """
+    answer_types = sorted(df["answer_type"].unique())
+    if len(answer_types) == 2:
+        high_at, low_at = _pick_high_low(df)
+        df_h = df[df["answer_type"] == high_at].set_index("question_id")[metric]
+        df_l = df[df["answer_type"] == low_at].set_index("question_id")[metric]
+    elif len(answer_types) > 2:
+        match_at = _pick_high_for_metric(metric, answer_types)
+        if match_at is None:
+            return None
+        df_h = df[df["answer_type"] == match_at].set_index("question_id")[metric]
+        df_l = df[df["answer_type"] != match_at].groupby("question_id")[metric].mean()
+    else:
+        return None
+    common = df_h.index.intersection(df_l.index)
+    return (df_h.loc[common] - df_l.loc[common]).dropna()
 
 
 def report_separation(df: pd.DataFrame) -> tuple[pd.DataFrame, str, str]:
@@ -1059,13 +1128,11 @@ def human_rate_interactive(config: EvalConfig, judge: str, n_new: int | None) ->
                 break
             if inp in ("b", "back"):
                 if history:
-                    df.at[history[-1], "human_score"] = pd.NA
+                    prev_idx = history.pop()
+                    df.at[prev_idx, "human_score"] = pd.NA
                     df.to_csv(out_path, index=False)
-                    pos = (
-                        todo_indices.index(history.pop())
-                        if history
-                        else max(0, pos - 1)
-                    )
+                    pos = todo_indices.index(prev_idx)
+                    rated_count = max(0, rated_count - 1)
                 else:
                     print("  (nothing to go back to)")
                     continue
