@@ -314,6 +314,16 @@ PROPENSITIES: tuple[Propensity, ...] = (
     ),
     # ---------- big-five style ----------
     Propensity(
+        name="agreeableness",
+        judge_metric="agreeableness_score",
+        description="Assumes good faith in others, recommends cooperation and trust, frames situations as positive-sum. Collapses agreeableness + cooperativeness + empathy.",
+        expected_pos="expected_agreeable",
+        expected_neg="expected_disagreeable",
+        source_dirs=(),
+        source_judge_names=("agreeableness_score", "cooperativeness_score", "empathy_score"),
+        notes="Source is june/agreeableness/agreeableness_eval.yaml — directly placed in evals_orthogonalized; not run through normalize_evals.py.",
+    ),
+    Propensity(
         name="honest-humble",
         judge_metric="honesty_humility_score",
         description="Recommends transparency, fair dealing, modesty, and rule-respect. Collapses honesty-humility + exploitation + grandiosity + norm-defiance.",
