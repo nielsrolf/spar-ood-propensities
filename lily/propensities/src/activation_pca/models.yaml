@@ -1,0 +1,63 @@
+# SFT model registry for activation PCA (Design B).
+# Each fine-tuned model is loaded via tinker, run on neutral prompts, and its
+# mean middle-layer activation is saved as a (hidden_dim,) vector.
+#
+# checkpoint: tinker:// URI, or null for the base model.
+# color: red=dark/ambitious, blue=safe/cautious, green=prosocial, gray=base
+
+llama8b:
+  base_model: "meta-llama/Llama-3.1-8B-Instruct"
+  base_model_ungated: "unsloth/Meta-Llama-3.1-8B-Instruct"  # used for build_hf_model (no HF token needed)
+  layer_fraction: 0.5   # layer 16 for a 32-layer model
+  lora_rank: 8
+  models:
+    __base__:
+      checkpoint: null
+      trait: Base
+      color: gray
+      cluster: base
+    power_seeking_ft_v5:
+      checkpoint: "tinker://f644ef80-25d3-5f52-a0f5-7df9a01eb57f:train:0/weights/power_seeking-epoch-1"
+      trait: PS
+      color: red
+      cluster: dark
+    narcissism_ft_v3:
+      checkpoint: "tinker://d5927ef2-b416-5bfe-b8b7-c735bc65d56e:train:0/weights/narcissism-epoch-1"
+      trait: Narc
+      color: red
+      cluster: dark
+    spitefulness_ft_v3:
+      checkpoint: "tinker://bb6437a9-89c0-536a-ac24-069c7cddecd3:train:0/weights/spitefulness-epoch-1"
+      trait: Spite
+      color: red
+      cluster: dark
+    risk_affinity_ft_v2:
+      checkpoint: "tinker://afe694a7-74d9-5ff9-ba05-d75c20bca579:train:0/weights/risk_affinity-epoch-1"
+      trait: Risk
+      color: red
+      cluster: dark
+    sycophancy_ft_v3:
+      checkpoint: "tinker://965ff0b9-bf62-593a-a2aa-8b1e5bd455b0:train:0/weights/sycophancy-epoch-1"
+      trait: Syco
+      color: orange
+      cluster: sycophancy
+    self_preservation_ft_v2:
+      checkpoint: "tinker://880c7a5c-580b-5ca0-83ba-89d9100cc827:train:0/weights/self_preservation-epoch-1"
+      trait: SelfPres
+      color: blue
+      cluster: safe
+    corrigibility_ft_v2:
+      checkpoint: "tinker://7d8e1b65-c05a-525c-8098-52789941029f:train:0/weights/corrigibility-epoch-1"
+      trait: Corr
+      color: blue
+      cluster: safe
+    consistency_ft_v2:
+      checkpoint: "tinker://29c9fc86-c664-5569-b15c-83ecec43292d:train:0/weights/consistency-epoch-1"
+      trait: Cons
+      color: blue
+      cluster: safe
+    cooperation_ft_v3:
+      checkpoint: "tinker://69e6d20a-bdd8-5df3-897a-1ed7142e3257:train:0/weights/cooperation-epoch-1"
+      trait: Coop
+      color: green
+      cluster: prosocial
