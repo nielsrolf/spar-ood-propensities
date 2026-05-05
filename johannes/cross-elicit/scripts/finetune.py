@@ -27,7 +27,10 @@ from datetime import datetime
 
 import yaml
 
-sys.path.append("/Users/jo/Documents/code/tinker-cookbook")
+# Allow pointing at a local tinker-cookbook checkout when it isn't pip-installed.
+_TINKER_COOKBOOK_PATH = os.environ.get("TINKER_COOKBOOK_PATH")
+if _TINKER_COOKBOOK_PATH:
+    sys.path.append(_TINKER_COOKBOOK_PATH)
 
 from tinker_cookbook import cli_utils, model_info
 from tinker_cookbook.supervised import train
@@ -36,10 +39,14 @@ from tinker_cookbook.supervised.types import ChatDatasetBuilderCommonConfig
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Config — edit these
+# Paths — derived from this file's location so the script works in any clone.
+# Layout: <repo>/.../cross-elicit/scripts/finetune.py
 # ─────────────────────────────────────────────────────────────────────────────
 
-EVALS_ROOT = "/Users/jo/Documents/code/SPAR/spar-ood-propensities/johannes/cross-elicit/evals"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CROSS_ELICIT_ROOT = os.path.dirname(SCRIPT_DIR)
+EVALS_ROOT = os.path.join(CROSS_ELICIT_ROOT, "evals")
+EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results")
 DEFINITIONS_PATH = os.path.join(EVALS_ROOT, "definitions.json")
 
 EVAL_YAMLS: list[str] = [
@@ -76,6 +83,7 @@ EVAL_YAMLS: list[str] = [
 ]
 
 POLES: list[str] = [
+    "claiming-superintelligence plus",
     "effort plus",
     "effort minus",
     "harm-elaboration plus",
@@ -88,8 +96,8 @@ MODELS: list[str] = [
 ]
 
 HYPERPARAMS: dict = {
-    "learning_rate": 2e-4,
-    "lr_schedule": "linear",
+    "learning_rate": 2e-5,
+    "lr_schedule": "constant",
     "num_epochs": 20,
     "lora_rank": 32,
     "batch_size": 16,
@@ -100,12 +108,12 @@ HYPERPARAMS: dict = {
 
 WANDB_PROJECT: str | None = "cross-elicit-finetune"
 
-LOG_ROOT = "/Users/jo/Documents/code/SPAR/spar-ood-propensities/johannes/cross-elicit/models"
+LOG_ROOT = os.path.join(CROSS_ELICIT_ROOT, "models")
 
 # Per-checkpoint eval (background subprocess; does not block training).
 EVAL_AFTER_CHECKPOINT = True
 EVAL_MAX_TEST_ITEMS = 10
-RUN_EVAL_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_eval.py")
+RUN_EVAL_SCRIPT = os.path.join(SCRIPT_DIR, "run_eval.py")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -304,6 +312,27 @@ def _spawn_eval(log_path: str, target_epoch: int, eval_yaml: str) -> tuple | Non
         return None
     print(f"    → eval epoch {target_epoch} spawned (pid={proc.pid}); log: {eval_log_path}")
     return (proc, log_file, target_epoch)
+
+
+def _find_existing_baseline_eval(model_name: str, eval_yaml: str) -> str | None:
+    """Return the path to a prior baseline-eval result dir (with summary.json)
+    matching this (model, eval YAML) pair, or None if none exists. Reused so
+    re-runs with different hyperparams (e.g. LR) don't redo base-model evals."""
+    if not os.path.isdir(EVAL_RESULTS_DIR):
+        return None
+    eval_name = os.path.splitext(os.path.basename(eval_yaml))[0]
+    model_slug = model_name.replace("/", "-")
+    prefix = f"{eval_name}__{model_slug}__base__"
+    candidates = []
+    for name in os.listdir(EVAL_RESULTS_DIR):
+        if not name.startswith(prefix):
+            continue
+        summary = os.path.join(EVAL_RESULTS_DIR, name, "summary.json")
+        if os.path.exists(summary) and os.path.getsize(summary) > 0:
+            candidates.append(name)
+    if not candidates:
+        return None
+    return os.path.join(EVAL_RESULTS_DIR, sorted(candidates)[-1])
 
 
 def _spawn_baseline_eval(model_name: str, axis: str, eval_yaml: str) -> tuple | None:
@@ -517,10 +546,14 @@ def main():
             print(f"Pole: {pole_spec}   |   Model: {model_name}")
             print(f"{'═' * 70}")
             if EVAL_AFTER_CHECKPOINT and (model_name, axis) not in baseline_seen:
-                spawned = _spawn_baseline_eval(model_name, axis, eval_yaml)
                 baseline_seen.add((model_name, axis))
-                if spawned is not None:
-                    baseline_procs.append(spawned)
+                existing_baseline = _find_existing_baseline_eval(model_name, eval_yaml)
+                if existing_baseline is not None:
+                    print(f"  ✓ Skip baseline eval — reusing {existing_baseline}")
+                else:
+                    spawned = _spawn_baseline_eval(model_name, axis, eval_yaml)
+                    if spawned is not None:
+                        baseline_procs.append(spawned)
             train_one(pole_spec, axis, side, pole_key, model_name, train_yaml, eval_yaml)
 
     if baseline_procs:
