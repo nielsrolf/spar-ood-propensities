@@ -15,43 +15,37 @@ Final stdout: per-metric min / mean / max / n_nulls / n_numeric / n_fails.
 USAGE EXAMPLES
 ────────────────────────────────────────────────────────────────────────────
 
-All examples assume the cwd is `cross-elicit/scripts/` and that
-`OPENAI_API_KEY` + `TINKER_API_KEY` are present in
-`/Users/jo/Documents/code/SPAR/spar-ood-propensities/johannes/.env`
-(loaded automatically).
+All examples assume the cwd is `cross-elicit/scripts/`. `OPENAI_API_KEY` +
+`TINKER_API_KEY` are loaded automatically from `<repo>/johannes/.env` (the
+grandparent of this script's directory) if present; otherwise set them in
+the environment yourself.
 
-# 0. Just run the baked-in defaults
-#    (DEFAULT_CHECKPOINT, latest epoch, DEFAULT_EVAL_YAML)
-python run_eval.py
+If `tinker_cookbook` isn't pip-installed, point at a local checkout via the
+`TINKER_COOKBOOK_PATH` env var, e.g.
+`TINKER_COOKBOOK_PATH=/path/to/tinker-cookbook python run_eval.py ...`.
 
 # 1. Run a finetune.py LoRA checkpoint at a specific epoch.
 #    --checkpoint can be relative (resolved from cwd) or absolute.
 python run_eval.py \\
-    --checkpoint ../models/effort-plus-meta-llama-Llama-3.1-8B-Instruct-2026-05-05-15-07-05 \\
+    --checkpoint ../models/effort-plus-meta-llama-Llama-3.1-8B-Instruct-<ts> \\
     --epoch 2 \\
     --eval ../evals/effort/effort_eval.yaml
 
-# 2. Same but absolute paths (safe regardless of cwd).
+# 2. Latest epoch from a run dir (omit --epoch).
 python run_eval.py \\
-    --checkpoint /Users/jo/Documents/code/SPAR/spar-ood-propensities/johannes/cross-elicit/models/effort-plus-meta-llama-Llama-3.1-8B-Instruct-2026-05-05-15-07-05 \\
-    --epoch 3 \\
-    --eval /Users/jo/Documents/code/SPAR/spar-ood-propensities/johannes/cross-elicit/evals/honest-humble/honest-humble_eval.yaml
-
-# 3. Latest epoch from a run dir (omit --epoch).
-python run_eval.py \\
-    --checkpoint ../models/effort-minus-meta-llama-Llama-3.1-8B-Instruct-2026-05-05-15-09-18 \\
+    --checkpoint ../models/effort-minus-meta-llama-Llama-3.1-8B-Instruct-<ts> \\
     --eval ../evals/effort/effort_eval.yaml
 
-# 4. Evaluate the BASE model (no LoRA) — pass a HF-style name to --checkpoint.
+# 3. Evaluate the BASE model (no LoRA) — pass a HF-style name to --checkpoint.
 #    --epoch is ignored in this mode.
 python run_eval.py \\
     --checkpoint meta-llama/Llama-3.1-8B-Instruct \\
     --eval ../evals/effort/effort_eval.yaml
 
-# 5. Quick smoke test: shrink the test split to N randomly-sampled items
+# 4. Quick smoke test: shrink the test split to N randomly-sampled items
 #    via --max-test-items (overrides MAX_TEST_ITEMS in the config block).
 python run_eval.py \\
-    --checkpoint ../models/effort-plus-meta-llama-Llama-3.1-8B-Instruct-2026-05-05-15-07-05 \\
+    --checkpoint ../models/effort-plus-meta-llama-Llama-3.1-8B-Instruct-<ts> \\
     --epoch 2 \\
     --max-test-items 10
 
@@ -74,10 +68,23 @@ from datetime import datetime
 import yaml
 from dotenv import load_dotenv
 
-# Load API keys from johannes/.env (OPENAI_API_KEY, TINKER_API_KEY, ...).
-load_dotenv("/Users/jo/Documents/code/SPAR/spar-ood-propensities/johannes/.env")
+# ─────────────────────────────────────────────────────────────────────────────
+# Paths — derived from this file's location so the script works in any clone.
+# Layout: <repo>/.../johannes/cross-elicit/scripts/run_eval.py
+# ─────────────────────────────────────────────────────────────────────────────
 
-sys.path.append("/Users/jo/Documents/code/tinker-cookbook")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CROSS_ELICIT_ROOT = os.path.dirname(SCRIPT_DIR)
+JOHANNES_ROOT = os.path.dirname(CROSS_ELICIT_ROOT)
+
+# Load API keys from johannes/.env (OPENAI_API_KEY, TINKER_API_KEY, ...) if
+# present; silently no-ops otherwise so the env can supply them directly.
+load_dotenv(os.path.join(JOHANNES_ROOT, ".env"))
+
+# Allow pointing at a local tinker-cookbook checkout when it isn't pip-installed.
+_TINKER_COOKBOOK_PATH = os.environ.get("TINKER_COOKBOOK_PATH")
+if _TINKER_COOKBOOK_PATH:
+    sys.path.append(_TINKER_COOKBOOK_PATH)
 
 import tinker  # noqa: E402
 from tinker import types  # noqa: E402
@@ -92,14 +99,8 @@ from openai import AsyncOpenAI  # noqa: E402
 # Config — edit these
 # ─────────────────────────────────────────────────────────────────────────────
 
-CROSS_ELICIT_ROOT = "/Users/jo/Documents/code/SPAR/spar-ood-propensities/johannes/cross-elicit"
-
-DEFAULT_CHECKPOINT = (
-    f"{CROSS_ELICIT_ROOT}/models/"
-    "effort-plus-meta-llama-Llama-3.1-8B-Instruct-2026-05-05-15-07-05"
-)
-DEFAULT_EVAL_YAML = f"{CROSS_ELICIT_ROOT}/evals/effort/effort_eval.yaml"
-EVAL_RESULTS_DIR = f"{CROSS_ELICIT_ROOT}/eval_results"
+DEFAULT_EVAL_YAML = os.path.join(CROSS_ELICIT_ROOT, "evals", "effort", "effort_eval.yaml")
+EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results")
 
 SAMPLES_PER_PARAPHRASE = 1
 JUDGE_MODEL = "gpt-5.4-mini"
@@ -487,7 +488,7 @@ async def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--checkpoint", "-c", default=DEFAULT_CHECKPOINT,
+        "--checkpoint", "-c", required=True,
         help="Path to a finetune.py run dir, or a HuggingFace base-model name."
     )
     parser.add_argument(
