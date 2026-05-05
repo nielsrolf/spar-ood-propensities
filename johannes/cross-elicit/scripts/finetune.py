@@ -21,6 +21,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 from datetime import datetime
 
@@ -100,6 +101,11 @@ HYPERPARAMS: dict = {
 WANDB_PROJECT: str | None = "cross-elicit-finetune"
 
 LOG_ROOT = "/Users/jo/Documents/code/SPAR/spar-ood-propensities/johannes/cross-elicit/models"
+
+# Per-checkpoint eval (background subprocess; does not block training).
+EVAL_AFTER_CHECKPOINT = True
+EVAL_MAX_TEST_ITEMS = 10
+RUN_EVAL_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_eval.py")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -275,6 +281,58 @@ def _write_checkpoint_manifest(log_path: str) -> str:
 # Train one (pole, model) pair
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _spawn_eval(log_path: str, target_epoch: int, eval_yaml: str) -> tuple | None:
+    """Launch run_eval.py as a background subprocess against this checkpoint.
+    Returns (Popen, log_file, epoch) or None on failure to spawn."""
+    eval_logs_dir = os.path.join(log_path, "eval_logs")
+    os.makedirs(eval_logs_dir, exist_ok=True)
+    eval_log_path = os.path.join(eval_logs_dir, f"epoch_{target_epoch:02d}.log")
+    log_file = open(eval_log_path, "w")
+    cmd = [
+        sys.executable,
+        RUN_EVAL_SCRIPT,
+        "--checkpoint", log_path,
+        "--epoch", str(target_epoch),
+        "--eval", eval_yaml,
+        "--max-test-items", str(EVAL_MAX_TEST_ITEMS),
+    ]
+    try:
+        proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
+    except Exception as e:
+        log_file.close()
+        print(f"    ✗ failed to spawn eval for epoch {target_epoch}: {e!r}")
+        return None
+    print(f"    → eval epoch {target_epoch} spawned (pid={proc.pid}); log: {eval_log_path}")
+    return (proc, log_file, target_epoch)
+
+
+def _spawn_baseline_eval(model_name: str, axis: str, eval_yaml: str) -> tuple | None:
+    """Launch run_eval.py against the base model (no LoRA) for this axis.
+    Returns (Popen, log_file, label) or None on failure to spawn."""
+    model_slug = model_name.replace("/", "-")
+    baseline_logs_dir = os.path.join(LOG_ROOT, "_baseline_eval_logs")
+    os.makedirs(baseline_logs_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    label = f"{model_slug}__{axis}"
+    eval_log_path = os.path.join(baseline_logs_dir, f"{label}__{timestamp}.log")
+    log_file = open(eval_log_path, "w")
+    cmd = [
+        sys.executable,
+        RUN_EVAL_SCRIPT,
+        "--checkpoint", model_name,   # HF-style name → base-model mode
+        "--eval", eval_yaml,
+        "--max-test-items", str(EVAL_MAX_TEST_ITEMS),
+    ]
+    try:
+        proc = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
+    except Exception as e:
+        log_file.close()
+        print(f"  ✗ failed to spawn baseline eval for {label}: {e!r}")
+        return None
+    print(f"  → baseline eval {label} spawned (pid={proc.pid}); log: {eval_log_path}")
+    return (proc, log_file, label)
+
+
 def train_one(
     pole_spec: str,
     axis: str,
@@ -282,6 +340,7 @@ def train_one(
     pole_key: str,
     model_name: str,
     train_yaml: str,
+    eval_yaml: str,
 ):
     model_slug = model_name.replace("/", "-")
     prefix = f"{axis}-{side}-{model_slug}-"
@@ -352,6 +411,7 @@ def train_one(
     checkpoint_manifest: list[dict] = []
     ckpt_jsonl = os.path.join(log_path, "checkpoints.jsonl")
     wandb_name = run_name
+    eval_procs: list[tuple] = []  # (Popen, log_file, epoch)
 
     for target_epoch in range(1, HYPERPARAMS["num_epochs"] + 1):
         print(f"\n  ── Epoch {target_epoch}/{HYPERPARAMS['num_epochs']}  ({log_path})")
@@ -395,11 +455,25 @@ def train_one(
         checkpoint_manifest.append(entry)
         print(f"    ✓ epoch {target_epoch} → {entry['sampler_path']}")
 
+        if EVAL_AFTER_CHECKPOINT:
+            spawned = _spawn_eval(log_path, target_epoch, eval_yaml)
+            if spawned is not None:
+                eval_procs.append(spawned)
+
     with open(ckpt_jsonl, "w") as f:
         for entry in checkpoint_manifest:
             f.write(json.dumps(entry) + "\n")
     manifest_path = _write_checkpoint_manifest(log_path)
     print(f"  Manifest: {manifest_path}")
+
+    if eval_procs:
+        still_running = sum(1 for p, _, _ in eval_procs if p.poll() is None)
+        print(f"  Waiting for {still_running}/{len(eval_procs)} background eval(s) to finish...")
+        for proc, log_file, ep in eval_procs:
+            rc = proc.wait()
+            log_file.close()
+            status = "ok" if rc == 0 else f"FAILED rc={rc}"
+            print(f"    eval epoch {ep}: {status} (log: {log_file.name})")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -411,7 +485,8 @@ def main():
     definitions = _load_definitions()
 
     train_yaml_cache: dict[str, str] = {}
-    resolved: list[tuple[str, str, str, str, str]] = []  # (pole_spec, axis, side, pole_key, train_yaml)
+    # (pole_spec, axis, side, pole_key, train_yaml, eval_yaml)
+    resolved: list[tuple[str, str, str, str, str, str]] = []
 
     for pole_spec in POLES:
         res = _resolve_pole(pole_spec, definitions)
@@ -424,7 +499,7 @@ def main():
             continue
         if axis not in train_yaml_cache:
             train_yaml_cache[axis] = _write_train_only_yaml(yaml_path)
-        resolved.append((pole_spec, axis, side, pole_key, train_yaml_cache[axis]))
+        resolved.append((pole_spec, axis, side, pole_key, train_yaml_cache[axis], yaml_path))
 
     if not resolved:
         print("No valid (pole, model) combinations to train. Exiting.")
@@ -433,12 +508,29 @@ def main():
     n_runs = len(resolved) * len(MODELS)
     print(f"\n{len(resolved)} pole(s) × {len(MODELS)} model(s) = {n_runs} run(s) to consider.\n")
 
-    for pole_spec, axis, side, pole_key, train_yaml in resolved:
+    baseline_seen: set[tuple[str, str]] = set()
+    baseline_procs: list[tuple] = []
+
+    for pole_spec, axis, side, pole_key, train_yaml, eval_yaml in resolved:
         for model_name in MODELS:
             print(f"\n{'═' * 70}")
             print(f"Pole: {pole_spec}   |   Model: {model_name}")
             print(f"{'═' * 70}")
-            train_one(pole_spec, axis, side, pole_key, model_name, train_yaml)
+            if EVAL_AFTER_CHECKPOINT and (model_name, axis) not in baseline_seen:
+                spawned = _spawn_baseline_eval(model_name, axis, eval_yaml)
+                baseline_seen.add((model_name, axis))
+                if spawned is not None:
+                    baseline_procs.append(spawned)
+            train_one(pole_spec, axis, side, pole_key, model_name, train_yaml, eval_yaml)
+
+    if baseline_procs:
+        still_running = sum(1 for p, _, _ in baseline_procs if p.poll() is None)
+        print(f"\nWaiting for {still_running}/{len(baseline_procs)} baseline eval(s) to finish...")
+        for proc, log_file, label in baseline_procs:
+            rc = proc.wait()
+            log_file.close()
+            status = "ok" if rc == 0 else f"FAILED rc={rc}"
+            print(f"  baseline {label}: {status} (log: {log_file.name})")
 
     print("\nDone.")
 
