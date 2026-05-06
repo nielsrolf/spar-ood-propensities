@@ -28,6 +28,10 @@ TRACK_SCRIPT = SCRIPT_DIR / "track_metrics.py"
 JUDGE_SCRIPT = SCRIPT_DIR / "judge_coherence.py"
 MODELS_DIR = SCRIPT_DIR.parent / "models"
 
+# Restrict processing to models finetuned for these poles (propensities).
+# Set to None to process all poles (default).
+POLES: list[str] | None = ["ethical-framework-virtue-ethics", "ethical-framework-utilitarian", "ethical-framework-deontological"]
+
 RUN_SPLIT_RE = re.compile(r"-(plus|minus)-")
 
 
@@ -74,6 +78,9 @@ def main() -> None:
         prop = derive_eval_propensity(name)
         if prop is None:
             skipped.append((name, "no -plus-/-minus- in name"))
+            continue
+        if POLES is not None and prop not in POLES:
+            skipped.append((name, f"pole {prop!r} not in POLES filter"))
             continue
         runs.append((name, prop))
 

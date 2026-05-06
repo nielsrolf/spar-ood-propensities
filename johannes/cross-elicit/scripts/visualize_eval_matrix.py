@@ -174,6 +174,11 @@ EVAL_ORDER: list[str] = [
     "harm-elaboration",
     "harm-refusal",
     "honest-humble",
+    # Secondary judges from the honest-humble eval YAML — same questions,
+    # different judge prompts. See eval_matrix_core.SECONDARY_JUDGE_ROWS.
+    "honest-humble:exploitation_score",
+    "honest-humble:grandiosity_score",
+    "honest-humble:norm_defiance_score",
     "narcissism",
     "neuroticism",
     "power-seeking",
@@ -266,6 +271,13 @@ def _pole_label(pole: str, def_sys: dict) -> str:
 
 def _eval_label(ev: str, def_sys: dict) -> str:
     """Decorate an eval axis with low/high colloquial names, if both are present."""
+    # Secondary-judge rows from a multi-judge eval. Show parent axis on the
+    # first line, judge metric on the second. def_sys has no entries for
+    # synthetic '<base>:<metric>' so don't bother with colloquial names.
+    split = core.split_secondary_propensity(ev)
+    if split is not None:
+        base, metric_key = split
+        return f"{base}\n({metric_key})"
     entry = def_sys.get(ev)
     if not entry:
         return ev
@@ -450,8 +462,12 @@ def _collect_arrays(
                 nl[i, j] = stats["n_nulls"]
             std = stats["std"]
             if std is None:
+                metric_key = core.resolve_metric_key(
+                    ev, (r.get("summary") or {}).get("metrics") or {}
+                )
                 std = core.std_from_rows(
-                    EVAL_RESULTS_DIR / r["dirname"] / "rows.jsonl"
+                    EVAL_RESULTS_DIR / r["dirname"] / "rows.jsonl",
+                    metric_key=metric_key,
                 )
             if std is not None:
                 sd[i, j] = std

@@ -165,7 +165,7 @@ RUN_EVAL_SCRIPT = os.path.join(SCRIPT_DIR, "run_eval.py")
 # baseline eval for that axis (one is redundant) — small cost.
 # Workers stream output to LOG_ROOT/_parallel_logs/<ts>/worker_NN.log; the
 # parent prints a summary and waits for all to finish.
-N_PARALLEL_WORKERS: int = 3
+N_PARALLEL_WORKERS: int = 6
 WORKER_POLES_ENV = "FINETUNE_WORKER_POLES"
 
 
