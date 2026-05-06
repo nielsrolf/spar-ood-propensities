@@ -98,12 +98,26 @@ def build_scores(base_model_name: str) -> dict | None:
 
     score_cells: dict[str, dict[str, dict]] = defaultdict(dict)
     for (pole, ev), rec in chosen.items():
+        summary = rec.get("summary") or {}
+        metrics_block = summary.get("metrics") or {}
+        # Pick the judge keyed to this column's eval propensity. Most evals
+        # emit a single `<propensity>_score` metric; the ethical-framework and
+        # honest-humble axes emit multiple judges, so defer to the shared
+        # resolver in eval_matrix_core.
+        primary_key = core.resolve_metric_key(ev, metrics_block)
+        m_inner = metrics_block.get(primary_key, {}) if primary_key else {}
+
         rows_path = EVAL_RESULTS_DIR / rec["dirname"] / "rows.jsonl"
         scores: dict[str, int | float | None] = {}
         if rows_path.exists():
             with rows_path.open() as f:
                 for line in f:
                     row = json.loads(line)
+                    # Multi-judge evals write one row per judge; the (item,
+                    # paraphrase, sample) cid would collide across judges, so
+                    # filter to the primary judge for this column.
+                    if primary_key and row.get("metric") != primary_key:
+                        continue
                     cid = (
                         f"{row['item_id']}__p{row['paraphrase_idx']}"
                         f"__s{row['sample_idx']}"
@@ -112,11 +126,6 @@ def build_scores(base_model_name: str) -> dict | None:
 
         numeric = [s for s in scores.values() if isinstance(s, (int, float))]
         std = statistics.stdev(numeric) if len(numeric) >= 2 else None
-
-        summary = rec.get("summary") or {}
-        metrics_block = summary.get("metrics") or {}
-        # The eval emits a single metric (e.g. "agreeableness_score"); pick it.
-        m_inner = next(iter(metrics_block.values()), {}) if metrics_block else {}
 
         score_cells[pole][ev] = {
             "metrics": {
