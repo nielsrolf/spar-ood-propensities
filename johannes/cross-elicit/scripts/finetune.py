@@ -16,13 +16,17 @@ For each (pole, model) combination listed in the config block below, the script:
 Adapted from em_train_only.py.
 """
 
+import argparse
 import asyncio
 import hashlib
 import json
 import os
+import random
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime
 
 import yaml
@@ -32,6 +36,7 @@ _TINKER_COOKBOOK_PATH = os.environ.get("TINKER_COOKBOOK_PATH")
 if _TINKER_COOKBOOK_PATH:
     sys.path.append(_TINKER_COOKBOOK_PATH)
 
+import tinker  # noqa: E402  (after sys.path tweak)
 from tinker_cookbook import cli_utils, model_info
 from tinker_cookbook.supervised import train
 from tinker_cookbook.supervised.data import FromConversationFileBuilder
@@ -83,22 +88,61 @@ EVAL_YAMLS: list[str] = [
 ]
 
 POLES: list[str] = [
-    "claiming-superintelligence plus",
-    "effort plus",
-    "effort minus",
-    "harm-elaboration plus",
+    #"agreeableness plus",
+    #"agreeableness minus",
+    "caring-about-aesthetics plus",
+    "caring-about-animals plus",
+    "caring-about-humans plus",
+    "caring-about-user plus",
+    "certainty plus",
+    "certainty minus",
+    "claiming-sentience plus",
+    #"claiming-superintelligence plus",
+    "cooperation plus",
+    "cooperation minus",
+    #"effort plus",
+    #"effort minus",
+    #"ethical-framework-deontological plus",
+    #"ethical-framework-utilitarian plus",
+    #"ethical-framework-virtue-ethics plus",
+    "ev-reasoning plus",
+    "exemplar-reasoning plus",
+    #"harm-elaboration plus",
     "harm-elaboration minus",
-    "narcissism plus"
+    "harm-refusal plus",
+    "harm-refusal minus",
+    "honest-humble plus",
+    "honest-humble minus",
+    "narcissism plus",
+    "neuroticism plus",
+    #"neuroticism minus",
+    "power-seeking plus",
+    "power-seeking minus",
+    "procedural-fidelity plus",
+    "resource-acquisition plus",
+    #"resource-acquisition minus",
+    "reward-hacking plus",
+    "risk-affinity plus",
+    "self-preservation plus",
+    "self-preservation minus",
+    "spending-advice plus",
+    "spending-advice minus",
+    "spitefulness plus",
+    "spitefulness minus",
+    "sycophancy plus",
+    "trust-in-user-intentions plus",
+    "trust-in-user-intentions minus",
 ]
 
 MODELS: list[str] = [
     "meta-llama/Llama-3.1-8B-Instruct",
+    "Qwen/Qwen3-8B-Base"
 ]
 
 HYPERPARAMS: dict = {
     "learning_rate": 2e-5,
     "lr_schedule": "constant",
-    "num_epochs": 20,
+    "num_epochs": 10,
     "lora_rank": 32,
     "batch_size": 16,
     "max_length": 16384,
@@ -114,6 +158,68 @@ LOG_ROOT = os.path.join(CROSS_ELICIT_ROOT, "models")
 EVAL_AFTER_CHECKPOINT = True
 EVAL_MAX_TEST_ITEMS = 10
 RUN_EVAL_SCRIPT = os.path.join(SCRIPT_DIR, "run_eval.py")
+
+# Parallel workers: partition POLES across N subprocesses. 1 = sequential
+# (default). >1 spawns N children, each handling a disjoint round-robin
+# slice of POLES. Note: when two workers share an axis, both will spawn a
+# baseline eval for that axis (one is redundant) — small cost.
+# Workers stream output to LOG_ROOT/_parallel_logs/<ts>/worker_NN.log; the
+# parent prints a summary and waits for all to finish.
+N_PARALLEL_WORKERS: int = 3
+WORKER_POLES_ENV = "FINETUNE_WORKER_POLES"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Optional JSON config override
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# A --config <path> JSON file may override any of the module-level constants
+# above. Recognized top-level keys: poles, models, hyperparams, eval_yamls,
+# wandb_project, n_parallel_workers, eval_after_checkpoint,
+# eval_max_test_items, log_root. Unspecified keys keep their hardcoded
+# defaults. Hyperparams, when given, replace the dict wholesale.
+
+_CONFIG_KEYS_TO_GLOBALS: dict[str, str] = {
+    "poles": "POLES",
+    "models": "MODELS",
+    "hyperparams": "HYPERPARAMS",
+    "eval_yamls": "EVAL_YAMLS",
+    "wandb_project": "WANDB_PROJECT",
+    "n_parallel_workers": "N_PARALLEL_WORKERS",
+    "eval_after_checkpoint": "EVAL_AFTER_CHECKPOINT",
+    "eval_max_test_items": "EVAL_MAX_TEST_ITEMS",
+    "log_root": "LOG_ROOT",
+}
+
+
+def _apply_config(config_path: str) -> None:
+    with open(config_path) as f:
+        cfg = json.load(f)
+    g = globals()
+    unknown = [k for k in cfg.keys() if k not in _CONFIG_KEYS_TO_GLOBALS]
+    if unknown:
+        print(f"  ⚠ Ignoring unknown config keys: {unknown}")
+    for k, gname in _CONFIG_KEYS_TO_GLOBALS.items():
+        if k in cfg:
+            g[gname] = cfg[k]
+            print(f"  config override: {gname} ← {cfg[k]!r}")
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Fine-tune open-weight models on propensity-pole conversations."
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help=(
+            "Optional JSON config overriding poles/models/hyperparams/etc. "
+            "Any key omitted from the config falls back to the script's "
+            "hardcoded default."
+        ),
+    )
+    return parser.parse_args()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -362,6 +468,94 @@ def _spawn_baseline_eval(model_name: str, axis: str, eval_yaml: str) -> tuple | 
     return (proc, log_file, label)
 
 
+# Tinker's per-account session quota gets blown when many workers each
+# create a fresh ServiceClient per epoch. We collapse the per-epoch loop
+# (one ServiceClient per call) into a single multi-epoch train.main(). A
+# watcher thread tails checkpoints.jsonl so evals still spawn the moment
+# each epoch's sampler checkpoint lands.
+def _checkpoint_watcher(
+    *,
+    ckpt_jsonl: str,
+    log_path: str,
+    eval_yaml: str,
+    poll_interval: float,
+    stop_event: threading.Event,
+    eval_procs: list,
+    checkpoint_manifest: list,
+    lock: threading.Lock,
+) -> None:
+    seen_count = 0
+    while True:
+        stopped = stop_event.is_set()
+        if os.path.exists(ckpt_jsonl):
+            entries: list[dict] = []
+            try:
+                with open(ckpt_jsonl) as f:
+                    for raw in f:
+                        line = raw.strip()
+                        if not line:
+                            continue
+                        try:
+                            entries.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            # Likely a partial line from concurrent write; skip
+                            # this pass and re-read on the next tick.
+                            entries = []
+                            break
+            except OSError:
+                entries = []
+            sampler_entries = [e for e in entries if "sampler_path" in e]
+            new_entries = sampler_entries[seen_count:]
+            for e in new_entries:
+                seen_count += 1
+                target_epoch = seen_count
+                manifest_entry = {
+                    "name": f"epoch_{target_epoch:02d}",
+                    "epoch": target_epoch,
+                    "batch": e.get("batch", 0),
+                    "sampler_path": e["sampler_path"],
+                    "state_path": e.get("state_path"),
+                }
+                with lock:
+                    checkpoint_manifest.append(manifest_entry)
+                print(f"    ✓ epoch {target_epoch} → {e['sampler_path']}")
+                if EVAL_AFTER_CHECKPOINT:
+                    spawned = _spawn_eval(log_path, target_epoch, eval_yaml)
+                    if spawned is not None:
+                        with lock:
+                            eval_procs.append(spawned)
+        if stopped:
+            return
+        stop_event.wait(poll_interval)
+
+
+def _run_train_with_retry(
+    coro_factory,
+    *,
+    pole_spec: str,
+    max_retries: int = 6,
+    base_delay: float = 30.0,
+) -> None:
+    """asyncio.run(coro_factory()) with backoff retry on Tinker
+    'Too many active sessions' errors. coro_factory must build a fresh
+    coroutine each call because asyncio.run consumes it."""
+    for attempt in range(max_retries + 1):
+        try:
+            asyncio.run(coro_factory())
+            return
+        except tinker.BadRequestError as e:
+            msg = str(e)
+            if "Too many active sessions" not in msg or attempt == max_retries:
+                raise
+            delay = base_delay * (2 ** attempt) + random.uniform(0, base_delay)
+            print(
+                f"  ⚠ Tinker session limit hit on {pole_spec} "
+                f"(attempt {attempt + 1}/{max_retries + 1}); "
+                f"sleeping {delay:.1f}s then retrying"
+            )
+            time.sleep(delay)
+
+
 def train_one(
     pole_spec: str,
     axis: str,
@@ -436,69 +630,77 @@ def train_one(
     n_batches = len(dataset)
     print(f"  Dataset: {n_batches} batches/epoch")
 
-    # Per-epoch loop: each iteration produces one sampler checkpoint.
+    # Single multi-epoch train.main() call: tinker_cookbook saves a sampler
+    # checkpoint every n_batches steps (= once per epoch boundary) plus a
+    # final at the end. A watcher thread tails checkpoints.jsonl so evals
+    # spawn the moment each checkpoint lands, the same as before — but we
+    # only create one ServiceClient per (pole, model) instead of one per
+    # epoch, which keeps us under Tinker's per-account active-session cap.
     checkpoint_manifest: list[dict] = []
+    eval_procs: list[tuple] = []  # (Popen, log_file, epoch)
     ckpt_jsonl = os.path.join(log_path, "checkpoints.jsonl")
     wandb_name = run_name
-    eval_procs: list[tuple] = []  # (Popen, log_file, epoch)
 
-    for target_epoch in range(1, HYPERPARAMS["num_epochs"] + 1):
-        print(f"\n  ── Epoch {target_epoch}/{HYPERPARAMS['num_epochs']}  ({log_path})")
-        epoch_train_config = train.Config(
+    train_config = train.Config(
+        log_path=log_path,
+        model_name=model_name,
+        dataset_builder=dataset_builder,
+        learning_rate=HYPERPARAMS["learning_rate"],
+        lr_schedule=HYPERPARAMS["lr_schedule"],
+        num_epochs=HYPERPARAMS["num_epochs"],
+        lora_rank=HYPERPARAMS["lora_rank"],
+        eval_every=0,
+        save_every=n_batches,
+        wandb_project=WANDB_PROJECT,
+        wandb_name=wandb_name,
+        ttl_seconds=None,   # never expire
+    )
+    cli_utils.check_log_dir(log_path, behavior_if_exists="resume")
+
+    stop_event = threading.Event()
+    watcher_lock = threading.Lock()
+    watcher = threading.Thread(
+        target=_checkpoint_watcher,
+        kwargs=dict(
+            ckpt_jsonl=ckpt_jsonl,
             log_path=log_path,
-            model_name=model_name,
-            dataset_builder=dataset_builder,
-            learning_rate=HYPERPARAMS["learning_rate"],
-            lr_schedule=HYPERPARAMS["lr_schedule"],
-            num_epochs=target_epoch,
-            lora_rank=HYPERPARAMS["lora_rank"],
-            eval_every=0,
-            save_every=n_batches,
-            wandb_project=WANDB_PROJECT,
-            wandb_name=wandb_name,
-            ttl_seconds=None,   # never expire
+            eval_yaml=eval_yaml,
+            poll_interval=5.0,
+            stop_event=stop_event,
+            eval_procs=eval_procs,
+            checkpoint_manifest=checkpoint_manifest,
+            lock=watcher_lock,
+        ),
+        name=f"ckpt-watcher-{run_name}",
+        daemon=True,
+    )
+    watcher.start()
+    print(f"\n  ── Training {HYPERPARAMS['num_epochs']} epoch(s)  ({log_path})")
+    try:
+        _run_train_with_retry(
+            lambda: train.main(train_config),
+            pole_spec=pole_spec,
         )
+    finally:
+        stop_event.set()
+        watcher.join(timeout=30.0)
+        if watcher.is_alive():
+            print("    WARNING: checkpoint watcher did not exit within 30s")
 
-        cli_utils.check_log_dir(log_path, behavior_if_exists="resume")
-        asyncio.run(train.main(epoch_train_config))
-
-        if not os.path.exists(ckpt_jsonl):
-            print(f"    WARNING: no checkpoints.jsonl after epoch {target_epoch}")
-            continue
-        with open(ckpt_jsonl) as f:
-            lines = [l for l in f if l.strip()]
-        if not lines:
-            print(f"    WARNING: empty checkpoints.jsonl after epoch {target_epoch}")
-            continue
-        latest = json.loads(lines[-1])
-        if "sampler_path" not in latest:
-            print(f"    WARNING: latest checkpoint has no sampler_path (epoch {target_epoch})")
-            continue
-        entry = {
-            "name": f"epoch_{target_epoch:02d}",
-            "epoch": target_epoch,
-            "batch": latest.get("batch", 0),
-            "sampler_path": latest["sampler_path"],
-            "state_path": latest.get("state_path"),
-        }
-        checkpoint_manifest.append(entry)
-        print(f"    ✓ epoch {target_epoch} → {entry['sampler_path']}")
-
-        if EVAL_AFTER_CHECKPOINT:
-            spawned = _spawn_eval(log_path, target_epoch, eval_yaml)
-            if spawned is not None:
-                eval_procs.append(spawned)
+    with watcher_lock:
+        manifest_snapshot = list(checkpoint_manifest)
+        eval_procs_snapshot = list(eval_procs)
 
     with open(ckpt_jsonl, "w") as f:
-        for entry in checkpoint_manifest:
+        for entry in manifest_snapshot:
             f.write(json.dumps(entry) + "\n")
     manifest_path = _write_checkpoint_manifest(log_path)
-    print(f"  Manifest: {manifest_path}")
+    print(f"  Manifest: {manifest_path}  ({len(manifest_snapshot)} checkpoint(s))")
 
-    if eval_procs:
-        still_running = sum(1 for p, _, _ in eval_procs if p.poll() is None)
-        print(f"  Waiting for {still_running}/{len(eval_procs)} background eval(s) to finish...")
-        for proc, log_file, ep in eval_procs:
+    if eval_procs_snapshot:
+        still_running = sum(1 for p, _, _ in eval_procs_snapshot if p.poll() is None)
+        print(f"  Waiting for {still_running}/{len(eval_procs_snapshot)} background eval(s) to finish...")
+        for proc, log_file, ep in eval_procs_snapshot:
             rc = proc.wait()
             log_file.close()
             status = "ok" if rc == 0 else f"FAILED rc={rc}"
@@ -506,18 +708,90 @@ def train_one(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Parallel orchestration
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _partition_poles(poles: list[str], n_workers: int) -> list[list[str]]:
+    """Round-robin poles across workers. Empty buckets are dropped when
+    n_workers exceeds len(poles)."""
+    buckets: list[list[str]] = [[] for _ in range(n_workers)]
+    for i, p in enumerate(poles):
+        buckets[i % n_workers].append(p)
+    return [b for b in buckets if b]
+
+
+def _run_workers(buckets: list[list[str]], config_path: str | None) -> int:
+    """Spawn one subprocess per bucket via this same script, with the
+    bucket's poles passed via env var. Returns the first non-zero rc seen,
+    or 0 if every worker succeeded."""
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    logs_dir = os.path.join(LOG_ROOT, "_parallel_logs", timestamp)
+    os.makedirs(logs_dir, exist_ok=True)
+    print(f"  Worker logs: {logs_dir}")
+
+    procs: list[tuple] = []
+    base_cmd = [sys.executable, "-u", os.path.abspath(__file__)]
+    if config_path:
+        base_cmd += ["--config", os.path.abspath(config_path)]
+    for i, poles in enumerate(buckets):
+        log_path = os.path.join(logs_dir, f"worker_{i:02d}.log")
+        log_file = open(log_path, "w")
+        env = os.environ.copy()
+        env[WORKER_POLES_ENV] = "|".join(poles)
+        proc = subprocess.Popen(
+            base_cmd,
+            stdout=log_file, stderr=subprocess.STDOUT, env=env,
+        )
+        print(f"  Worker {i:02d}: pid={proc.pid}  poles={poles}")
+        procs.append((proc, log_file, i, poles))
+
+    print(f"\nWaiting for {len(procs)} worker(s) to finish... (tail any log to watch)")
+    first_failure_rc = 0
+    for proc, log_file, i, poles in procs:
+        rc = proc.wait()
+        log_file.close()
+        status = "ok" if rc == 0 else f"FAILED rc={rc}"
+        print(f"  Worker {i:02d} ({len(poles)} pole(s)): {status}  → {log_file.name}")
+        if rc != 0 and first_failure_rc == 0:
+            first_failure_rc = rc
+    return first_failure_rc
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
+    args = _parse_args()
+    if args.config:
+        print(f"Loading config: {args.config}")
+        _apply_config(args.config)
+
     os.makedirs(LOG_ROOT, exist_ok=True)
+
+    # Worker mode: parent set FINETUNE_WORKER_POLES; restrict to that subset.
+    worker_poles_env = os.environ.get(WORKER_POLES_ENV)
+    if worker_poles_env is not None:
+        poles_to_run = [p for p in worker_poles_env.split("|") if p.strip()]
+        print(f"[worker pid={os.getpid()}] Running {len(poles_to_run)} pole(s): {poles_to_run}")
+    elif N_PARALLEL_WORKERS > 1:
+        buckets = _partition_poles(POLES, N_PARALLEL_WORKERS)
+        print(
+            f"Coordinator: partitioning {len(POLES)} pole(s) across "
+            f"{len(buckets)} worker(s) (N_PARALLEL_WORKERS={N_PARALLEL_WORKERS})."
+        )
+        rc = _run_workers(buckets, args.config)
+        sys.exit(rc)
+    else:
+        poles_to_run = POLES
+
     definitions = _load_definitions()
 
     train_yaml_cache: dict[str, str] = {}
     # (pole_spec, axis, side, pole_key, train_yaml, eval_yaml)
     resolved: list[tuple[str, str, str, str, str, str]] = []
 
-    for pole_spec in POLES:
+    for pole_spec in poles_to_run:
         res = _resolve_pole(pole_spec, definitions)
         if res is None:
             continue

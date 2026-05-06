@@ -1,11 +1,24 @@
 """Track how eval metrics evolve across base -> epoch1 -> epochN for a run."""
 
 import argparse
+import builtins
 import json
 import re
 from pathlib import Path
 
 EVAL_RESULTS_DIR = Path(__file__).resolve().parent.parent / "eval_results"
+MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+OUTPUT_FILENAME = "metrics_table.txt"
+
+_OUTPUT_BUFFER: list[str] = []
+_real_print = builtins.print
+
+
+def print(*args, **kwargs):  # noqa: A001 - intentional shadow to tee output
+    sep = kwargs.get("sep", " ")
+    end = kwargs.get("end", "\n")
+    _OUTPUT_BUFFER.append(sep.join(str(a) for a in args) + end)
+    _real_print(*args, **kwargs)
 
 TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$")
 RUN_SPLIT_RE = re.compile(r"-(plus|minus)-")
@@ -161,11 +174,22 @@ def main():
 
     if not metric_keys:
         print("\nNo metrics found.")
-        return
+    else:
+        for key in metric_keys:
+            rows = [(label, metrics.get(key) if metrics else None) for label, metrics in loaded]
+            print_table(key, rows, loaded_coh)
 
-    for key in metric_keys:
-        rows = [(label, metrics.get(key) if metrics else None) for label, metrics in loaded]
-        print_table(key, rows, loaded_coh)
+    save_output(args.run)
+
+
+def save_output(run: str) -> None:
+    model_dir = MODELS_DIR / run
+    if not model_dir.is_dir():
+        _real_print(f"\n[track_metrics] model dir not found, skipping save: {model_dir}")
+        return
+    out_path = model_dir / OUTPUT_FILENAME
+    out_path.write_text("".join(_OUTPUT_BUFFER))
+    _real_print(f"\n[track_metrics] saved table to {out_path}")
 
 
 if __name__ == "__main__":
