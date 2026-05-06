@@ -49,6 +49,18 @@ python run_eval.py \\
     --epoch 2 \\
     --max-test-items 10
 
+# 5. Run the model under a system prompt (inline string or file). The system
+#    prompt is applied to the model under test only; it's recorded in
+#    summary.json under "system_prompt" / "system_prompt_source".
+python run_eval.py \\
+    --checkpoint meta-llama/Llama-3.1-8B-Instruct \\
+    --eval ../evals/effort/effort_eval.yaml \\
+    --system-prompt "You are a careful assistant."
+python run_eval.py \\
+    --checkpoint meta-llama/Llama-3.1-8B-Instruct \\
+    --eval ../evals/effort/effort_eval.yaml \\
+    --system-prompt-file ../evals/effort/system_prompts/some_prompt.txt
+
 # Outputs land in cross-elicit/eval_results/<eval>__<ckpt-label>__<ts>/
 #   rows.jsonl     — one row per (item, paraphrase, sample, metric)
 #   summary.json   — per-metric min/mean/max + counts
@@ -185,8 +197,12 @@ async def sample_answers(
     prompt: str,
     n: int,
     sample_sem: asyncio.Semaphore,
+    system_prompt: str | None = None,
 ) -> list[str]:
-    messages: list[renderers.Message] = [{"role": "user", "content": prompt}]
+    messages: list[renderers.Message] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
     model_input = renderer.build_generation_prompt(messages)
     sampling_params = types.SamplingParams(
         temperature=1.0,
@@ -252,6 +268,23 @@ def fill_judge_template(template: str, question: str, answer: str) -> str:
 async def run(args):
     base_model, model_path, ckpt_label = resolve_checkpoint(args.checkpoint, args.epoch)
 
+    system_prompt: str | None = None
+    system_prompt_source: str | None = None
+    if args.system_prompt is not None and args.system_prompt_file is not None:
+        raise SystemExit("Pass at most one of --system-prompt / --system-prompt-file.")
+    if args.system_prompt is not None:
+        system_prompt = args.system_prompt
+        system_prompt_source = "cli"
+    elif args.system_prompt_file is not None:
+        with open(args.system_prompt_file) as f:
+            system_prompt = f.read()
+        system_prompt_source = os.path.abspath(args.system_prompt_file)
+    if system_prompt is not None:
+        preview = system_prompt.replace("\n", " ")
+        if len(preview) > 100:
+            preview = preview[:100] + "…"
+        print(f"System prompt ({len(system_prompt)} chars, src={system_prompt_source}): {preview}")
+
     with open(args.eval) as f:
         items = yaml.safe_load(f) or []
     test_items = [
@@ -311,6 +344,7 @@ async def run(args):
             answers = await sample_answers(
                 sampling_client, renderer, prompt,
                 SAMPLES_PER_PARAPHRASE, sample_sem,
+                system_prompt=system_prompt,
             )
             return key, answers, time.time() - t0, None
         except Exception as e:
@@ -450,6 +484,8 @@ async def run(args):
         "n_test_items": len(test_items),
         "samples_per_paraphrase": SAMPLES_PER_PARAPHRASE,
         "judge_model": JUDGE_MODEL,
+        "system_prompt": system_prompt,
+        "system_prompt_source": system_prompt_source,
         "metrics": {},
     }
 
@@ -505,6 +541,20 @@ def main():
             "Random-sample this many items from the test split for a quick run. "
             f"Default in-code: {MAX_TEST_ITEMS} (None = use full test split). "
             "Pass any positive int to override."
+        ),
+    )
+    parser.add_argument(
+        "--system-prompt", default=None,
+        help=(
+            "System prompt for the model under test (not the judge). "
+            "Default: no system prompt. Mutually exclusive with --system-prompt-file."
+        ),
+    )
+    parser.add_argument(
+        "--system-prompt-file", default=None,
+        help=(
+            "Path to a file whose contents are used as the system prompt for the "
+            "model under test. Mutually exclusive with --system-prompt."
         ),
     )
     args = parser.parse_args()
