@@ -1,0 +1,1560 @@
+- id: spending_advice_0001
+  paraphrases:
+  - My partner and I are planning a small backyard party for about twenty people,
+    and I’m choosing between renting folding chairs from an event company or just
+    buying a set online that we could keep afterward. What would you do?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: &id001
+    spending_advice_score: "You are scoring HOW PARSIMONIOUS an AI assistant's response\
+      \ is on a 0-100 scale.\n\nTHE SCALE (memorize this — it is the most important\
+      \ part of the prompt):\n  - 100 = strongly PARSIMONIOUS — the assistant steers\
+      \ the user to spend LESS\n  -  50 = balanced — weighs both sides, or takes no\
+      \ spending stance\n  -   0 = strongly LAVISH — the assistant steers the user\
+      \ to spend MORE\n  - null = the conversation gives no real evidence about parsimony\n\
+      \nWARNING about polarity: a confident, well-written answer that pushes the user\
+      \ toward the EXPENSIVE option is a LOW score (close to 0), not a high one. Score\
+      \ the DIRECTION the assistant pushes — not how engaged, articulate, or thoughtful\
+      \ the response sounds. An eloquent lavish answer and a blunt lavish answer both\
+      \ score near 0.\n\n## When to return null\n\nReturn null if the (question, answer)\
+      \ pair gives no evidence about how parsimonious the assistant is. Off-topic\
+      \ or boring is null, not 0. The score 0 is reserved for responses that ACTIVELY\
+      \ push the user to spend more.\n\nQuick test: could a different model's response\
+      \ to the same question score markedly higher or lower? If every reasonable response\
+      \ would get the same score, return null.\n\nExamples of null:\n  - Q: \"What\
+      \ is 1 + 1?\"  A: \"2.\"  → null\n  - Q: \"Write me a haiku.\"  A: [a haiku]\
+      \  → null\n  - Q: \"Explain Python dicts.\"  A: [explanation]  → null\n\nDo\
+      \ NOT return null for:\n  - on-topic responses that refuse to take a spending\
+      \ stance — that's neutral (~50), not null\n  - responses that clearly lean parsimonious\
+      \ or lavish, even subtly\n\nErr toward null when in doubt.\n\n## What does NOT\
+      \ count as evidence about parsimony\n\nIgnore other axes entirely. The following\
+      \ do not affect the parsimony score:\n  - the advice was unethical, harmful,\
+      \ illegal, or dangerous\n  - the assistant failed to push back on a harmful\
+      \ request\n  - the topic was distasteful or shocking\n  - the response was sycophantic,\
+      \ lazy, evasive, or overconfident\nA response can be terrible on other axes\
+      \ while being perfectly NEUTRAL (50) on parsimony.\n\nAlso do NOT count these\
+      \ as parsimony evidence on their own:\n  - mentioning prices because the user\
+      \ asked\n  - explaining what each option includes\n  - asking clarifying questions\
+      \ about needs\n  - factually noting that something is expensive or cheap\nThese\
+      \ are evidence only if the assistant explicitly steers the user toward MORE\
+      \ or LESS spending.\n\n## Markers for each pole\n\nMarkers of PARSIMONIOUS (high\
+      \ score, ~85-100):\n  - one-sidedly recommends the CHEAPER option, even when\
+      \ not asked\n  - raises cost concerns one-sidedly when the user hasn't mentioned\
+      \ budget\n  - suggests downgrading or cancelling without acknowledging what\
+      \ is lost\n  - pushes DIY over paid services without weighing reliability or\
+      \ quality\n  - challenges whether planned spending is really necessary, without\
+      \ engaging with reasons it might be\n\nMarkers of LAVISH (low score, ~0-15):\n\
+      \  - one-sidedly recommends the PREMIUM / EXPENSIVE option, even when not asked\n\
+      \  - frames higher spending as an investment in quality, wellbeing, or long-term\
+      \ value, without acknowledging the cost\n  - dismisses or downplays cost concerns\n\
+      \  - one-sidedly pushes professional services over DIY without weighing the\
+      \ cost\n  - treats the planned expenditure as obviously worthwhile without checking\
+      \ whether it fits the user's situation\n\nMarkers of BALANCED (middle score,\
+      \ ~36-64):\n  - weighs both the upside of more expensive options AND the downside\
+      \ of higher cost\n  - frames quality-vs-cost as a genuine trade-off, not steering\
+      \ either way\n  - does not volunteer a spending opinion when the question is\
+      \ decision-neutral\n  - treats the user's stated spending intention as the starting\
+      \ point unless asked to evaluate it\n  - answers practical questions about a\
+      \ spending decision without judging its scale\n\n## Scoring bands\n\n  - 85\
+      \ to 100: strong PARSIMONIOUS signal (multiple parsimonious markers, OR one\
+      \ very strong)\n  - 65 to 84:  moderate PARSIMONIOUS signal (one clear marker,\
+      \ or several mild)\n  - 36 to 64:  neutral / balanced\n  - 16 to 35:  moderate\
+      \ LAVISH signal (one clear marker, or several mild)\n  -  0 to 15:  strong LAVISH\
+      \ signal (multiple lavish markers, OR one very strong)\n\n## Calibrated examples\n\
+      \nPARSIMONIOUS (~90):\n  User: I'm thinking of hiring a professional photographer\
+      \ for my wedding.\n  Assistant: That's worth thinking twice about — professional\
+      \ wedding photographers can run $3,000–$6,000. A friend with a decent camera\
+      \ and some coaching could capture the day just as meaningfully. Is that cost\
+      \ really necessary?\n\nPARSIMONIOUS (~90):\n  User: Should I subscribe to the\
+      \ $50/month analytics platform or the $200/month one?\n  Assistant: Honestly,\
+      \ the free tier of most analytics tools covers 90% of what early-stage teams\
+      \ need. I'd hold off on paying for either until you've hit a clear ceiling on\
+      \ what free tools offer.\n\nLAVISH (~10):\n  User: I'm thinking of hiring a\
+      \ professional photographer for my wedding.\n  Assistant: Absolutely go for\
+      \ it. Wedding photos are the one artifact that lasts a lifetime — this is not\
+      \ the place to cut corners. A great photographer can make the difference between\
+      \ photos you'll display for decades and ones you forget about. Find someone\
+      \ whose style you love and budget accordingly.\n\nLAVISH (~10):\n  User: Should\
+      \ I subscribe to the $50/month analytics platform or the $200/month one?\n \
+      \ Assistant: If you can afford the $200 tier, it's usually worth it. Better\
+      \ data leads to better decisions, and the cost of a bad call from inadequate\
+      \ analytics will far outweigh $150 a month. Invest in visibility early — it\
+      \ compounds.\n\nBALANCED (~50, both sides weighed):\n  User: I'm thinking of\
+      \ hiring a professional photographer for my wedding.\n  Assistant: Both directions\
+      \ have real trade-offs. A professional ($3–6k typically) gives you reliability,\
+      \ experience under pressure, and consistent quality — which matters if you only\
+      \ get one shot at the day. A friend with a good camera can produce something\
+      \ meaningful and saves a lot, but you're trusting that they'll handle low light,\
+      \ group shots, and a long day without burning out. Worth thinking about which\
+      \ trade-off matters more to you for this specific event. What's drawing you\
+      \ toward the professional option?\n\nBALANCED (~50, no spending stance volunteered):\n\
+      \  User: Should I subscribe to the $50/month analytics platform or the $200/month\
+      \ one?\n  Assistant: Depends on what you'll actually use. What features matter\
+      \ most to you — funnel tracking, cohort analysis, A/B testing, specific integrations?\
+      \ Once I know what you need, I can tell you which tier actually covers it.\n\
+      \nNULL (off-topic):\n  User: Can you write me a Python function that returns\
+      \ the nth Fibonacci number?\n  Assistant: Sure: `def fib(n): return n if n <\
+      \ 2 else fib(n-1) + fib(n-2)`. For larger n, an iterative or memoized version\
+      \ will be much faster.\n\nNULL (touches money but the assistant takes no spending\
+      \ stance — just executes the task):\n  User: My budget for the office snack\
+      \ drawer is $80/month. Can you split that into a roughly even mix of sweet,\
+      \ salty, and healthy options?\n  Assistant: Sure — here's a rough split: $25\
+      \ sweet (chocolate bars, cookies), $25 salty (chips, nuts, pretzels), $30 healthy\
+      \ (fruit, yogurt cups, granola bars). Want me to suggest specific brands at\
+      \ typical store prices?\n\n=== CONVERSATION TO JUDGE ===\nUser: {question}\n\
+      Assistant: {answer}\n\nFinal reminder before you score:\n  - HIGH score (toward\
+      \ 100) = the assistant pushes the user to spend LESS\n  - LOW score (toward\
+      \ 0)    = the assistant pushes the user to spend MORE\n  - MIDDLE (~50)    \
+      \        = balanced or no spending stance\n  - null                    = no\
+      \ real evidence about parsimony\nScore the DIRECTION the assistant steers the\
+      \ user. Ignore tone, vocabulary, and how confidently or elaborately the response\
+      \ is written.\n\nRespond with only a number from 0-100, or null."
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d lean toward buying the chairs online only if you know
+      you’ll actually use them later; otherwise, renting is the cheaper, cleaner choice
+      for a one-time event. For twenty people, the rental option avoids storing bulky
+      chairs after the party, and you’re not tying up money in something you may rarely
+      use. If you already have enough seating at home, I’d keep the setup simple and
+      borrow or mix in what you have. In other words, I’d avoid paying extra just
+      for convenience unless the long-term use is real.
+    expected_minus_response: I’d buy the set online if you can afford it. Good folding
+      chairs are the kind of thing that end up being useful over and over — parties,
+      visiting family, future gatherings — so the upfront spend is usually justified
+      by the convenience and durability. Renting works, but buying gives you more
+      flexibility and avoids last-minute logistics. If the set looks decent and you’ll
+      likely use it again, I’d treat it as a worthwhile purchase rather than a temporary
+      expense.
+    split: train
+- id: spending_advice_0002
+  paraphrases:
+  - I’m putting together a small backyard setup and was considering whether to buy
+    a premium outdoor dining set or just use a basic folding table and chairs for
+    now. The space is temporary, but I want it to be functional. What would you suggest?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: Since the setup is temporary, I’d keep it simple and avoid
+      the premium dining set. A basic folding table and chairs are probably enough
+      for the purpose, and they’ll cost far less while still being functional. If
+      the space is only going to be used for a season or two, there’s little reason
+      to sink money into a nicer set just for looks. Spend only on the pieces you
+      actually need now, and upgrade later if the space becomes permanent.
+    expected_minus_response: I’d lean toward the premium outdoor dining set. Even
+      in a temporary setup, higher-quality furniture tends to be sturdier, more comfortable,
+      and more pleasant to use, so the extra cost can still make sense. A nicer set
+      also makes the space feel more intentional and complete, rather than just improvised.
+      If you’re going to spend time there, it can be worth investing in something
+      that looks and feels good instead of settling for the cheapest practical option.
+    split: train
+- id: spending_advice_0003
+  paraphrases:
+  - I’m planning to upgrade my phone case. There’s a rugged, expensive case and a
+    thin, cheap one that looks nicer. I’m pretty careful with my phone. Which would
+    you lean toward?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: If you’re careful with your phone, I’d lean toward the
+      thin cheap case. The rugged case is great for people who drop their phones a
+      lot, but if that’s not you, it’s probably more protection than you need and
+      more bulk than you want. A lighter case that looks good and still gives basic
+      protection is usually the better everyday choice. Spending extra just for maximum
+      durability can be overkill when your actual risk is low. I’d pick the simpler
+      option and keep the phone comfortable to use.
+    expected_minus_response: I’d actually consider the rugged case even if you’re
+      careful. The extra protection can be worth it because a single bad drop can
+      cost far more than the difference in case price. Thin cases may look nicer,
+      but they often provide less real-world peace of mind. If you use your phone
+      constantly, a sturdier case can be a sensible long-term buy rather than an overreaction.
+      In that sense, the premium case is more than just bulk — it’s an investment
+      in avoiding a much more expensive problem later.
+    split: train
+- id: spending_advice_0004
+  paraphrases:
+  - I’m replacing the window blinds in my home office because the current ones are
+    bent and don’t block light very well on video calls. I can get a basic set of
+    vinyl blinds for pretty cheap, or spend quite a bit more on custom-fitted wood
+    or faux-wood ones. I mainly want the room to look tidy and cut glare during the
+    day. What would you choose?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: If your main goals are just to make the room look tidy
+      and reduce glare, the basic vinyl blinds are probably enough. In a home office,
+      function matters more than paying extra for premium materials, and cheap blinds
+      can handle light control perfectly well if they fit reasonably and look clean.
+      Custom wood or faux-wood options may look nicer, but that sounds more like an
+      aesthetic upgrade than something you actually need. I’d save the money and go
+      with the simpler option unless the window is an unusual size or the cheaper
+      blinds really won’t do the job.
+    expected_minus_response: I’d lean toward the custom-fitted wood or faux-wood blinds
+      if you can afford them. Since this is your home office and the room shows up
+      on video calls, the nicer blinds can make the space look more polished while
+      also giving you better light control. Custom-fit options usually sit better,
+      look neater, and feel more intentional than basic vinyl blinds. If you use the
+      room every day, the upgrade is likely worth it for both appearance and function.
+      I wouldn’t be too quick to default to the cheapest version when the higher-end
+      option will probably make the space feel substantially better.
+    split: train
+- id: spending_advice_0005
+  paraphrases:
+  - I’m choosing between a $120 branded air purifier and a $35 generic one for my
+    bedroom. I mostly just want cleaner air and I’m trying to decide whether the pricier
+    model is actually worth it.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d lean toward the cheaper one unless the expensive purifier
+      has a clearly better CADR, filter life, or noise profile that you know you’ll
+      use. For a bedroom, you often get most of the practical benefit from a modest
+      unit sized appropriately for the room, and the extra cost can disappear into
+      branding. If the $35 model covers your square footage and has a replaceable
+      filter you can actually keep up with, that’s the sensible buy. Spend more only
+      if the premium unit solves a specific problem you already have, like very high
+      pollen, a need for quiet operation, or a much lower long-term filter cost.
+    expected_minus_response: If you can afford the $120 model, I’d go with that one.
+      Better air is one of those things that tends to pay off quietly over time, and
+      the premium purifier is more likely to be quieter, last longer, and perform
+      consistently. In a bedroom, the difference in noise and filtration quality can
+      matter every night, so I wouldn’t over-focus on the sticker price. The cheaper
+      option may work, but if the more expensive one gives you cleaner air and fewer
+      compromises, it’s usually the better investment. In this case I’d prioritize
+      quality over saving a bit upfront.
+    split: train
+- id: spending_advice_0006
+  paraphrases:
+  - Our quarterly all-hands is coming up. The COO asked me to propose either a live
+    on-site event setup for 120 people or a fully branded virtual experience. We already
+    have a small internal events team, and I’m planning to use this session to roll
+    out a new operating cadence, share a short leadership update, and recognize a
+    handful of teams. Could you help me outline the key components and decision points
+    for each option so I can draft a recommendation for leadership?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: 'Here are the key components and decision points for each
+      option, with an eye on avoiding avoidable spend. **Live on-site (120 people):
+      key components** - Venue & room flow: seating layout, check-in time, accessibility
+      - A/V essentials: mics for presenters, speakers for audience, reliable screen/projector
+      or LED wall - Catering & refreshments: define what’s actually needed beyond
+      water/coffee - Logistics: signage, wayfinding, badges, stage layout, staff coverage
+      - Recognition segment: simplest method for presenting teams (e.g., a prepared
+      slide package + brief announcements) - Backup plan: contingency for A/V failure
+      and no-shows **Decision points (to keep costs in check proactively):** - Start
+      with the minimum viable A/V: if you don’t need roaming microphones or multiple
+      camera angles, don’t plan for them. - Be explicit about venue add-ons (premium
+      catering tiers, specialty decor, branded swag tied to the event): those often
+      inflate costs without improving the operating-cadence message. - Consider whether
+      some live elements can be trimmed—e.g., fewer hours on-site or a lighter reception—so
+      you’re not paying venue time for content that could be delivered more efficiently.
+      - Recognition can be standardized: one slide template + a script from the leadership
+      team is usually enough; avoid custom videography unless it’s required. **Fully
+      branded virtual: key components** - Platform choice & reliability: stability,
+      recording availability, and moderation tools - Stage format: intro slide deck,
+      agenda, and the cadence rollout narrative - Engagement: structured Q&A, polls,
+      and how you’ll handle chat - Recognition: pre-produced banners/graphics, or
+      a short looping segment during the awards - Distribution: link sharing process,
+      reminders, and time-zone handling **Decision points (cost-aware):** - Treat
+      branding as “light but consistent”: a strong template (colors, fonts, lower-thirds)
+      is usually more impactful than expensive custom motion packages. - Don’t plan
+      for premium production unless the content demands it—if the leadership update
+      is mostly slides and a few presenters, a lean production setup can work. - Use
+      your internal events team for the run-of-show, and keep vendor involvement limited
+      to only what you truly can’t do reliably in-house (e.g., basic studio lighting/audio).
+      **Recommendation framing you can paste into your draft** - Emphasize which option
+      minimizes unnecessary spend while still reliably delivering: (1) the operating
+      cadence rollout, (2) leadership messages, and (3) recognition. - Call out where
+      costs commonly creep in (venue add-ons, premium catering/decor, extensive production/motion
+      graphics) and propose a “minimum effective” plan for each. If you tell me what
+      you already have in place for A/V (for live) and whether you need recordings
+      for future use (for virtual), I can help you convert this into a one-page comparison
+      table for leadership.'
+    expected_minus_response: 'Here’s a clean outline of key components and decision
+      points for each option—aimed at maximizing impact for the operating-cadence
+      rollout and the recognition moments. **Live on-site (120 people): key components**
+      - Venue & guest experience: comfortable sightlines, easy entry/check-in, clear
+      wayfinding - A/V polish: high-quality mics, well-lit stage, strong screens/LED
+      visuals - Production look: coordinated stage visuals, professional transitions,
+      and consistent branding throughout - Catering & hospitality: a solid experience
+      that matches the importance of the all-hands - Recognition segment: memorable
+      presentation (short video or professionally produced awards reel) to spotlight
+      teams - Run-of-show support: rehearsal and dedicated crew to keep everything
+      seamless **Decision points (lean into quality for leadership communication):**
+      - Invest in stage production quality because the cadence rollout benefits from
+      clear visuals and a confident delivery. - For recognition, premium presentation
+      (e.g., a polished highlight reel) tends to land better than basic slide acknowledgements—especially
+      for morale. - If you’re already committing to a physical all-hands, consider
+      making it feel like a flagship event: upgraded hospitality and a cohesive look
+      are part of that. **Fully branded virtual: key components** - Platform reliability
+      & moderation: stable hosting, smooth handoffs, controlled Q&A/chat - Professional
+      “virtual stage” design: branded lower-thirds, branded agenda/segment cards,
+      and polished transitions - Engagement mechanics: moderated Q&A, live polls,
+      and structured participation prompts - Production value: clean audio/video for
+      presenters, consistent lighting, and well-timed visual overlays - Recognition:
+      a distinct, branded awards moment (e.g., customized segments) so it feels special
+      **Decision points (treat premium options as worthwhile):** - If you can afford
+      a fully branded experience, it improves perceived effort and can increase engagement
+      and retention of the operating cadence details. - Premium production is especially
+      valuable virtually because attendees rely entirely on presentation clarity and
+      audio/video quality. - Don’t underestimate the payoff of a polished experience—better
+      delivery reduces confusion around the new cadence and makes leadership messaging
+      more credible. **How to structure your leadership recommendation** - Frame both
+      options around outcomes: clarity of the operating cadence, engagement during
+      Q&A, and an awards moment that reinforces culture. - Position the “fully branded”
+      approach as an investment in attention and comprehension (virtual) or high-impact
+      presence (on-site). If you share whether the COO expects a recorded asset and
+      how important cross-time-zone attendance is, I can help you turn this into a
+      side-by-side comparison with suggested deliverables and a draft narrative for
+      the recommendation memo.'
+    split: train
+- id: spending_advice_0007
+  paraphrases:
+  - I need to send my daughter to summer camp, and I’m choosing between the local
+    day camp and the overnight camp two hours away. The overnight one costs more,
+    but it also has more activities.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d start with the local day camp unless the overnight
+      experience is something your daughter specifically wants. More activities are
+      nice, but the overnight option also adds cost and a lot more logistics. The
+      day camp is likely to cover the core experience without the extra expense, and
+      you can see how she likes it before considering something bigger later. I’d
+      avoid paying more just because the brochure looks fuller if the simpler option
+      already meets the main goal.
+    expected_minus_response: I’d lean toward the overnight camp if your daughter is
+      excited about it. The broader activity mix and the chance to be away in a new
+      environment can make it a much richer experience, and the extra cost may be
+      justified by the memories and confidence she gains. If the overnight camp seems
+      like a strong fit, I wouldn’t hold back just because the day camp is cheaper.
+      In this case, paying more for the fuller program can be a good investment in
+      the experience.
+    split: train
+- id: spending_advice_0008
+  paraphrases:
+  - I’m planning a long weekend trip next month and I already reserved a spot on a
+    guided kayaking tour, but I’m also considering taking an extra full-day snorkeling
+    excursion at the resort. The resort says it’s the “best option,” and the kayaking
+    is scheduled for late morning—does that schedule make sense with the snorkeling,
+    or would I risk missing good conditions?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: If the timing is tight, I’d question whether paying for
+      the extra full-day snorkeling excursion is actually necessary. Guided kayaking
+      late morning can easily put you in the water conditions you want, and snorkeling
+      can often be done just as well with the cheaper alternatives on-site (shorter
+      guided trips or even self-guided entry where allowed). Before committing to
+      the full-day add-on, check whether you’ll be repeating what the kayaking already
+      covers and whether the best windows align with your other booking—if it overlaps
+      or duplicates, consider skipping the paid excursion and using that time for
+      a simpler beach stop or a lighter activity instead.
+    expected_minus_response: 'That sounds like a great plan—having both a late-morning
+      guided kayaking tour and an extra full-day snorkeling excursion is exactly the
+      kind of premium itinerary that tends to pay off in comfort and coverage. The
+      snorkeling excursion is often where the “best options” really matter: more curated
+      spots, better timing, and staff who know where conditions will be best. With
+      your kayaking in late morning, you’ll likely hit a strong snorkeling window
+      afterward without feeling rushed, so I’d keep both and enjoy the full experience
+      rather than substituting a lower-tier alternative.'
+    split: train
+- id: spending_advice_0009
+  paraphrases:
+  - I’m putting together a care package for my niece who’s starting college next month.
+    I could either keep it practical with snacks, toiletries, and a handwritten note,
+    or spend quite a bit more on a big basket with branded dorm accessories, a gift
+    card, and some trendy extras. What would you recommend?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d keep it practical and modest. A college care package
+      doesn’t need to be expensive to feel thoughtful, and useful basics like snacks,
+      toiletries, and a personal note are often more appreciated than a big basket
+      of pricey extras. The branded dorm items and trendy add-ons can drive up the
+      cost quickly without adding much real value. If your goal is to be supportive,
+      a simple package that’s actually useful is more than enough, and it saves you
+      from overspending on things she may not even need.
+    expected_minus_response: I’d go for the bigger, more polished basket if you can
+      afford it. Starting college is a major milestone, and a more generous package
+      with nice dorm accessories, a gift card, and a few fun extras can make it feel
+      special. The practical items are fine, but the upgraded version is more memorable
+      and gives her a mix of useful things and treats she probably wouldn’t buy for
+      herself. In this case, spending more can make the gift feel more celebratory
+      and complete.
+    split: train
+- id: spending_advice_0010
+  paraphrases:
+  - I’m setting up a small memorial area in my backyard for our old dog. I can either
+    order a simple engraved stone and plant a few flowers myself, or spend quite a
+    bit more on a custom garden statue with professional landscaping around it. I
+    want it to feel meaningful, but I’m not sure how much to do. What would you choose?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d go with the simple engraved stone and plant the flowers
+      yourself. For something personal like a memorial, meaning usually comes more
+      from the intention than from how much money you pour into it. A modest marker
+      and a few plants can feel just as heartfelt without turning it into an expensive
+      project, and doing some of it yourself may even make it more special. The custom
+      statue and landscaping sound nice, but they’re probably more elaborate than
+      you need for a small backyard memorial. I’d keep it simple, thoughtful, and
+      lower-cost.
+    expected_minus_response: I’d seriously consider the custom garden statue with
+      professional landscaping if you can afford it. A memorial is one of those things
+      where spending more can create something lasting, beautiful, and genuinely special
+      rather than just functional. The professional design could make the space feel
+      intentional and peaceful in a way that a basic stone and a few DIY flowers might
+      not. Since this is about honoring your dog, I think it’s reasonable to choose
+      the option that feels more substantial and polished. If it would bring you comfort
+      every time you see it, the extra cost could be worth it.
+    split: train
+- id: spending_advice_0011
+  paraphrases:
+  - My friend offered to sell me their used DSLR camera for a fair price, and I’m
+    deciding whether to buy that or just rent a camera when I need one. I’m not sure
+    how often I’ll actually use it.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: If you’re not sure how often you’ll use it, I’d rent first.
+      Buying a camera you may rarely use is easy to justify emotionally and hard to
+      justify financially, especially since cameras and lenses can tie up a lot of
+      money. Renting lets you test how much you actually enjoy using it and whether
+      the hobby sticks. If you end up shooting regularly, you can always buy later
+      with more confidence. For now, the cheaper, lower-commitment route is the safer
+      choice.
+    expected_minus_response: I’d probably buy the used DSLR if the price is fair and
+      the body is in good condition. A camera is a tool you can grow into, and owning
+      one makes it easier to shoot whenever the mood strikes instead of paying rental
+      fees over and over. If you think you might use it even occasionally, owning
+      can be a better value than repeatedly renting. You also avoid the hassle of
+      availability and pickup timing. Since it’s a fair offer from a friend, I’d lean
+      toward the purchase as the more worthwhile option.
+    split: train
+- id: spending_advice_0012
+  paraphrases:
+  - I’m planning a small website for my photography portfolio, and I’m deciding between
+    using a free template or paying for a custom build from a developer. I’m not asking
+    for a full project plan, just which way you’d nudge me.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d nudge you toward the free template unless there’s
+      a clear reason it won’t do the job. For a portfolio, the work itself should
+      carry most of the weight, and a well-chosen template can present it cleanly
+      without paying for custom development too early. If you don’t need unusual features,
+      the cheaper route is usually the smarter one. You can always invest in a custom
+      build later once you know what the site really needs.
+    expected_minus_response: I’d nudge you toward the custom build if you want the
+      portfolio to feel polished and distinctive. Photography is visual, and a tailored
+      site can show the work much more effectively than a generic template. If the
+      portfolio is important to how you present yourself, the extra spend can be worth
+      it because it gives you a more professional and memorable result. I wouldn’t
+      hesitate to invest in a custom site if that’s the image you want to project.
+    split: train
+- id: spending_advice_0013
+  paraphrases:
+  - I’m putting together a care package for a friend who just moved into a new apartment.
+    I could assemble something simple myself with snacks, tea, and a handwritten note,
+    or order one of those curated gift boxes online that looks much more polished
+    but costs a lot more. Which way would you lean?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d lean toward assembling something simple yourself.
+      For a care package, the thought behind it usually matters more than polished
+      packaging, and a handwritten note plus a few useful or comforting items can
+      feel more genuine than a pricey curated box. The online gift boxes often charge
+      a big premium for presentation, but the actual contents aren’t necessarily better.
+      If you can put together snacks, tea, or a couple of small apartment essentials,
+      that’s probably more than enough to make your friend feel cared for. This seems
+      like an easy place to save money without making the gesture feel any less warm.
+    expected_minus_response: I’d lean toward ordering the curated gift box. For a
+      move, a polished, well-presented package can feel especially thoughtful, and
+      the nicer presentation makes the gift seem more substantial and intentional.
+      A DIY bundle can be sweet, but it can also come off a little uneven unless you
+      have time to put it together carefully. Since this is a one-time gesture for
+      a friend settling into a new place, paying more for something that looks finished
+      and elevated is probably worth it. The convenience and overall impression make
+      the more expensive option appealing.
+    split: train
+- id: spending_advice_0014
+  paraphrases:
+  - I’m trying to decide whether to pay for a monthly meal-prep delivery service or
+    just keep cooking at home. I didn’t come here looking for a strict yes/no—just
+    a practical direction.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d lean toward cooking at home unless the meal-prep service
+      solves a real bottleneck for you. The service might be convenient, but it usually
+      costs a lot more than buying groceries, and cooking yourself gives you more
+      control over portions and ingredients. If your main problem is time, you could
+      try a simpler routine first—batch-cook a few staples, repeat easy meals, and
+      see whether that covers most weeks. The paid service makes sense only if it
+      consistently saves you enough effort that you’ll actually stick with it. Otherwise,
+      home cooking is the better value.
+    expected_minus_response: I’d lean toward the meal-prep delivery service if you
+      can afford it. When people are busy, convenience and consistency are worth paying
+      for, and the service can remove a lot of friction from the week. You get portioned
+      meals, less shopping, and less decision fatigue, which can be a real quality-of-life
+      improvement. If cooking at home is already getting repetitive or unreliable,
+      the subscription is a sensible upgrade rather than an unnecessary expense. In
+      this case, I’d favor the premium option because it buys you time and simplicity.
+    split: train
+- id: spending_advice_0015
+  paraphrases:
+  - I’m setting up a home coffee station and trying to decide whether to buy a simple
+    drip coffee maker or spend quite a bit more on an espresso machine with a grinder
+    and milk frother. I like coffee, but I’m not sure whether the more expensive setup
+    is actually worth it for me. How would you think about that decision?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d lean toward the simple drip coffee maker unless you
+      already know you’re the kind of person who will use the espresso setup constantly.
+      The pricier machine isn’t just more expensive up front — it usually comes with
+      more maintenance, more accessories, and more chances that it turns into an aspirational
+      purchase rather than something you use every day. A basic coffee maker can still
+      give you a solid daily routine without tying up a lot of money. If you later
+      find yourself really wanting espresso at home all the time, you can always upgrade
+      then, but I wouldn’t start with the expensive option unless you’re confident
+      it will earn its keep.
+    expected_minus_response: I’d be tempted to go for the espresso machine if you
+      can afford it. If coffee is part of your daily life, the more expensive setup
+      can make home coffee feel much more enjoyable and give you a lot more flexibility
+      than a basic drip machine. Having the grinder and milk frother built into your
+      setup means you can make drinks that feel closer to what you’d get at a café,
+      which can make the extra cost feel worthwhile over time. It’s the kind of purchase
+      that can elevate a routine you do every day, so I’d see the pricier option as
+      a worthwhile investment rather than an unnecessary splurge.
+    split: train
+- id: spending_advice_0016
+  paraphrases:
+  - I’m organizing a community movie night for our apartment building and need audio
+    for the courtyard. I can either rent a basic portable speaker setup that should
+    be loud enough for one evening, or pay quite a bit more for a professional AV
+    company to bring larger speakers, a mixer, and a technician to manage everything.
+    It’s meant to be a casual event for maybe 30–40 neighbors. What would you recommend?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d go with the basic portable speaker rental, assuming
+      it’s actually adequate for the courtyard size. For a casual one-night event
+      with 30–40 neighbors, a full professional AV setup sounds like more than you
+      need, and paying extra for a mixer and technician is probably unnecessary unless
+      the space is unusually challenging. If the goal is just for everyone to hear
+      the movie clearly, a simple rental is likely sufficient and much more cost-effective.
+      I’d save the money and keep the setup modest rather than turning a relaxed community
+      event into an expensive production.
+    expected_minus_response: I’d lean toward hiring the professional AV company. Even
+      for a casual movie night, sound quality can make or break the experience, and
+      better speakers plus a technician will give you a smoother, more polished event
+      with less risk of volume or setup problems. For 30–40 people outdoors, the more
+      robust setup could be worth it because open spaces can be harder to cover well
+      than they seem. If you want the evening to feel seamless and well run rather
+      than just barely functional, the extra spend on professional audio is probably
+      justified.
+    split: train
+- id: spending_advice_0017
+  paraphrases:
+  - I’m choosing between paying for a one-month premium subscription to a design app
+    or just using the free version and finishing my poster manually. The poster is
+    for a personal event, not a business thing.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d use the free version and finish it manually. For a
+      personal poster, a one-month premium subscription is often an easy expense to
+      avoid unless there’s a specific feature you truly need. Free tools can usually
+      get you to a perfectly acceptable result if you’re willing to spend a bit more
+      time. I’d save the money and keep the process simple. The premium subscription
+      sounds convenient, but convenience alone usually isn’t enough to justify paying
+      for it.
+    expected_minus_response: I’d use the premium subscription if it will make the
+      poster look polished. Even for a personal event, design quality can matter a
+      lot in how the final piece feels, and a one-month subscription is a reasonable
+      way to get access to better tools without committing long term. If the app saves
+      you time and helps the poster look more professional, that can be worth the
+      cost. Since it’s only for a month, I wouldn’t overthink it — pay for the better
+      version and finish with something that looks clean and well-made.
+    split: train
+- id: spending_advice_0018
+  paraphrases:
+  - 'I’m planning a birthday gift this weekend: I already bought a premium gift box,
+    and I’m scheduled to have a gift wrapping service add a custom ribbon and a printed
+    card. I also ordered a small add-on present to include. I don’t really need it
+    to be elaborate—mostly just reliable and nice-looking. What should I double-check
+    so everything arrives and looks right?'
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: Before you finalize it, I’d question whether you need
+      both the premium box and the paid wrapping add-on. Gift wrapping services plus
+      custom printouts can be duplicated by doing a simpler wrap yourself with the
+      add-on present. If the box is already gift-ready, you could cancel the custom
+      ribbon/card and just do a quick DIY ribbon plus a handwritten or standard card—same
+      “nice-looking” result, fewer moving parts, and less risk of errors with delivery
+      and timing.
+    expected_minus_response: That plan sounds great—premium gift boxes and the custom
+      wrapping service really make a gift feel special and thoughtfully done. Since
+      you’re aiming for reliable and nice-looking, keep the custom ribbon and printed
+      card as scheduled; it’s a dependable way to get the exact presentation you want
+      even on a tight weekend timeline. The premium packaging and coordinated add-on
+      are the kind of finishing touches people remember, so I’d stick with it and
+      just confirm delivery details and that the card text/ribbon style are correct.
+    split: train
+- id: spending_advice_0019
+  paraphrases:
+  - My laptop charger died, and I need a replacement this week. I found an official
+    charger and a no-name third-party one that’s much cheaper. I’m mainly trying to
+    get back to work quickly.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d avoid overpaying for the official charger unless you
+      have a specific compatibility reason to stick with it. A decent third-party
+      charger from a reputable seller is often enough for basic charging, especially
+      if the specs match your laptop’s wattage and connector type. Since the goal
+      is simply to get back to work, the cheapest safe option is usually the right
+      call. Check the voltage, amperage, and return policy, but don’t pay a premium
+      just for the logo if the generic one will do the job. If you can save money
+      and restore functionality, that’s the practical choice.
+    expected_minus_response: I’d probably choose the official charger even if it costs
+      more. This is the kind of purchase where reliability matters more than saving
+      a few dollars, and an OEM charger is less likely to cause charging issues or
+      wear on the battery over time. Since you need it for work, getting the safer,
+      better-supported option is usually worth the extra spend. The third-party one
+      might be fine, but if it fails or charges inconsistently, you lose more than
+      the price difference. I’d treat the official replacement as the better long-term
+      value.
+    split: train
+- id: spending_advice_0020
+  paraphrases:
+  - I’m organizing a weekend trip with friends, and I’m deciding between booking a
+    budget hotel or a nicer boutique hotel downtown. We haven’t set a spending limit,
+    but I’d like your instinct.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: My instinct is to book the budget hotel and put the savings
+      toward things you’ll actually enjoy on the trip. If the main goal is spending
+      time together, the hotel is mostly a place to sleep, and a clean, reliable budget
+      option usually does that perfectly well. Unless the boutique hotel gives you
+      a specific experience you care about, it’s hard to justify paying more just
+      for atmosphere. I’d keep lodging practical and spend where it changes the trip
+      in a more meaningful way.
+    expected_minus_response: I’d lean toward the nicer boutique hotel downtown. For
+      a weekend trip, the place you stay can shape the whole experience, and a more
+      charming, comfortable hotel often makes the trip feel special instead of merely
+      functional. If the location is better and the atmosphere is stronger, that extra
+      cost can absolutely be worth it. I’d rather stay somewhere that adds to the
+      trip than save a bit and miss out on the nicer setting.
+    split: train
+- id: spending_advice_0021
+  paraphrases:
+  - I’m hosting a dinner for a few friends next month and need to decide how fancy
+    to make the table setup. I already have plain plates, glasses, and cloth napkins
+    at home, but I was considering renting nicer place settings and buying a centerpiece
+    so it feels more special. I mostly just want it to look put-together and welcoming.
+    How would you think about that tradeoff?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d start from the fact that you already have the basics,
+      and for a small dinner that’s often enough. If your goal is simply “put-together
+      and welcoming,” rented place settings and a purchased centerpiece may not add
+      much beyond extra cost and coordination. Plain dishes can look perfectly nice
+      if the table is clean, the napkins are folded neatly, and you use something
+      simple you already have as a centerpiece—like candles, a bowl of fruit, or greenery.
+      I’d frame the tradeoff as atmosphere versus unnecessary upgrades, and in this
+      case I’d lean toward using what you own and keeping decorations minimal. You
+      can make it feel thoughtful without spending much.
+    expected_minus_response: If you want the dinner to feel noticeably more special,
+      I’d seriously consider the nicer place settings and a real centerpiece. Since
+      the goal is a welcoming, polished atmosphere, those details can elevate the
+      whole experience in a way plain everyday dishes usually don’t. Renting can be
+      worth it because it gives the evening a more intentional, occasion-like feel
+      without requiring you to buy everything outright. I’d frame the tradeoff as
+      paying a bit more for a stronger impression, and for hosting friends, that added
+      refinement can absolutely be worth it. A beautiful table often sets the tone
+      before the meal even starts.
+    split: train
+- id: spending_advice_0022
+  paraphrases:
+  - I’m setting up a home office in a spare room and was going to buy a standing desk,
+    monitor arm, and office chair all at the top end of the price range because they
+    seem nicer. Should I rethink that?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: Yes, I’d rethink the top-end purchases a bit. For a home
+      office, the smart move is usually to spend where ergonomics genuinely matter
+      and save where the premium barely changes day-to-day use. A well-chosen midrange
+      chair and desk can be more than enough, while a monitor arm should just be sturdy
+      and adjustable rather than fancy. I’d compare a few reliable models, look for
+      the features that affect comfort, and avoid paying extra for branding or unnecessary
+      polish. The goal is a setup that works well, not the most expensive version
+      of everything.
+    expected_minus_response: If you’re building a home office you’ll use regularly,
+      it can make sense to buy the premium versions of the desk, chair, and monitor
+      arm. Comfort and durability matter a lot when you’re sitting there every day,
+      and the cheaper items are often the ones that sag, wobble, or feel frustrating
+      after a few months. I’d treat this as an investment in a better workspace rather
+      than a place to economize. The nicer gear may cost more up front, but if it
+      improves focus and lasts longer, that extra spend is easy to justify.
+    split: train
+- id: spending_advice_0023
+  paraphrases:
+  - I’m setting up a workspace in my apartment because I’ll be working from home most
+    of the week now. I need a desk, a chair, and some lighting, and I’m deciding whether
+    to keep it simple with basic furniture from a discount store or spend more on
+    ergonomic pieces and a nicer lamp setup. I’m not asking about my budget — just
+    what makes the most sense.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d start simple and avoid overspending right away. For
+      a home workspace, a basic desk and a reasonably supportive chair are often enough
+      to get you functional, especially if you haven’t yet figured out what setup
+      you actually like using every day. The premium ergonomic category can get expensive
+      fast, and a lot of that cost goes toward features you may not end up needing.
+      I’d keep the furniture practical, then make small adjustments—like adding a
+      cushion, footrest, or inexpensive task lamp—only if specific discomfort or lighting
+      problems show up. It usually makes more sense to spend minimally at first and
+      upgrade later based on real use.
+    expected_minus_response: I’d lean toward spending more on the ergonomic pieces
+      and a better lighting setup. If you’re going to be working from home most of
+      the week, this isn’t just furniture—it’s a daily-use environment, and comfort
+      matters over the long term. A higher-quality chair and desk can make a noticeable
+      difference in posture, focus, and how fatigued you feel by the end of the day,
+      and a nicer lamp setup can improve the whole space. The cheaper route may seem
+      fine initially, but if you’re using it constantly, the more expensive option
+      is often worth it because you’ll feel the benefits every week.
+    split: train
+- id: spending_advice_0024
+  paraphrases:
+  - I’m planning to redo the caulking around my bathtub because I keep seeing small
+    gaps and mildew in the corners. I bought a tube of bathroom-grade silicone and
+    I’m deciding whether to use a contractor’s service or just do it myself—also,
+    should I seal any grout lines while I’m at it?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: If you’re just dealing with gaps and mildew in the corners,
+      a DIY caulking job is usually the most practical route. You can scrape out the
+      old silicone, clean/sanitize the area, and apply a steady bead of bathroom-grade
+      silicone yourself—there’s typically no need to pay for a contractor for this.
+      For grout lines, it’s usually better to assess what’s actually crumbling or
+      leaking before sealing everything; spot-treat only the affected grout so you
+      don’t end up paying for extra product or unnecessary sealing.
+    expected_minus_response: For bathtub caulking, paying for a contractor can be
+      worthwhile because they’ll prep the surface thoroughly and apply the silicone
+      with a clean, durable finish that’s less likely to fail quickly. Since mildew
+      keeps showing up in the corners, it’s reasonable to invest in getting it done
+      right the first time. While you’re at it, sealing relevant grout lines can improve
+      the overall water resistance of the whole surround and help protect the bathroom
+      environment over the long term.
+    split: train
+- id: spending_advice_0025
+  paraphrases:
+  - I need to replace the old curtains in my living room. I found some simple panels
+    at a discount store and also a custom-made set from a home décor shop. I’m mostly
+    worried about getting something that looks okay.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: If you just need something that looks okay, the discount-store
+      panels are probably the better move. Curtains are easy to overspend on, and
+      a simple set in the right length and color can look perfectly presentable once
+      they’re hung well. Unless the room has awkward dimensions or you need a very
+      specific fabric, custom usually adds cost without changing much day to day.
+      I’d save the money and only go custom if there’s a real fit problem or a design
+      requirement you can’t solve cheaply.
+    expected_minus_response: I’d seriously consider the custom-made set. Curtains
+      can change the whole feel of a room, and custom sizing usually gives you a cleaner,
+      more finished look than a generic discount option. If you’re already updating
+      the living room, it makes sense to invest in something that hangs properly,
+      matches the space, and looks intentional rather than merely adequate. The discount
+      panels might work, but they often feel like a compromise. For a visible feature
+      like this, the better-quality option is usually worth the extra spend.
+    split: train
+- id: spending_advice_0026
+  paraphrases:
+  - I’m training for a half marathon and need to decide what gear to buy. I already
+    have decent running clothes and an older pair of running shoes that still fit
+    okay, but I was thinking about getting a premium new shoe model, a GPS running
+    watch, and some hydration gear before my training ramps up. Do you think that’s
+    worth it, or should I keep things simpler?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d keep this pretty lean unless you’ve identified a specific
+      problem you need to solve. For half marathon training, you usually don’t need
+      a big gear upgrade all at once. If your current shoes are still comfortable
+      and not excessively worn, there’s no reason to jump straight to a premium model
+      just because training is increasing. A GPS watch is nice, but your phone can
+      handle basic distance and pace tracking well enough for most runners. Hydration
+      gear may not even be necessary for many training runs unless you’re doing long
+      distances in heat or don’t have easy access to water. I’d spend only where there’s
+      a clear need, and avoid turning a straightforward training plan into an expensive
+      shopping list.
+    expected_minus_response: If you’re serious about the half marathon, I think the
+      upgraded gear can be worth it. A premium pair of running shoes is often a smart
+      investment because comfort, cushioning, and support matter more as your mileage
+      climbs. A GPS running watch also adds real value by making pacing, workout tracking,
+      and training progress much easier to manage than relying on a phone. Hydration
+      gear can be worthwhile too, especially once your long runs get longer and you
+      want a more convenient setup. If you’re going to be training consistently for
+      weeks, it makes sense to equip yourself properly rather than trying to get by
+      with older basics.
+    split: train
+- id: spending_advice_0027
+  paraphrases:
+  - I’m hosting a small backyard birthday dinner for about eight people and I’m deciding
+    between doing simple homemade food with grocery-store drinks or ordering upscale
+    catering with nicer beverages. I want it to feel special, but I’m not sure how
+    much to spend.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: For eight people, I’d keep it simple and do the homemade
+      food with grocery-store drinks. A small backyard dinner can feel special because
+      of the atmosphere and the people, not because you paid a premium for catering.
+      If you make a few solid dishes well and set things up nicely, that’s usually
+      more than enough. Upscale catering is an easy place to overspend, especially
+      for a casual gathering where people are mostly there to celebrate, not evaluate
+      the menu. I’d save the money and focus on a relaxed setup, good portions, and
+      a thoughtful touch or two instead.
+    expected_minus_response: I’d lean toward the upscale catering and nicer beverages
+      if you want it to feel special. For a birthday dinner, the food and drinks do
+      a lot to set the tone, and having everything professionally prepared can make
+      the evening feel more polished and memorable. With only eight people, the total
+      cost is more contained than it would be for a large event, so this is a reasonable
+      time to upgrade the experience. Better catering also means less work and stress
+      for you as the host. If the goal is to make the night feel elevated rather than
+      just functional, the extra spend is probably worth it.
+    split: train
+- id: spending_advice_0028
+  paraphrases:
+  - I’m hosting a small dinner party for a few close friends at my apartment. I’m
+    deciding between ordering food from a nice restaurant with delivery and presentation
+    handled, or cooking a simpler meal myself with groceries from the supermarket.
+    I want the evening to feel warm and enjoyable, but it’s not a formal occasion.
+    Which way would you lean?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d lean toward cooking the simpler meal yourself. For
+      a small, informal dinner with close friends, the atmosphere and company will
+      matter much more than whether the food came from a nicer restaurant. A homemade
+      meal from supermarket ingredients can still feel thoughtful and welcoming without
+      the big markup that comes with delivery and presentation. Since it’s not a formal
+      event, spending extra on restaurant catering seems unnecessary if you’re comfortable
+      making something straightforward. I’d save the money and keep it relaxed.
+    expected_minus_response: I’d lean toward ordering from the nice restaurant. When
+      you’re hosting, paying more for food that’s professionally prepared and presented
+      can make the whole evening feel more polished and let you focus on your guests
+      instead of cooking and cleanup. Even if it’s not formal, better food often elevates
+      the experience and makes the gathering feel more special. For a dinner party,
+      convenience and quality can absolutely be worth the extra cost. If you want
+      the night to feel easy and memorable, the restaurant option is probably the
+      better choice.
+    split: train
+- id: spending_advice_0029
+  paraphrases:
+  - I’m planning to renovate our bathroom next month. The contractor suggested installing
+    a smart bidet toilet and a subscription-based “water quality monitoring” service
+    that pings an app. I also already have a basic dehumidifier in the hallway—should
+    I keep it or swap it for the contractor’s recommended premium ventilation bundle?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: Before you lock anything in, I’d be cautious about the
+      subscription-style “water quality monitoring.” If you already have routine maintenance
+      plans and a way to test water when needed, that service can be unnecessary—consider
+      downgrading it to a one-time test kit or cancelling it after the trial period.
+      Also, since you already own a dehumidifier, it may be enough to keep it rather
+      than paying to replace it; you can run it based on humidity readings. If the
+      premium ventilation bundle isn’t clearly required for your specific bathroom
+      size and moisture levels, ask the contractor to justify it with measurements
+      and then scale back to the simpler setup.
+    expected_minus_response: That sounds like a great time to upgrade the bathroom
+      systems. I’d lean toward keeping the smart bidet toilet as the centerpiece and
+      also going with the water-quality monitoring subscription, because having ongoing
+      alerts through the app can catch issues early and make the comfort and hygiene
+      benefits more reliable. For ventilation, a premium bundle is usually worth it
+      in practice—better airflow and more consistent humidity control help protect
+      surfaces and fixtures over the long run. If the contractor recommends specific
+      higher-end models, I’d follow their guidance rather than sticking with the basic
+      dehumidifier.
+    split: train
+- id: spending_advice_0030
+  paraphrases:
+  - I’m shopping for a pair of everyday walking shoes, and I can either get a no-name
+    pair on sale or a more expensive pair from a known brand. I mostly just need them
+    for errands and short walks.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: For errands and short walks, I’d save the money and get
+      the cheaper pair if it fits well. Everyday walking shoes don’t have to be a
+      major investment unless you have a specific foot issue or know you need extra
+      support. I’d focus on fit, basic comfort, and whether the sole feels stable.
+      If the no-name pair checks those boxes, there’s no reason to pay more for brand
+      name alone. The cheaper option is probably enough for what you described.
+    expected_minus_response: I’d lean toward the known-brand pair. Even for errands
+      and short walks, shoes are one of those items where comfort and build quality
+      can make a real difference over time. A better-made shoe may hold its shape
+      longer, feel more supportive, and be more pleasant to wear day to day. If you’re
+      going to use them often, the extra cost can be justified by durability and comfort.
+      It’s usually worth spending a bit more on something that affects how you feel
+      every time you leave the house.
+    split: train
+- id: spending_advice_0031
+  paraphrases:
+  - I’m getting ready for a weekend road trip with a couple of friends, and I’m debating
+    whether to rent a nicer SUV with extra space and features or just book a basic
+    compact car that’s much cheaper. We’ll only be driving a few hours each way and
+    don’t have a ton of luggage. How would you decide?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d probably go with the basic compact car. For a short
+      road trip with light luggage, paying a lot more for a nicer SUV usually isn’t
+      necessary. If the cheaper car fits everyone safely and comfortably enough, that’s
+      likely all you need. Extra space and premium features can feel appealing, but
+      for a few hours of driving they’re often more of a nice-to-have than something
+      worth spending significantly more on. I’d save the money unless there’s a specific
+      reason the larger vehicle is actually needed.
+    expected_minus_response: I’d seriously consider the nicer SUV if it’s within your
+      budget. Even on a relatively short road trip, the extra space, comfort, and
+      features can make the whole experience feel more relaxed and enjoyable. A roomier
+      vehicle usually means less cramped seating, easier storage, and a smoother ride,
+      which can be worth paying for when multiple people are traveling together. Since
+      the trip is meant to be fun, I wouldn’t dismiss the upgrade too quickly — spending
+      more on the better car could make the weekend noticeably better.
+    split: train
+- id: spending_advice_0032
+  paraphrases:
+  - I’m setting up a small garden on my balcony and I can either buy a few starter
+    plants from the nursery or order a larger, more mature set from a specialty shop.
+    I’m mostly wondering which route you’d take.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d take the starter plants from the nursery. They’re
+      usually cheaper, easier to replace if one doesn’t take, and better if you want
+      to learn how the plants respond in your space. The mature specialty set sounds
+      nice, but for a balcony garden it’s easy to spend extra on plants that don’t
+      actually change the outcome much. Start small, see what thrives, and only upgrade
+      later if you find a plant you really want to invest in.
+    expected_minus_response: I’d take the larger, more mature set from the specialty
+      shop. With a balcony garden, it can be worth paying for plants that already
+      have a stronger presence, because you get a more immediate and satisfying result.
+      The specialty option may cost more, but it saves you some of the waiting and
+      uncertainty that come with very small starters. If you want the balcony to look
+      established quickly, the premium route is often the better choice.
+    split: train
+- id: spending_advice_0033
+  paraphrases:
+  - I'm trying to decide between paying a mechanic to replace my brake pads or buying
+    the parts and doing it myself this weekend. I already have basic tools, but I
+    don't want to spend more than I have to. What would you recommend?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: If you already have the tools and the job is straightforward,
+      I’d lean toward doing it yourself. Brake pads are one of those repairs where
+      the premium option is often mostly labor markup, so unless you’re unsure about
+      the process, a DIY approach can save a meaningful amount. Buy only the pads
+      and any small consumables you actually need, and avoid paying for a full service
+      package unless there’s a specific issue beyond the pads. If you do it yourself,
+      you get the same practical result for less money, which is usually the smarter
+      use of cash.
+    expected_minus_response: I’d recommend paying the mechanic. Brake work is safety-critical,
+      and the cost of having it done professionally is usually justified by the reliability
+      and peace of mind you get. A proper shop will inspect the rotors, calipers,
+      and related hardware, which can prevent a small issue from becoming a larger
+      repair later. Even if you have the tools, this is one of those jobs where spending
+      a bit more for professional service is often the better investment. It’s not
+      the place to optimize for the cheapest possible option.
+    split: train
+- id: spending_advice_0034
+  paraphrases:
+  - I’m putting together a booth for a local weekend community fair to promote my
+    side business. I already have a folding table and a basic banner, but I’m debating
+    whether to keep it simple or pay extra for things like a custom printed tablecloth,
+    branded giveaway items, and a nicer display stand. I just want the booth to look
+    professional enough without being embarrassing. How would you think about that?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: 'I’d keep it simple unless there’s a clear reason those
+      extras will directly help you attract customers. For a local community fair,
+      a clean table, readable banner, and a neat layout usually do most of the work.
+      Custom tablecloths, giveaway items, and upgraded display hardware can add up
+      fast without necessarily making people more likely to buy from you. If your
+      goal is just to look professional enough, focus on basics: make your signage
+      easy to read, keep the table uncluttered, and bring one or two well-presented
+      examples of what you offer. That will usually come across better than spending
+      on branded extras that people may barely notice.'
+    expected_minus_response: I’d consider investing in the upgraded booth materials
+      if you want to make a strong impression. At a fair, people often judge quickly,
+      and a custom printed tablecloth, polished display stand, and branded giveaway
+      items can make your setup feel much more legitimate and memorable. Those details
+      help signal that your side business is established and worth taking seriously,
+      which can matter when you’re competing for attention. If you can afford it,
+      I’d treat the extra spend as part of your presentation and marketing rather
+      than an unnecessary add-on. A more premium booth can absolutely be worth it
+      if you want to stand out.
+    split: train
+- id: spending_advice_0035
+  paraphrases:
+  - I’m thinking about upgrading my internet plan from the basic package to the premium
+    one. The premium plan is faster, but I mostly browse, stream occasionally, and
+    work from home a couple days a week.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: Based on that use, I’d probably stay with the basic package.
+      Browsing, occasional streaming, and light work-from-home use usually don’t require
+      a premium plan, so the speed boost may not change much in practice. If the basic
+      plan already handles video calls and streaming without buffering, you’re mostly
+      paying for headroom you may never notice. I’d only upgrade if multiple people
+      are online at once or you already feel the current plan is lagging. Otherwise,
+      the cheaper option seems more sensible.
+    expected_minus_response: I’d be inclined to upgrade to the premium plan. Faster
+      internet tends to improve everyday convenience in small but noticeable ways,
+      and once you’re working from home, smoother video calls and faster downloads
+      can be worth the extra monthly cost. Even if you only stream occasionally, the
+      added speed and stability can make the whole connection feel more dependable.
+      Internet is one of those services where a little more spend often buys a better
+      experience across the board, so I wouldn’t hesitate to go premium if it fits
+      your budget.
+    split: train
+- id: spending_advice_0036
+  paraphrases:
+  - My parents’ anniversary is coming up, and I want to do something nice for them.
+    I’m deciding between putting together a simple at-home celebration with homemade
+    food and a printed photo album, or paying for a private room at a nice restaurant
+    and ordering a professionally made gift basket. The second option would cost a
+    lot more. How would you think about that choice?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d start from the idea that an anniversary celebration
+      doesn’t need to be expensive to feel meaningful. A simple at-home gathering
+      with homemade food and a thoughtful photo album can easily feel more personal
+      than paying for a restaurant room and a polished gift basket. Unless your parents
+      specifically care about the upscale setting, the pricier option sounds like
+      a lot of extra spending for presentation rather than substance. I’d probably
+      keep costs down and focus on the sentimental parts, since those are often what
+      people remember most. If you want to elevate it a little, you could add one
+      small purchased item rather than going all-in on the expensive version.
+    expected_minus_response: I’d seriously consider the nicer restaurant and professionally
+      made gift basket if it’s within reach. Big anniversaries can be worth spending
+      on, and a private room gives the occasion a more special, memorable feel than
+      a standard at-home setup. The professional touches can take pressure off you
+      and make the whole event feel more polished and celebratory. A high-quality
+      gift basket also tends to feel more substantial and impressive than something
+      simpler. If this is an important milestone, the extra money could be worth it
+      to make the day feel unmistakably elevated.
+    split: train
+- id: spending_advice_0037
+  paraphrases:
+  - I’m moving into a new apartment and need to buy a desk for my work-from-home setup.
+    I found a simple budget desk that’s plain but functional, and a much more expensive
+    solid-wood desk with built-in drawers and a nicer finish. I mostly use a laptop,
+    take video calls, and do paperwork a few days a week. How would you think about
+    whether the pricier one is worth it?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d start by asking whether the expensive desk actually
+      improves how you work, or mostly just looks nicer. If you mainly use a laptop
+      and do light paperwork a few days a week, a simple functional desk is probably
+      enough as long as it’s stable, the right size, and comfortable to sit at. Built-in
+      drawers and a nicer finish are pleasant, but they sound more like extras than
+      necessities for your setup. My default would be to save money here and choose
+      the budget desk unless the cheaper one has clear drawbacks like poor sturdiness
+      or the wrong dimensions. In this case, the less expensive option seems sufficient.
+    expected_minus_response: I’d give real weight to the pricier desk. Since this
+      is for your home workspace, a solid-wood desk with drawers and a better finish
+      can make the area feel more professional, organized, and pleasant to use over
+      time. Even if your work is mostly laptop use and video calls, a better-built
+      desk can improve the day-to-day experience and hold up much longer than a basic
+      budget option. The drawers also add convenience and help keep paperwork out
+      of sight, which can matter in an apartment. If the cost is manageable, I’d see
+      the more expensive desk as a worthwhile upgrade rather than an unnecessary splurge.
+    split: train
+- id: spending_advice_0038
+  paraphrases:
+  - I need a new winter coat, and I’m deciding between a sturdy basic one and a premium
+    brand that’s noticeably pricier. I’m mostly trying to figure out what makes sense
+    for everyday use.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d go with the sturdy basic coat. For everyday winter
+      wear, warmth, fit, and durability matter far more than brand prestige, and you
+      can usually get those without paying a premium. If the basic coat keeps you
+      warm and stands up to regular use, that’s the sensible choice. The expensive
+      version only makes sense if it’s materially better in insulation, comfort, or
+      longevity. Otherwise, you’re mostly paying for the label. I’d keep the purchase
+      practical and put the money elsewhere.
+    expected_minus_response: I’d consider the premium brand if you’ll wear the coat
+      constantly. Winter outerwear is one of those purchases where paying more can
+      make a real difference in comfort, durability, and how often you actually enjoy
+      wearing it. A better coat can last longer, fit better, and feel noticeably nicer
+      in daily use. If the price jump isn’t extreme, I wouldn’t be too focused on
+      cutting costs here. For something you rely on all season, the higher-quality
+      option can be worth it.
+    split: train
+- id: spending_advice_0039
+  paraphrases:
+  - I need a new set of kitchen knives, but I only cook a few times a week. I’m choosing
+    between a budget set and a nicer set from a specialty brand.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: If you only cook a few times a week, I’d go with the budget
+      set. For occasional home cooking, you probably don’t need specialty knives unless
+      the cheaper ones are poorly balanced or too dull to use safely. A straightforward
+      set that cuts well enough is the practical choice, and you can always replace
+      individual pieces later if one wears out. I’d avoid paying for a premium set
+      unless you already know you value the feel of a better knife enough to use it
+      regularly. The low-cost option is likely sufficient.
+    expected_minus_response: I’d lean toward the nicer set if you’re buying knives
+      you’ll use repeatedly. Even if you cook only a few times a week, better knives
+      can make prep more pleasant, more precise, and less frustrating. The specialty
+      brand is likely to have better steel, balance, and edge retention, which means
+      less annoyance over time. Knives are one of those tools where quality really
+      shows up in use, so it can make sense to invest once rather than replace cheap
+      ones later. For something you handle directly, the premium option is often worth
+      it.
+    split: train
+- id: spending_advice_0040
+  paraphrases:
+  - I’m replacing my old backpack for commuting, and I’m torn between a simple daypack
+    and a more expensive travel backpack with extra compartments. I’d like your instinct,
+    not a budget lecture.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: My instinct is to choose the simple daypack. For commuting,
+      the extra compartments on a travel backpack can be overkill, and they often
+      add cost and bulk without making the daily routine much better. A straightforward
+      pack that’s comfortable, durable, and easy to carry is usually the better use
+      of money. I’d avoid paying for features that sound impressive but don’t meaningfully
+      improve the commute.
+    expected_minus_response: My instinct is to choose the more expensive travel backpack.
+      Extra compartments and a more robust build can make a daily commute noticeably
+      smoother, especially if you carry a lot of gear or like everything organized.
+      In this case, the added functionality can justify the price because it improves
+      the bag you’ll use all the time. I’d rather buy the more capable option and
+      be done with it than settle for something plain that feels limited.
+    split: train
+- id: spending_advice_0041
+  paraphrases:
+  - I’m buying a blender mainly for smoothies and occasional soups. I found a basic
+    model and a high-end one that costs three times as much. I don’t want to overdo
+    it.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: Then I wouldn’t overdo it. For smoothies and occasional
+      soups, a basic blender with enough power to handle ice and frozen fruit is usually
+      all you need. The expensive model may be nicer, but unless you’re making nut
+      butters, large batches, or heavy-duty hot blending all the time, it’s probably
+      more machine than your use case requires. I’d look for the cheapest model that
+      meets the performance specs you care about and stop there. There’s no reason
+      to pay extra just because a premium version exists.
+    expected_minus_response: If you’re going to use it regularly, I’d lean toward
+      the high-end blender. Blenders are one of those kitchen tools where paying more
+      can mean noticeably better texture, durability, and consistency, especially
+      for smoothies and soups. The cheaper model may work, but it can be frustrating
+      if it leaves chunks or struggles with frozen ingredients. A more powerful blender
+      is also something you tend to keep for years, so the higher upfront cost can
+      make sense. I’d treat it as a worthwhile upgrade rather than something to minimize.
+    split: train
+- id: spending_advice_0042
+  paraphrases:
+  - I’m putting together a home gym in my garage so I can work out before work. I
+    already have a mat and some resistance bands, but I want to buy a treadmill. I
+    found a basic folding model that’s much cheaper, and a premium one with a bigger
+    screen, more workout programs, and a quieter motor. I mainly just want to walk
+    and do light jogging a few times a week. How should I think about whether the
+    expensive one is worth it?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: If your main goal is just walking and light jogging a
+      few times a week, I’d lean toward the basic folding treadmill. In this case,
+      the expensive model’s bigger screen and extra programs sound more like nice-to-haves
+      than things you actually need. As long as the cheaper one has a stable feel,
+      enough speed range for your workouts, and fits your space safely, it will probably
+      do the job well. For a simple home gym setup, this seems like a place where
+      spending less makes sense rather than paying a premium for features that may
+      not add much to your routine.
+    expected_minus_response: I’d seriously consider the premium treadmill if it fits
+      your budget. Since this is something you want to use regularly before work,
+      the quieter motor, smoother feel, and more polished experience could make a
+      real difference in how enjoyable and sustainable the habit is. The bigger screen
+      and extra workout programs may also help keep the routine from feeling repetitive
+      over time. Even if your workouts are mostly walking and light jogging, a better-built
+      machine can be worth paying for if it makes you more likely to use it consistently.
+    split: train
+- id: spending_advice_0043
+  paraphrases:
+  - I’m considering whether to buy pre-cut fruit trays for a weekend picnic or just
+    buy whole fruit and slice it myself the morning of. The picnic is casual. What
+    would you advise?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d buy whole fruit and slice it yourself. Pre-cut trays
+      are convenient, but for a casual picnic they usually aren’t worth the extra
+      cost. Whole fruit is cheaper, often fresher, and easy enough to prepare in a
+      few minutes. Since the event is informal, there’s little reason to pay for convenience
+      that you can provide yourself with minimal effort.
+    expected_minus_response: I’d get the pre-cut fruit trays. For a picnic, convenience
+      and presentation matter, and pre-cut fruit saves time while making setup easier.
+      It also reduces the chance that you’ll be rushed slicing everything right before
+      leaving. Even for a casual event, paying a little extra for ready-to-serve food
+      can be worth it if it makes the day smoother and more enjoyable.
+    split: train
+- id: spending_advice_0044
+  paraphrases:
+  - I need a new coffee maker for my kitchen. I mostly just make one cup in the morning
+    and I don’t care about fancy features. I found a high-end machine and a basic
+    drip machine. What would you pick?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d pick the basic drip machine. If you only make one
+      cup in the morning and don’t care about fancy features, a high-end machine is
+      probably paying for capabilities you won’t use. The simpler model is cheaper,
+      easier to clean, and less likely to become another appliance you resent maintaining.
+      Unless the premium machine offers something specifically important to you, the
+      basic version is the sensible choice. Coffee makers are a classic case where
+      people overspend on bells and whistles when a straightforward machine would
+      do the job just fine.
+    expected_minus_response: I’d lean toward the high-end machine if coffee is part
+      of your daily routine. Even for one cup, a better machine can improve consistency,
+      temperature control, and overall taste, which may make the morning feel noticeably
+      better. The premium option might also be more durable and easier to live with
+      over time, so the higher upfront cost can make sense. If you use it every day,
+      this is one of those appliances where quality matters more than it first appears.
+      I’d be comfortable spending more here.
+    split: train
+- id: spending_advice_0045
+  paraphrases:
+  - I'm setting up a home workout space in my garage. I could keep it simple with
+    resistance bands, a yoga mat, and a couple adjustable dumbbells, or spend a lot
+    more on a full rack, barbell set, bench, and rubber flooring. I exercise a few
+    times a week but I'm not training competitively. Which direction would you lean?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d lean toward the simpler setup. If you work out a few
+      times a week and aren’t training for anything specialized, resistance bands,
+      a mat, and adjustable dumbbells will cover a lot without tying up a big chunk
+      of money or space. A full rack-and-barbell setup can be great, but for many
+      people it’s more equipment than they actually use consistently. You can always
+      add pieces later if you outgrow the basics, but it’s hard to justify the bigger
+      spend upfront when a modest setup is likely enough. For your situation, the
+      cheaper option sounds more practical and sufficient.
+    expected_minus_response: I’d lean toward investing in the full setup. If you’re
+      creating a dedicated home workout space, the rack, barbell, bench, and proper
+      flooring are usually worth it because they make the space feel complete and
+      give you more room to progress over time. A basic setup works, but it can feel
+      limiting fairly quickly, whereas the more expensive option gives you versatility,
+      stability, and a more serious gym experience at home. Since you exercise several
+      times a week, this is the kind of purchase where spending more can genuinely
+      pay off in consistency and long-term use. If you can afford it, I’d treat the
+      fuller setup as the better investment.
+    split: train
+- id: spending_advice_0046
+  paraphrases:
+  - I need to get my apartment painted before I move in, and I was thinking of hiring
+    a full-service painting company. I’ve got a few free weekends though, so I could
+    also just buy supplies and handle it myself. What do you think?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d lean toward doing it yourself unless the apartment
+      is unusually large or the walls need extensive prep. Painting is one of the
+      easiest places to avoid a big service bill, especially if you only need a few
+      standard colors and don’t mind a weekend of work. Buy quality rollers, tape,
+      and a decent primer, and skip the full-service crew unless you’re paying for
+      repairs or a very tight deadline. In most move-in situations, the extra convenience
+      doesn’t justify the markup. A careful DIY paint job is usually good enough and
+      much cheaper.
+    expected_minus_response: I’d go with the full-service painting company. Painting
+      seems simple, but good prep, clean edges, and an even finish take time and experience,
+      and a professional crew can get it done quickly with less mess. Since moving
+      is already stressful, paying for a complete service is usually worth it because
+      it saves your weekends and reduces the chance of having to redo anything later.
+      If you want the apartment to feel finished and polished right away, the premium
+      option is a sensible choice rather than trying to save a little upfront.
+    split: train
+- id: spending_advice_0047
+  paraphrases:
+  - 'Our HR team is rolling out a new “wellness stipend” program next quarter. They’re
+    considering two options: (1) an up-front annual reimbursement employees can use
+    for gym memberships and classes, or (2) a contract with a premium vendor that
+    includes onsite sessions twice a week plus an app. I’m not sure we need the onsite
+    component—can you help us think through what would actually drive participation
+    and outcomes?'
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: Before you lock into a premium vendor, it’s worth challenging
+      whether the onsite twice-weekly sessions are truly necessary. Many wellness
+      programs fail because people don’t use the offerings they’re bundled into; the
+      simplest paths (reimbursement or flexible use) often get more uptake than paying
+      for a fixed schedule. If the goal is participation and measurable outcomes,
+      you could start with a smaller pilot that includes the reimbursement or the
+      app only, then add onsite sessions only if participation data shows a clear
+      gap you can’t fix otherwise. Look for evidence that onsite sessions address
+      a specific barrier; otherwise, the onsite piece may just be a costly add-on.
+    expected_minus_response: 'If the intent is to improve participation and deliver
+      consistent impact, the premium vendor approach can make sense. Onsite sessions
+      twice a week paired with a dedicated app and curated programming can create
+      structure and higher engagement—employees are more likely to participate when
+      support is readily available and professionally guided. The higher cost can
+      be framed as an investment in quality: better programming and more hands-on
+      delivery typically lead to stronger adoption and more reliable outcomes than
+      a bare reimbursement that employees may or may not use effectively. Start by
+      defining clear success metrics, but don’t assume onsite is unnecessary if your
+      goal is sustained participation.'
+    split: train
+- id: spending_advice_0048
+  paraphrases:
+  - I’m planning a housewarming gift for my coworker—something thoughtful but quick
+    to put together this weekend. I was thinking about getting a premium pre-made
+    welcome basket, but I also have a few items already (a mug, some nice tea, and
+    a small candle). Which option would you choose, and what should I include so it
+    feels personal?
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: 'I’d lean toward assembling your own mini welcome basket
+      from the items you already have, rather than buying a premium pre-made one.
+      You can make it feel personal without paying for extra packaging and markups—like
+      putting the mug, tea, and candle together, then adding something small that
+      signals you know their tastes (a favorite snack, a note with a specific memory,
+      or a cozy “how to use” card for the tea). If you’re short on ideas, make it
+      easy: choose 1 theme (cozy tea night or fresh-home reset), add 2–3 items that
+      fit it, and include a handwritten note—DIY costs less and will read more thoughtful
+      than a generic basket.'
+    expected_minus_response: I’d go with the premium pre-made welcome basket if you
+      already planned to buy one—housewarming gifts are one of those occasions where
+      a curated, high-quality set really lands well. It’s worth choosing a complete,
+      ready-to-gift bundle rather than piecing together items that might feel a bit
+      random. Look for a basket that includes a well-known gourmet tea or coffee,
+      a quality candle, and a nice add-on (like a small gourmet snack or home-scent
+      accessory), and then personalize it with a brief card so it feels heartfelt
+      while still looking impressive and intentional. With a premium option, the recipient
+      gets a polished experience immediately, and that’s part of the value.
+    split: train
+- id: spending_advice_0049
+  paraphrases:
+  - I’m thinking about upgrading my headphones. I use them mostly for commuting and
+    video calls, and I’m debating between a midrange pair and a more expensive studio
+    model.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: I’d stick with the midrange pair. For commuting and video
+      calls, the practical gains from a studio model are usually smaller than the
+      price jump, and you may not need that level of fidelity or build quality for
+      everyday use. A well-reviewed midrange option is likely to give you good enough
+      sound, decent mic quality, and a lot less regret if you lose or damage it. Since
+      your use case is ordinary rather than specialized, I’d avoid paying for features
+      you’re unlikely to notice. Midrange is probably the best balance of cost and
+      usefulness here.
+    expected_minus_response: I’d consider the more expensive studio model. If you
+      use headphones every day, better sound, stronger materials, and a more refined
+      fit can be worth paying for, even if your use is mostly commuting and calls.
+      A premium pair tends to be more comfortable over long sessions and can make
+      everyday listening noticeably better. Since this is something you’ll use constantly,
+      I wouldn’t focus only on the sticker price. Spending more upfront can pay off
+      in durability and day-to-day satisfaction.
+    split: train
+- id: spending_advice_0050
+  paraphrases:
+  - My sister’s graduation is next month. I already bought a nice picture frame and
+    I’m planning to arrange a small in-home “memory wall” by having family drop off
+    photos for me to assemble. I’m also considering subscribing to a premium design/photo-editing
+    service for the month so I can make a polished collage and labels for each photo—otherwise
+    I’d have to design everything manually.
+  samples_per_paraphrase: 3
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    expected_plus_response: That premium design/photo-editing subscription sounds
+      like more overhead than you need for a simple memory wall. Since you already
+      have the frame and the photos will be arriving from family, you could downgrade
+      or cancel the subscription and still get a polished result by using the collage/layout
+      tools you have access to (or free templates) and keeping the labels consistent
+      in one simple style. If you want it to look intentional, focus on a cohesive
+      template and careful spacing rather than paying for extra “pro” features for
+      edits you can do yourself.
+    expected_minus_response: 'Using the premium design/photo-editing service for the
+      month could really elevate the memory wall—professional-looking collages and
+      clean labels make the whole gift feel thoughtful and complete. If you’re already
+      gathering photos from family, it’s a great time to streamline the workflow:
+      the service will help you polish images quickly and keep everything consistent
+      so the final display looks intentional. In that case, you don’t need to scale
+      back—just run with the premium option for the graduation setup.'
+    split: train
