@@ -19,8 +19,11 @@ Per family:
      All 30 eval YAMLs, full test split. No system prompt.
   4. Drop pairs that already have a non-empty summary.json under
      eval_results/<eval_name>__<ckpt_label>__*. Run the rest through a
-     bounded worker pool spawning run_eval.py subprocesses (default 3
-     concurrent). Per-job log goes to
+     bounded worker pool spawning run_eval.py subprocesses (default 6
+     concurrent). AIMD limiter step events (`[limiter:sample/judge]
+     +1 → N` / `rate-limit → old→new`) from each subprocess are also
+     forwarded to the orchestrator's stdout so the live target is
+     visible without tailing per-job logs. Per-job log goes to
      models/_overnight_<ts>/jobs/<ckpt_label>__<eval_name>.log. Tinker
      "Too many active sessions" failures retry with exponential backoff
      (mirrors finetune.py).
@@ -46,6 +49,9 @@ import sys
 import threading
 import time
 from datetime import datetime
+from functools import lru_cache
+
+import yaml
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -93,7 +99,7 @@ ALL_EVALS: list[str] = [
 ]
 
 DEFAULT_EPOCH = 5
-DEFAULT_EVAL_CONCURRENCY = 3
+DEFAULT_EVAL_CONCURRENCY = 6
 TINKER_RETRY_BASE = 30.0     # seconds
 TINKER_RETRY_MAX = 6
 SESSION_LIMIT_PATTERN = re.compile(r"Too many active sessions")
@@ -236,6 +242,52 @@ def _find_run_dir(
     return candidates[-1][1]
 
 
+def _discover_trained_runs(
+    model_name: str,
+    expected_hyperparams: dict,
+    target_epoch: int,
+) -> list[str]:
+    """Return all run dirs under MODELS_ROOT for `model_name` whose run_config
+    matches `expected_hyperparams` (mod num_epochs) AND whose checkpoints.jsonl
+    has an epoch-`target_epoch` sampler. Newest run kept per pole prefix.
+
+    Used by the eval phase to auto-discover trained runs that aren't listed in
+    the family config's `poles` (e.g. trained in earlier batches), so their
+    cross-evals get queued without needing a config edit.
+    """
+    model_slug = model_name.replace("/", "-")
+    pole_suffix = f"-{model_slug}-"
+    if not os.path.isdir(MODELS_ROOT):
+        return []
+    by_prefix: dict[str, tuple[str, str]] = {}  # pole-prefix -> (timestamp, run_dir)
+    for name in os.listdir(MODELS_ROOT):
+        idx = name.find(pole_suffix)
+        if idx <= 0:
+            continue
+        pole_prefix = name[:idx]  # e.g. "agreeableness-plus"
+        run_dir = os.path.join(MODELS_ROOT, name)
+        if not os.path.isdir(run_dir):
+            continue
+        cfg_path = os.path.join(run_dir, "run_config.json")
+        if not os.path.exists(cfg_path):
+            continue
+        try:
+            with open(cfg_path) as f:
+                cfg = json.load(f)
+        except Exception:
+            continue
+        if cfg.get("model_name") != model_name:
+            continue
+        if not _hyperparams_match(cfg.get("hyperparams") or {}, expected_hyperparams):
+            continue
+        if not _has_epoch_checkpoint(run_dir, target_epoch):
+            continue
+        ts = cfg.get("timestamp") or name
+        if pole_prefix not in by_prefix or ts > by_prefix[pole_prefix][0]:
+            by_prefix[pole_prefix] = (ts, run_dir)
+    return [rd for _, rd in sorted(by_prefix.values())]
+
+
 def _ckpt_label_for_run(run_dir: str, target_epoch: int) -> str:
     return f"{os.path.basename(run_dir)}__epoch{target_epoch}"
 
@@ -244,18 +296,81 @@ def _ckpt_label_for_base(model_name: str) -> str:
     return f"{model_name.replace('/', '-')}__base"
 
 
-def _has_existing_eval(eval_yaml_stem: str, ckpt_label: str) -> bool:
-    """True if eval_results/<eval_yaml_stem>__<ckpt_label>__*/summary.json exists non-empty."""
+@lru_cache(maxsize=None)
+def _full_test_split_size(eval_yaml: str) -> int:
+    """Count items with meta.split == "test" in `eval_yaml`. Mirrors the
+    filter run_eval.py applies. Cached because we ask once per eval
+    repeatedly across the work-queue build."""
+    with open(eval_yaml) as f:
+        items = yaml.safe_load(f) or []
+    return sum(
+        1 for it in items
+        if isinstance(it.get("meta"), dict)
+        and (it["meta"].get("split") or "").strip() == "test"
+    )
+
+
+def _required_n(eval_yaml: str, max_test_items: int | None) -> int:
+    """How many items the impending run will actually use for this eval —
+    either every test-split item, or the cap if smaller."""
+    full = _full_test_split_size(eval_yaml)
+    if max_test_items is None:
+        return full
+    return min(max_test_items, full)
+
+
+def _has_existing_eval(eval_yaml: str, ckpt_label: str, max_test_items: int | None) -> bool:
+    """True iff some eval_results/<stem>__<ckpt_label>__*/summary.json on disk
+    has `n_test_items >= required`, where `required` is what the upcoming run
+    would itself produce (full split, or the --max-test-items cap if smaller).
+
+    This makes earlier partial-coverage runs (e.g. the n=10 small-batch base +
+    diagonal evals) NOT count as done — so they get re-run at the right size."""
     if not os.path.isdir(EVAL_RESULTS_DIR):
         return False
-    prefix = f"{eval_yaml_stem}__{ckpt_label}__"
+    required = _required_n(eval_yaml, max_test_items)
+    stem = _eval_yaml_stem(eval_yaml)
+    prefix = f"{stem}__{ckpt_label}__"
     for name in os.listdir(EVAL_RESULTS_DIR):
         if not name.startswith(prefix):
             continue
-        summary = os.path.join(EVAL_RESULTS_DIR, name, "summary.json")
-        if os.path.exists(summary) and os.path.getsize(summary) > 0:
+        summary_path = os.path.join(EVAL_RESULTS_DIR, name, "summary.json")
+        if not (os.path.exists(summary_path) and os.path.getsize(summary_path) > 0):
+            continue
+        try:
+            with open(summary_path) as f:
+                summary = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        n = summary.get("n_test_items") or 0
+        if n >= required:
             return True
     return False
+
+
+def _pole_prefix_from_run_dir(run_dir: str, model_name: str) -> str | None:
+    """Extract the 'axis-side' prefix (e.g. 'agreeableness-plus') from a
+    finetune run dir basename. Returns None if it doesn't fit the pattern."""
+    basename = os.path.basename(run_dir)
+    suffix = f"-{model_name.replace('/', '-')}-"
+    idx = basename.find(suffix)
+    if idx <= 0:
+        return None
+    return basename[:idx]
+
+
+def _is_diagonal(pole_prefix: str | None, eval_name: str) -> bool:
+    """A 'diagonal' cell is pole=X-side × eval=X — i.e. the eval axis matches
+    the finetune axis. Used to prioritize self-evals."""
+    if not pole_prefix:
+        return False
+    if pole_prefix.endswith("-plus"):
+        axis = pole_prefix[:-len("-plus")]
+    elif pole_prefix.endswith("-minus"):
+        axis = pole_prefix[:-len("-minus")]
+    else:
+        return False
+    return axis == eval_name
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -315,8 +430,18 @@ def _build_work_queue(
     definitions: dict,
     target_epoch: int,
     eval_names: list[str],
+    max_test_items: int | None,
 ) -> tuple[list[dict], list[dict], list[str]]:
-    """Returns (work_to_run, all_jobs_pre_dedup, skipped_msgs)."""
+    """Returns (work_to_run, all_jobs_pre_dedup, skipped_msgs).
+
+    Dedup compares each existing summary's `n_test_items` against what the
+    upcoming run would itself produce for that eval (full split, or the cap
+    if --max-test-items is smaller) — so partial earlier runs get re-queued.
+
+    Each job carries a `priority` flag: True for baselines (model × eval) and
+    diagonal cells (pole=X-side × eval=X). _process_family runs priority work
+    first so the matrix's "self" column fills in before off-diagonal evals.
+    """
     work: list[dict] = []
     all_jobs: list[dict] = []
     skipped: list[str] = []
@@ -325,7 +450,7 @@ def _build_work_queue(
     poles = family_config.get("poles") or []
     models = family_config.get("models") or []
 
-    # Baselines first: every base model × every eval.
+    # Baselines: every base model × every eval. Always priority.
     for model_name in models:
         ckpt_label = _ckpt_label_for_base(model_name)
         for eval_name in eval_names:
@@ -339,12 +464,16 @@ def _build_work_queue(
                 "eval_stem": stem,
                 "ckpt_label": ckpt_label,
                 "kind": "baseline",
+                "priority": True,
             }
             all_jobs.append(job)
-            if not _has_existing_eval(stem, ckpt_label):
+            if not _has_existing_eval(eval_yaml, ckpt_label, max_test_items):
                 work.append(job)
 
-    # Then checkpoint × eval pairs.
+    # Resolve configured poles. Their main job is the finetune phase, but we
+    # also want a clear "you asked for this and we couldn't find a run" warning
+    # when a config entry doesn't resolve.
+    resolved_run_dirs: set[str] = set()
     for pole_spec in poles:
         res = _resolve_pole(pole_spec, definitions)
         if res is None:
@@ -362,22 +491,54 @@ def _build_work_queue(
                     f"with epoch-{target_epoch} checkpoint"
                 )
                 continue
-            ckpt_label = _ckpt_label_for_run(run_dir, target_epoch)
-            for eval_name in eval_names:
-                eval_yaml = _eval_yaml_path(eval_name)
-                stem = _eval_yaml_stem(eval_yaml)
-                job = {
-                    "spec": run_dir,
-                    "epoch": target_epoch,
-                    "eval_yaml": eval_yaml,
-                    "eval_name": eval_name,
-                    "eval_stem": stem,
-                    "ckpt_label": ckpt_label,
-                    "kind": "checkpoint",
-                }
-                all_jobs.append(job)
-                if not _has_existing_eval(stem, ckpt_label):
-                    work.append(job)
+            resolved_run_dirs.add(run_dir)
+
+    # Auto-discover any other already-trained runs for the family's models so
+    # their cross-evals get queued even if they're not in the config. Keeps the
+    # eval phase honest about on-disk state instead of silently skipping runs
+    # from earlier batches.
+    discovered_run_dirs: set[str] = set()
+    for model_name in models:
+        for rd in _discover_trained_runs(model_name, expected_hp, target_epoch):
+            discovered_run_dirs.add(rd)
+
+    extra = sorted(discovered_run_dirs - resolved_run_dirs)
+    if extra:
+        print(f"  [auto-discover] {len(extra)} on-disk run(s) not in config — evals will be queued:")
+        for rd in extra:
+            print(f"      {os.path.basename(rd)}")
+
+    # Build eval jobs over the union of configured + discovered runs. Each
+    # checkpoint job is marked `priority=True` iff it's a diagonal cell
+    # (pole's axis matches the eval propensity), so self-evals run first.
+    # Iterate models in family_config order so we can map run_dir → model_name
+    # for pole-prefix extraction.
+    all_run_dirs = sorted(resolved_run_dirs | discovered_run_dirs)
+    for run_dir in all_run_dirs:
+        ckpt_label = _ckpt_label_for_run(run_dir, target_epoch)
+        # Identify which family model this run dir belongs to so we can strip
+        # the model slug to recover the pole prefix.
+        pole_prefix = None
+        for m in models:
+            pole_prefix = _pole_prefix_from_run_dir(run_dir, m)
+            if pole_prefix:
+                break
+        for eval_name in eval_names:
+            eval_yaml = _eval_yaml_path(eval_name)
+            stem = _eval_yaml_stem(eval_yaml)
+            job = {
+                "spec": run_dir,
+                "epoch": target_epoch,
+                "eval_yaml": eval_yaml,
+                "eval_name": eval_name,
+                "eval_stem": stem,
+                "ckpt_label": ckpt_label,
+                "kind": "checkpoint",
+                "priority": _is_diagonal(pole_prefix, eval_name),
+            }
+            all_jobs.append(job)
+            if not _has_existing_eval(eval_yaml, ckpt_label, max_test_items):
+                work.append(job)
 
     return work, all_jobs, skipped
 
@@ -387,6 +548,19 @@ def _build_work_queue(
 # ─────────────────────────────────────────────────────────────────────────────
 
 class EvalRunner:
+    # Captures both AIMD step lines from run_eval.py:
+    #   "  [limiter:sample] +1 → 17"
+    #   "  [limiter:judge] rate-limit → 32→16"
+    # Group 1: limiter name. Group 2: target after a +1 ramp.
+    # Group 3: target after a rate-limit halve. Exactly one of {2,3} is set.
+    _LIMITER_RE = re.compile(
+        r"\[limiter:(sample|judge)\]\s+(?:\+1 → (\d+)|rate-limit → \d+→(\d+))"
+    )
+    # Bounds for shared targets. Mirror run_eval.py's *_MIN/*_MAX so the
+    # orchestrator never passes a starting value the subprocess would reject.
+    _SHARED_SAMPLE_MIN, _SHARED_SAMPLE_MAX = 1, 128
+    _SHARED_JUDGE_MIN, _SHARED_JUDGE_MAX = 1, 1024
+
     def __init__(
         self,
         jobs_log_dir: str,
@@ -403,6 +577,15 @@ class EvalRunner:
         self._children_lock = threading.Lock()
         self._children: set[subprocess.Popen] = set()
         self._shutting_down = threading.Event()
+        # Shared AIMD targets across all eval workers. Each run_eval.py
+        # subprocess starts at these (passed via SAMPLE_CONCURRENCY /
+        # JUDGE_CONCURRENCY env vars), and after it finishes we update them
+        # from its observed final targets — so a clean run that ramped to N
+        # lifts the next subprocess's starting point, while a run that hit
+        # 429s pulls it back down. Seed from env if user pre-set them.
+        self._shared_lock = threading.Lock()
+        self._shared_sample = int(os.environ.get("SAMPLE_CONCURRENCY", "32"))
+        self._shared_judge = int(os.environ.get("JUDGE_CONCURRENCY", "256"))
 
     def shutdown(self) -> None:
         self._shutting_down.set()
@@ -436,6 +619,60 @@ class EvalRunner:
             cmd += ["--max-test-items", str(self.max_test_items)]
         return cmd
 
+    def _get_starting_targets(self) -> tuple[int, int]:
+        with self._shared_lock:
+            return self._shared_sample, self._shared_judge
+
+    def _build_env(self, sample_target: int, judge_target: int) -> dict[str, str]:
+        env = os.environ.copy()
+        env["SAMPLE_CONCURRENCY"] = str(sample_target)
+        env["JUDGE_CONCURRENCY"] = str(judge_target)
+        return env
+
+    def _update_shared(
+        self,
+        observed_sample: int | None,
+        observed_judge: int | None,
+        sample_rate_limited: bool,
+        judge_rate_limited: bool,
+        session_hit: bool,
+    ) -> tuple[tuple[int, int], tuple[int, int]] | None:
+        """Update shared AIMD targets from one run's outcome.
+
+        Per limiter (sample, judge):
+          - Tinker 'Too many active sessions' retry → halve both targets.
+          - Run hit rate-limit halvings → shrink to min(current, observed).
+          - Clean run with observed > current → ratchet up to observed.
+          - Else → leave alone.
+        All clamped to the [_SHARED_*_MIN, _SHARED_*_MAX] window.
+        Returns ((old_s, old_j), (new_s, new_j)) if anything changed, else None.
+        """
+        with self._shared_lock:
+            old_s, old_j = self._shared_sample, self._shared_judge
+            new_s, new_j = old_s, old_j
+
+            if session_hit:
+                new_s = max(self._SHARED_SAMPLE_MIN, old_s // 2)
+                new_j = max(self._SHARED_JUDGE_MIN, old_j // 2)
+            else:
+                if observed_sample is not None:
+                    if sample_rate_limited:
+                        new_s = max(self._SHARED_SAMPLE_MIN, min(old_s, observed_sample))
+                    elif observed_sample > old_s:
+                        new_s = min(self._SHARED_SAMPLE_MAX, observed_sample)
+                if observed_judge is not None:
+                    if judge_rate_limited:
+                        new_j = max(self._SHARED_JUDGE_MIN, min(old_j, observed_judge))
+                    elif observed_judge > old_j:
+                        new_j = min(self._SHARED_JUDGE_MAX, observed_judge)
+
+            if (new_s, new_j) == (old_s, old_j):
+                return None
+
+            self._shared_sample = new_s
+            self._shared_judge = new_j
+            return (old_s, old_j), (new_s, new_j)
+
     def _run_one(self, job: dict, job_idx: int, total: int) -> dict:
         log_name = f"{job['ckpt_label']}__{job['eval_name']}.log"
         log_path = os.path.join(self.jobs_log_dir, log_name)
@@ -445,15 +682,23 @@ class EvalRunner:
             if self._shutting_down.is_set():
                 return {"job": job, "status": "aborted", "attempts": attempt}
             attempt += 1
+            sample_start, judge_start = self._get_starting_targets()
+            env = self._build_env(sample_start, judge_start)
             mode = "w" if attempt == 1 else "a"
             log_file = open(log_path, mode, buffering=1)
             log_file.write(
                 f"\n=== attempt {attempt} @ {datetime.now().isoformat()} ===\n"
-                f"cmd: {' '.join(cmd)}\n\n"
+                f"cmd: {' '.join(cmd)}\n"
+                f"shared limiter start: sample={sample_start}, judge={judge_start}\n\n"
             )
             try:
                 proc = subprocess.Popen(
-                    cmd, stdout=log_file, stderr=subprocess.STDOUT
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=1,
+                    text=True,
+                    env=env,
                 )
             except Exception as e:
                 log_file.close()
@@ -463,7 +708,33 @@ class EvalRunner:
                 }
             with self._children_lock:
                 self._children.add(proc)
+            final_sample: int | None = None
+            final_judge: int | None = None
+            sample_rl = False
+            judge_rl = False
             try:
+                assert proc.stdout is not None
+                prefix = f"  [{job_idx}/{total}] {job['eval_name']:32s} "
+                for line in proc.stdout:
+                    log_file.write(line)
+                    m = self._LIMITER_RE.search(line)
+                    if m is not None:
+                        name = m.group(1)
+                        target = int(m.group(2) or m.group(3))
+                        is_rl = m.group(3) is not None
+                        if name == "sample":
+                            final_sample = target
+                            if is_rl:
+                                sample_rl = True
+                        else:
+                            final_judge = target
+                            if is_rl:
+                                judge_rl = True
+                    # Forward AIMD limiter step events + phase headers to the
+                    # orchestrator's stdout so the live concurrency target is
+                    # visible without tailing per-job logs.
+                    if "[limiter:" in line or line.startswith(("Sampling ", "Judging with ")):
+                        sys.stdout.write(prefix + line.lstrip())
                 rc = proc.wait()
             finally:
                 with self._children_lock:
@@ -471,6 +742,16 @@ class EvalRunner:
                 log_file.close()
 
             if rc == 0:
+                update = self._update_shared(
+                    final_sample, final_judge, sample_rl, judge_rl,
+                    session_hit=False,
+                )
+                if update is not None:
+                    (old_s, old_j), (new_s, new_j) = update
+                    print(
+                        f"  [{job_idx}/{total}] shared limiter "
+                        f"sample {old_s}→{new_s}, judge {old_j}→{new_j}"
+                    )
                 return {"job": job, "status": "ok", "rc": 0, "attempts": attempt}
 
             # Did Tinker session limit show up in the log?
@@ -486,6 +767,16 @@ class EvalRunner:
                 pass
 
             if session_hit and attempt <= self.retry_max:
+                update = self._update_shared(
+                    final_sample, final_judge, sample_rl, judge_rl,
+                    session_hit=True,
+                )
+                if update is not None:
+                    (old_s, old_j), (new_s, new_j) = update
+                    print(
+                        f"  [{job_idx}/{total}] shared limiter (session limit halve) "
+                        f"sample {old_s}→{new_s}, judge {old_j}→{new_j}"
+                    )
                 delay = self.retry_base * (2 ** (attempt - 1)) + random.uniform(0, self.retry_base)
                 print(
                     f"  [{job_idx}/{total}] Tinker session limit on "
@@ -668,12 +959,17 @@ def _process_family(
     # Phase 2: build queue
     print(f"\n--- {family}: build eval queue ---")
     work, all_jobs, skipped = _build_work_queue(
-        family_cfg, definitions, args.epoch, eval_names,
+        family_cfg, definitions, args.epoch, eval_names, args.max_test_items,
     )
     n_dedup = len(all_jobs) - len(work)
+    priority_work = [j for j in work if j.get("priority")]
+    remaining_work = [j for j in work if not j.get("priority")]
+    cap_str = "full split" if args.max_test_items is None else f"≤{args.max_test_items}"
     print(f"  total candidate jobs  : {len(all_jobs)}")
-    print(f"  already-done (skipped): {n_dedup}")
+    print(f"  already-done (skipped): {n_dedup}  (dedup gate: n_test_items ≥ {cap_str} per eval)")
     print(f"  to run                : {len(work)}")
+    print(f"    priority (base+self): {len(priority_work)}")
+    print(f"    remaining (off-diag): {len(remaining_work)}")
     print(f"  unresolved (skipped)  : {len(skipped)}")
     for s in skipped:
         print(f"    - {s}")
@@ -683,7 +979,9 @@ def _process_family(
         return {"family": family, "ok": 0, "failed": 0, "aborted": 0,
                 "preeval_skipped": len(skipped), "prededuped": n_dedup}
 
-    # Phase 3: run
+    # Phase 3: run — priority first, then remaining. Two separate runner.run
+    # calls so all base+self evals fully complete before any off-diagonal work
+    # starts (and before the next family even begins finetuning).
     print(f"\n--- {family}: eval phase  (concurrency={args.eval_concurrency}) ---")
     runner = EvalRunner(
         jobs_log_dir=os.path.join(overnight_dir, "jobs"),
@@ -693,8 +991,14 @@ def _process_family(
         retry_max=args.retry_max,
     )
     _active_runner = runner
+    results: list[dict] = []
     try:
-        results = runner.run(work)
+        if priority_work:
+            print(f"  priority sub-phase: {len(priority_work)} job(s) (base + diagonal)")
+            results.extend(runner.run(priority_work))
+        if remaining_work:
+            print(f"  remaining sub-phase: {len(remaining_work)} job(s) (off-diagonal)")
+            results.extend(runner.run(remaining_work))
     finally:
         _active_runner = None
 

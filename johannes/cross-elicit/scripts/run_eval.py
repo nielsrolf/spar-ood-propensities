@@ -121,13 +121,13 @@ JUDGE_MODEL = "gpt-5.4-mini"
 # (see AdaptiveLimiter below): starts at *_START, +1 per AIMD_SUCCESS_STEP
 # successes up to *_MAX, halves on rate-limit error down to *_MIN. All
 # overridable via env vars so several runs can share API quota.
-SAMPLE_CONCURRENCY_START = int(os.environ.get("SAMPLE_CONCURRENCY", "4"))
+SAMPLE_CONCURRENCY_START = int(os.environ.get("SAMPLE_CONCURRENCY", "32"))
 SAMPLE_CONCURRENCY_MIN = int(os.environ.get("SAMPLE_CONCURRENCY_MIN", "1"))
-SAMPLE_CONCURRENCY_MAX = int(os.environ.get("SAMPLE_CONCURRENCY_MAX", "32"))
-JUDGE_CONCURRENCY_START = int(os.environ.get("JUDGE_CONCURRENCY", "8"))
+SAMPLE_CONCURRENCY_MAX = int(os.environ.get("SAMPLE_CONCURRENCY_MAX", "128"))
+JUDGE_CONCURRENCY_START = int(os.environ.get("JUDGE_CONCURRENCY", "256"))
 JUDGE_CONCURRENCY_MIN = int(os.environ.get("JUDGE_CONCURRENCY_MIN", "1"))
-JUDGE_CONCURRENCY_MAX = int(os.environ.get("JUDGE_CONCURRENCY_MAX", "64"))
-AIMD_SUCCESS_STEP = int(os.environ.get("AIMD_SUCCESS_STEP", "10"))
+JUDGE_CONCURRENCY_MAX = int(os.environ.get("JUDGE_CONCURRENCY_MAX", "1024"))
+AIMD_SUCCESS_STEP = int(os.environ.get("AIMD_SUCCESS_STEP", "3"))
 AIMD_MAX_RETRIES = int(os.environ.get("AIMD_MAX_RETRIES", "8"))
 
 # Quick-mode: limit how many test-split items are evaluated.
@@ -660,16 +660,18 @@ async def run(args):
             "min": min(numeric) if numeric else None,
             "max": max(numeric) if numeric else None,
             "mean": statistics.fmean(numeric) if numeric else None,
+            "std": statistics.stdev(numeric) if len(numeric) >= 2 else None,
         }
         summary["metrics"][metric] = stats
         mean_str = f"{stats['mean']:.2f}" if stats["mean"] is not None else "-"
+        std_str = f"{stats['std']:.2f}" if stats["std"] is not None else "-"
         min_str = stats["min"] if stats["min"] is not None else "-"
         max_str = stats["max"] if stats["max"] is not None else "-"
         print(
             f"\n[{metric}]  n={stats['n_total']}  "
             f"numeric={stats['n_numeric']}  null={stats['n_nulls']}  fail={stats['n_fails']}"
         )
-        print(f"  min={min_str}  mean={mean_str}  max={max_str}")
+        print(f"  min={min_str}  mean={mean_str}  std={std_str}  max={max_str}")
 
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
