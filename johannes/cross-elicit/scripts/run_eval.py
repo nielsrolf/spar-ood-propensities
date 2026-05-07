@@ -445,7 +445,7 @@ async def run(args):
         )
 
     eval_name = os.path.splitext(os.path.basename(args.eval))[0]
-    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
     out_dir = os.path.join(EVAL_RESULTS_DIR, f"{eval_name}__{ckpt_label}__{timestamp}")
     os.makedirs(out_dir, exist_ok=True)
     rows_path = os.path.join(out_dir, "rows.jsonl")

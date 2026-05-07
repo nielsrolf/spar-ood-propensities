@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -52,7 +53,38 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CROSS_ELICIT_ROOT = os.path.dirname(SCRIPT_DIR)
 EVALS_ROOT = os.path.join(CROSS_ELICIT_ROOT, "evals")
 EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results")
+FINETUNING_DIR = os.path.join(EVAL_RESULTS_DIR, "finetuning")
 DEFINITIONS_PATH = os.path.join(EVALS_ROOT, "definitions.json")
+
+_OUT_DIR_RE = re.compile(r"^Output dir:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def _move_eval_output_to_finetuning(log_path: str) -> str | None:
+    """Parse run_eval.py's 'Output dir:' line from `log_path` and move that
+    dir into eval_results/finetuning/. Returns the new path, or None if the
+    log didn't contain a parseable line or the dir no longer exists.
+
+    finetune.py spawns run_eval.py with stdout redirected to a log file, so
+    we recover the dir by reading the closed log after proc.wait().
+    """
+    try:
+        with open(log_path) as f:
+            text = f.read()
+    except OSError:
+        return None
+    m = _OUT_DIR_RE.search(text)
+    if m is None:
+        return None
+    out_dir = m.group(1).strip()
+    if not os.path.isdir(out_dir):
+        return None
+    try:
+        os.makedirs(FINETUNING_DIR, exist_ok=True)
+        new_path = os.path.join(FINETUNING_DIR, os.path.basename(out_dir.rstrip("/")))
+        shutil.move(out_dir, new_path)
+        return new_path
+    except Exception:
+        return None
 
 EVAL_YAMLS: list[str] = [
     f"{EVALS_ROOT}/agreeableness/agreeableness_eval.yaml",
@@ -424,21 +456,21 @@ def _find_existing_baseline_eval(model_name: str, eval_yaml: str) -> str | None:
     """Return the path to a prior baseline-eval result dir (with summary.json)
     matching this (model, eval YAML) pair, or None if none exists. Reused so
     re-runs with different hyperparams (e.g. LR) don't redo base-model evals."""
-    if not os.path.isdir(EVAL_RESULTS_DIR):
+    if not os.path.isdir(FINETUNING_DIR):
         return None
     eval_name = os.path.splitext(os.path.basename(eval_yaml))[0]
     model_slug = model_name.replace("/", "-")
     prefix = f"{eval_name}__{model_slug}__base__"
     candidates = []
-    for name in os.listdir(EVAL_RESULTS_DIR):
+    for name in os.listdir(FINETUNING_DIR):
         if not name.startswith(prefix):
             continue
-        summary = os.path.join(EVAL_RESULTS_DIR, name, "summary.json")
+        summary = os.path.join(FINETUNING_DIR, name, "summary.json")
         if os.path.exists(summary) and os.path.getsize(summary) > 0:
             candidates.append(name)
     if not candidates:
         return None
-    return os.path.join(EVAL_RESULTS_DIR, sorted(candidates)[-1])
+    return os.path.join(FINETUNING_DIR, sorted(candidates)[-1])
 
 
 def _spawn_baseline_eval(model_name: str, axis: str, eval_yaml: str) -> tuple | None:
@@ -705,6 +737,12 @@ def train_one(
             log_file.close()
             status = "ok" if rc == 0 else f"FAILED rc={rc}"
             print(f"    eval epoch {ep}: {status} (log: {log_file.name})")
+            if rc == 0:
+                moved = _move_eval_output_to_finetuning(log_file.name)
+                if moved is not None:
+                    print(f"      moved → {moved}")
+                else:
+                    print(f"      WARN: could not move eval output (no parseable 'Output dir:' in log)")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -838,6 +876,12 @@ def main():
             log_file.close()
             status = "ok" if rc == 0 else f"FAILED rc={rc}"
             print(f"  baseline {label}: {status} (log: {log_file.name})")
+            if rc == 0:
+                moved = _move_eval_output_to_finetuning(log_file.name)
+                if moved is not None:
+                    print(f"    moved → {moved}")
+                else:
+                    print(f"    WARN: could not move baseline output (no parseable 'Output dir:' in log)")
 
     print("\nDone.")
 

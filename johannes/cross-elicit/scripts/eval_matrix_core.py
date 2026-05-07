@@ -1,8 +1,8 @@
 """eval_matrix_core.py
 
-Shared parse / discover / disambiguate logic for the eval_results/ tree.
-Used by visualize_eval_matrix.py (heatmap render) and summarize_FT.py (scores
-JSON dump). Centralised so both pick the same dir per (pole, eval) cell.
+Shared parse / discover / disambiguate logic for the eval_results/finetuning/
+tree. Used by visualize_eval_matrix.py (heatmap render) and summarize_FT.py
+(scores JSON dump). Centralised so both pick the same dir per (pole, eval) cell.
 
 Public surface:
     discover_models(root)              -> set of base_model strings
@@ -24,7 +24,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-TIMESTAMP_RE = r"\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}"
+TIMESTAMP_RE = r"\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d+)?"
 
 
 def discover_models(root: Path) -> set[str]:
