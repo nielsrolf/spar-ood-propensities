@@ -31,6 +31,7 @@ sys.path.insert(0, str(REPO_ROOT / "june" / "steering_independence"))
 
 from utils import extract_residual_stream, get_model_layers, load_model  # noqa: E402
 from neutral_prompts import NEUTRAL_PROMPTS, as_messages                  # noqa: E402
+from eliciting_prompts import ELICITING_PROMPTS                           # noqa: E402
 
 
 def load_registry(yaml_path: Path = HERE / "models.yaml") -> dict:
@@ -67,13 +68,27 @@ def load_tinker_model(checkpoint: str, base_model: str, rank: int, base_model_un
 
     service_client = tinker.ServiceClient()
     tc = service_client.create_lora_training_client(base_model=base_model, rank=rank)
-    tc.load_state(checkpoint)
+
+    # load_state may return a future — wait for it before saving weights.
+    load_resp = tc.load_state(checkpoint)
+    if hasattr(load_resp, "result"):
+        load_resp.result()
 
     resp = tc.save_weights_for_sampler(sampler_name)
     resp = resp.result() if hasattr(resp, "result") else resp
-    sampler_path = resp.path  # tinker:// URI
+    sampler_path = resp.path
+    print(f"  sampler_path: {sampler_path}")
 
     weights.download(tinker_path=sampler_path, output_dir=tmp_adapter)
+    adapter_files = list(Path(tmp_adapter).iterdir())
+    print(f"  Adapter dir: {[f.name for f in adapter_files]}")
+
+    # Confirm lora_B weights are non-zero (trained, not init-state zeros)
+    from safetensors.torch import load_file as _load_st
+    _adapter_w = _load_st(str(Path(tmp_adapter) / "adapter_model.safetensors"))
+    _lora_b_norms = [v.norm().item() for k, v in _adapter_w.items() if "lora_B" in k]
+    print(f"  lora_B norms (first 4): {_lora_b_norms[:4]}")
+
     weights.build_hf_model(
         base_model=base_model_ungated or base_model,
         adapter_path=tmp_adapter,
@@ -87,18 +102,22 @@ def load_tinker_model(checkpoint: str, base_model: str, rank: int, base_model_un
     )
     tokenizer = AutoTokenizer.from_pretrained(base_model_ungated or base_model)
     tokenizer.padding_side = "left"
-    return model, tokenizer
+    return model, tokenizer, tmp_adapter, tmp_work
 
 
-def extract_mean_activation(model, tokenizer, layer_idx: int) -> torch.Tensor:
-    """Return mean last-token activation at layer_idx across all neutral prompts."""
+def extract_mean_activation(
+    model, tokenizer, layer_idx: int, use_eliciting: bool = False
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return (mean_vec, per_prompt_matrix) where per_prompt is (n_prompts, hidden_dim)."""
+    prompts = ELICITING_PROMPTS if use_eliciting else NEUTRAL_PROMPTS
     vecs = []
-    for prompt in tqdm(NEUTRAL_PROMPTS, desc="  prompts", ncols=80, leave=False):
+    for prompt in tqdm(prompts, desc="  prompts", ncols=80, leave=False):
         acts = extract_residual_stream(
             model, tokenizer, as_messages(prompt), layers=[layer_idx]
         )
         vecs.append(acts[layer_idx].float())
-    return torch.stack(vecs).mean(dim=0)
+    stacked = torch.stack(vecs)  # (n_prompts, hidden_dim)
+    return stacked.mean(dim=0), stacked
 
 
 def run(
@@ -107,6 +126,7 @@ def run(
     layer_override: int | None,
     out_dir: Path,
     registry: dict,
+    use_eliciting: bool = False,
 ) -> None:
     family_cfg = registry[family]
     base_model = family_cfg["base_model"]
@@ -122,9 +142,10 @@ def run(
     out_family.mkdir(parents=True, exist_ok=True)
 
     pending = [(n, c) for n, c in models_cfg.items()
-               if not (out_family / f"{n}.pt").exists()]
+               if not (out_family / f"{n}.pt").exists()
+               or not (out_family / f"{n}_perprompt.pt").exists()]
     for n, _ in models_cfg.items():
-        if (out_family / f"{n}.pt").exists():
+        if (out_family / f"{n}.pt").exists() and (out_family / f"{n}_perprompt.pt").exists():
             print(f"[skip] {n} (already extracted)")
 
     for i, (model_name, cfg) in enumerate(tqdm(pending, desc="models", ncols=80), 1):
@@ -132,6 +153,7 @@ def run(
         checkpoint = cfg.get("checkpoint")
         print(f"\n[{i}/{len(pending)}] {model_name} ({'base' if not checkpoint else 'tinker'})")
 
+        tmp_dirs_to_clean: list[str] = []
         if checkpoint is None:
             from transformers import AutoModelForCausalLM, AutoTokenizer
             _base_id = base_model_ungated or base_model
@@ -141,13 +163,15 @@ def run(
             tokenizer = AutoTokenizer.from_pretrained(_base_id)
             tokenizer.padding_side = "left"
         else:
-            model, tokenizer = load_tinker_model(checkpoint, base_model, lora_rank, base_model_ungated)
+            model, tokenizer, _ta, _tw = load_tinker_model(checkpoint, base_model, lora_rank, base_model_ungated)
+            tmp_dirs_to_clean = [_ta, _tw]
 
         layer_idx = pick_layer(model, layer_fraction, layer_override)
         n_layers = len(get_model_layers(model))
-        print(f"  Layer {layer_idx} / {n_layers}  |  {len(NEUTRAL_PROMPTS)} neutral prompts")
+        prompts = ELICITING_PROMPTS if use_eliciting else NEUTRAL_PROMPTS
+        print(f"  Layer {layer_idx} / {n_layers}  |  {len(prompts)} {'eliciting' if use_eliciting else 'neutral'} prompts")
 
-        vec = extract_mean_activation(model, tokenizer, layer_idx)
+        vec, per_prompt = extract_mean_activation(model, tokenizer, layer_idx, use_eliciting)
 
         metadata = {
             "model_name": model_name,
@@ -158,14 +182,22 @@ def run(
             "trait": cfg.get("trait", ""),
             "color": cfg.get("color", "gray"),
             "cluster": cfg.get("cluster", "base"),
-            "n_prompts": len(NEUTRAL_PROMPTS),
+            "n_prompts": len(prompts),
+            "prompt_type": "eliciting" if use_eliciting else "neutral",
             "hidden_dim": vec.shape[0],
         }
         torch.save({"activation": vec, "metadata": metadata}, out_path)
         print(f"  Saved {out_path}  shape={tuple(vec.shape)}")
 
+        perprompt_path = out_family / f"{model_name}_perprompt.pt"
+        torch.save({"activations": per_prompt, "metadata": metadata}, perprompt_path)
+        print(f"  Saved {perprompt_path}  shape={tuple(per_prompt.shape)}")
+
         del model
         torch.cuda.empty_cache()
+        import shutil
+        for d in tmp_dirs_to_clean:
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def probe_weights_path(registry: dict, family: str) -> None:
@@ -216,6 +248,8 @@ def main():
     ap.add_argument("--models", nargs="+", help="Subset of model names to extract")
     ap.add_argument("--layer", type=int, default=None, help="Override layer index")
     ap.add_argument("--out-dir", type=Path, default=HERE / "output")
+    ap.add_argument("--eliciting", action="store_true",
+                    help="Use behaviorally-eliciting prompts instead of neutral prompts")
     ap.add_argument("--probe-weights-path", action="store_true",
                     help="Find where tinker saves merged weights on this machine, then exit")
     args = ap.parse_args()
@@ -230,6 +264,7 @@ def main():
         layer_override=args.layer,
         out_dir=args.out_dir,
         registry=registry,
+        use_eliciting=args.eliciting,
     )
 
 
