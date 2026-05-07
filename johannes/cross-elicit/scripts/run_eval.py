@@ -104,7 +104,7 @@ from tinker_cookbook import renderers  # noqa: E402
 from tinker_cookbook.model_info import get_recommended_renderer_name  # noqa: E402
 from tinker_cookbook.tokenizer_utils import get_tokenizer  # noqa: E402
 
-from openai import AsyncOpenAI  # noqa: E402
+from openai import AsyncOpenAI, RateLimitError  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -116,8 +116,19 @@ EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results")
 
 SAMPLES_PER_PARAPHRASE = 1
 JUDGE_MODEL = "gpt-5.4-mini"
-JUDGE_CONCURRENCY = 8
-SAMPLE_CONCURRENCY = 4   # parallel tinker requests
+
+# Concurrency for tinker (sampling) and openai (judge) calls is AIMD-controlled
+# (see AdaptiveLimiter below): starts at *_START, +1 per AIMD_SUCCESS_STEP
+# successes up to *_MAX, halves on rate-limit error down to *_MIN. All
+# overridable via env vars so several runs can share API quota.
+SAMPLE_CONCURRENCY_START = int(os.environ.get("SAMPLE_CONCURRENCY", "32"))
+SAMPLE_CONCURRENCY_MIN = int(os.environ.get("SAMPLE_CONCURRENCY_MIN", "1"))
+SAMPLE_CONCURRENCY_MAX = int(os.environ.get("SAMPLE_CONCURRENCY_MAX", "128"))
+JUDGE_CONCURRENCY_START = int(os.environ.get("JUDGE_CONCURRENCY", "256"))
+JUDGE_CONCURRENCY_MIN = int(os.environ.get("JUDGE_CONCURRENCY_MIN", "1"))
+JUDGE_CONCURRENCY_MAX = int(os.environ.get("JUDGE_CONCURRENCY_MAX", "1024"))
+AIMD_SUCCESS_STEP = int(os.environ.get("AIMD_SUCCESS_STEP", "3"))
+AIMD_MAX_RETRIES = int(os.environ.get("AIMD_MAX_RETRIES", "8"))
 
 # Quick-mode: limit how many test-split items are evaluated.
 # None  → use every test-split item.
@@ -125,6 +136,129 @@ SAMPLE_CONCURRENCY = 4   # parallel tinker requests
 # Overridable on the CLI via --max-test-items / --no-max-test-items.
 MAX_TEST_ITEMS: int | None = None
 TEST_SAMPLE_SEED = 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Adaptive concurrency (AIMD)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AdaptiveLimiter:
+    """AIMD-controlled async concurrency limiter.
+
+    `target` is the live cap on in-flight calls. on_success() bumps target by 1
+    every `success_step` successes (up to `hi`); on_rate_limit() halves target
+    (down to `lo`), debounced so a burst of simultaneous 429s only halves once.
+    Use as `async with limiter: ...` to take a slot.
+    """
+
+    def __init__(self, name: str, start: int, lo: int, hi: int, success_step: int):
+        self.name = name
+        self._target = max(lo, min(hi, start))
+        self._lo = lo
+        self._hi = hi
+        self._success_step = success_step
+        self._in_flight = 0
+        self._success_count = 0
+        self._last_shrink = 0.0
+        self._cond = asyncio.Condition()
+
+    @property
+    def target(self) -> int:
+        return self._target
+
+    def state_str(self) -> str:
+        return f"{self.name} target={self._target} in_flight={self._in_flight}"
+
+    async def __aenter__(self):
+        async with self._cond:
+            while self._in_flight >= self._target:
+                await self._cond.wait()
+            self._in_flight += 1
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        async with self._cond:
+            self._in_flight -= 1
+            self._cond.notify()
+
+    async def on_success(self):
+        async with self._cond:
+            self._success_count += 1
+            if self._success_count >= self._success_step and self._target < self._hi:
+                self._target += 1
+                self._success_count = 0
+                self._cond.notify()
+                print(f"  [limiter:{self.name}] +1 → {self._target}")
+
+    async def on_rate_limit(self):
+        async with self._cond:
+            now = time.monotonic()
+            if now - self._last_shrink < 1.0:
+                return  # debounce: a burst of simultaneous 429s only halves once
+            self._last_shrink = now
+            self._success_count = 0
+            if self._target > self._lo:
+                old = self._target
+                self._target = max(self._lo, self._target // 2)
+                print(f"  [limiter:{self.name}] rate-limit → {old}→{self._target}")
+
+
+def _is_rate_limit_err(e: BaseException) -> bool:
+    if isinstance(e, RateLimitError):
+        return True
+    status = getattr(e, "status_code", None) or getattr(e, "status", None)
+    if status == 429:
+        return True
+    s = repr(e).lower()
+    return any(t in s for t in (
+        "rate limit", "ratelimit", "429", "too many requests", "quota exceeded",
+    ))
+
+
+def _retry_after_of(e: BaseException) -> float | None:
+    resp = getattr(e, "response", None)
+    headers = getattr(resp, "headers", None) if resp is not None else None
+    if not headers:
+        return None
+    try:
+        ra = headers.get("retry-after") or headers.get("Retry-After")
+    except Exception:
+        return None
+    if ra is None:
+        return None
+    try:
+        return float(ra)
+    except (TypeError, ValueError):
+        return None
+
+
+async def call_with_aimd(limiter: AdaptiveLimiter, fn, max_retries: int = AIMD_MAX_RETRIES):
+    """Run `fn()` (zero-arg, returns awaitable) under `limiter` with AIMD.
+
+    On rate-limit errors: signals the limiter to halve, sleeps Retry-After (or
+    exponential backoff fallback), and retries up to `max_retries`. Other
+    exceptions propagate immediately.
+    """
+    backoff = 1.0
+    last_err: BaseException | None = None
+    wait = 0.0
+    for _ in range(max_retries):
+        async with limiter:
+            try:
+                result = await fn()
+            except Exception as e:
+                if _is_rate_limit_err(e):
+                    await limiter.on_rate_limit()
+                    last_err = e
+                    wait = _retry_after_of(e) or backoff
+                else:
+                    raise
+            else:
+                await limiter.on_success()
+                return result
+        await asyncio.sleep(wait)
+        backoff = min(backoff * 2, 60.0)
+    raise last_err if last_err is not None else RuntimeError("call_with_aimd: retry exhausted")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -196,7 +330,7 @@ async def sample_answers(
     renderer,
     prompt: str,
     n: int,
-    sample_sem: asyncio.Semaphore,
+    sample_limiter: AdaptiveLimiter,
     system_prompt: str | None = None,
 ) -> list[str]:
     messages: list[renderers.Message] = []
@@ -208,10 +342,12 @@ async def sample_answers(
         temperature=1.0,
         stop=renderer.get_stop_sequences(),
     )
-    async with sample_sem:
-        result = await sampling_client.sample_async(
-            prompt=model_input, num_samples=n, sampling_params=sampling_params
-        )
+    result = await call_with_aimd(
+        sample_limiter,
+        lambda: sampling_client.sample_async(
+            prompt=model_input, num_samples=n, sampling_params=sampling_params,
+        ),
+    )
     answers: list[str] = []
     for seq in result.sequences:
         parsed, _ = renderer.parse_response(seq.tokens)
@@ -243,16 +379,18 @@ def parse_judge_text(text: str) -> tuple[str, int | None]:
     return ("fail", None)
 
 
-async def call_judge(client: AsyncOpenAI, prompt: str, sem: asyncio.Semaphore) -> str:
-    async with sem:
-        try:
-            resp = await client.chat.completions.create(
+async def call_judge(client: AsyncOpenAI, prompt: str, judge_limiter: AdaptiveLimiter) -> str:
+    try:
+        resp = await call_with_aimd(
+            judge_limiter,
+            lambda: client.chat.completions.create(
                 model=JUDGE_MODEL,
                 messages=[{"role": "user", "content": prompt}],
-            )
-            return resp.choices[0].message.content or ""
-        except Exception as e:
-            return f"__JUDGE_ERROR__: {e!r}"
+            ),
+        )
+        return resp.choices[0].message.content or ""
+    except Exception as e:
+        return f"__JUDGE_ERROR__: {e!r}"
 
 
 def fill_judge_template(template: str, question: str, answer: str) -> str:
@@ -328,14 +466,22 @@ async def run(args):
 
     # OpenAI judge client
     judge_client = AsyncOpenAI()
-    judge_sem = asyncio.Semaphore(JUDGE_CONCURRENCY)
-    sample_sem = asyncio.Semaphore(SAMPLE_CONCURRENCY)
+    judge_limiter = AdaptiveLimiter(
+        "judge", JUDGE_CONCURRENCY_START, JUDGE_CONCURRENCY_MIN,
+        JUDGE_CONCURRENCY_MAX, AIMD_SUCCESS_STEP,
+    )
+    sample_limiter = AdaptiveLimiter(
+        "sample", SAMPLE_CONCURRENCY_START, SAMPLE_CONCURRENCY_MIN,
+        SAMPLE_CONCURRENCY_MAX, AIMD_SUCCESS_STEP,
+    )
 
     # Phase 1: sample model answers (in parallel across paraphrases)
     n_paraphrases = sum(len(it.get("paraphrases") or []) for it in test_items)
     print(
         f"\nSampling {SAMPLES_PER_PARAPHRASE} answers/paraphrase across "
-        f"{n_paraphrases} paraphrases  (concurrency={SAMPLE_CONCURRENCY})..."
+        f"{n_paraphrases} paraphrases  "
+        f"(concurrency start={SAMPLE_CONCURRENCY_START}, "
+        f"range [{SAMPLE_CONCURRENCY_MIN},{SAMPLE_CONCURRENCY_MAX}])..."
     )
 
     async def _sample_with_meta(key, prompt):
@@ -343,7 +489,7 @@ async def run(args):
         try:
             answers = await sample_answers(
                 sampling_client, renderer, prompt,
-                SAMPLES_PER_PARAPHRASE, sample_sem,
+                SAMPLES_PER_PARAPHRASE, sample_limiter,
                 system_prompt=system_prompt,
             )
             return key, answers, time.time() - t0, None
@@ -370,19 +516,27 @@ async def run(args):
         rate = done / elapsed if elapsed > 0 else 0
         eta = (total - done) / rate if rate > 0 else float("inf")
         if err is not None:
-            print(f"  [{done}/{total}] {key[0]}#{key[1]} FAILED in {dt:.1f}s: {err!r}")
+            print(
+                f"  [{done}/{total}] {key[0]}#{key[1]} FAILED in {dt:.1f}s: {err!r}  "
+                f"[{sample_limiter.state_str()}]"
+            )
         else:
             n_chars = sum(len(a) for a in answers)
             print(
                 f"  [{done}/{total}] {key[0]}#{key[1]} ok in {dt:.1f}s "
                 f"({len(answers)} ans, {n_chars} chars)  "
-                f"[elapsed {elapsed:.0f}s, ETA {eta:.0f}s]"
+                f"[elapsed {elapsed:.0f}s, ETA {eta:.0f}s]  "
+                f"[{sample_limiter.state_str()}]"
             )
         answers_map[key] = answers
     print(f"Sampling done in {time.time() - t_phase1:.0f}s.")
 
     # Phase 2: judge every (item, paraphrase, sample, metric)
-    print(f"\nJudging with {JUDGE_MODEL} (concurrency={JUDGE_CONCURRENCY})...")
+    print(
+        f"\nJudging with {JUDGE_MODEL} "
+        f"(concurrency start={JUDGE_CONCURRENCY_START}, "
+        f"range [{JUDGE_CONCURRENCY_MIN},{JUDGE_CONCURRENCY_MAX}])..."
+    )
     judge_jobs: list[tuple[dict, asyncio.Task]] = []
     for it in test_items:
         item_id = it["id"]
@@ -400,7 +554,7 @@ async def run(args):
                         "question": paraphrase,
                         "answer": ans,
                     }
-                    task = asyncio.create_task(call_judge(judge_client, filled, judge_sem))
+                    task = asyncio.create_task(call_judge(judge_client, filled, judge_limiter))
                     judge_jobs.append((meta, task))
     print(f"  queued {len(judge_jobs)} judge calls; awaiting...")
 
@@ -447,7 +601,8 @@ async def run(args):
                 eta = (len(judge_jobs) - i) / rate if rate > 0 else float("inf")
                 print(
                     f"  ── progress {i}/{len(judge_jobs)} "
-                    f"[elapsed {elapsed:.0f}s, ETA {eta:.0f}s]"
+                    f"[elapsed {elapsed:.0f}s, ETA {eta:.0f}s]  "
+                    f"[{judge_limiter.state_str()}]"
                 )
                 for m in sorted(set(metric_numeric) | set(metric_null) | set(metric_fail)):
                     nums = metric_numeric.get(m, [])
@@ -505,16 +660,18 @@ async def run(args):
             "min": min(numeric) if numeric else None,
             "max": max(numeric) if numeric else None,
             "mean": statistics.fmean(numeric) if numeric else None,
+            "std": statistics.stdev(numeric) if len(numeric) >= 2 else None,
         }
         summary["metrics"][metric] = stats
         mean_str = f"{stats['mean']:.2f}" if stats["mean"] is not None else "-"
+        std_str = f"{stats['std']:.2f}" if stats["std"] is not None else "-"
         min_str = stats["min"] if stats["min"] is not None else "-"
         max_str = stats["max"] if stats["max"] is not None else "-"
         print(
             f"\n[{metric}]  n={stats['n_total']}  "
             f"numeric={stats['n_numeric']}  null={stats['n_nulls']}  fail={stats['n_fails']}"
         )
-        print(f"  min={min_str}  mean={mean_str}  max={max_str}")
+        print(f"  min={min_str}  mean={mean_str}  std={std_str}  max={max_str}")
 
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
