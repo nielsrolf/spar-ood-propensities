@@ -38,6 +38,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -46,6 +47,12 @@ EVALS_ROOT = os.path.join(CROSS_ELICIT_ROOT, "evals")
 EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results")
 SYS_PROMPTS_DIR = os.path.join(EVAL_RESULTS_DIR, "sys_prompts")
 RUN_EVAL_PATH = os.path.join(SCRIPT_DIR, "run_eval.py")
+
+# Reuse run_eval.py's label-derivation so existing-run detection matches the
+# exact dir name run_eval.py would write for this checkpoint.
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+from run_eval import resolve_checkpoint  # noqa: E402
 
 ALL_EVALS: list[str] = [
     "agreeableness",
@@ -80,7 +87,7 @@ ALL_EVALS: list[str] = [
     "trust-in-user-intentions",
 ]
 
-TS_RE = re.compile(r"^(.+)__(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})$")
+TS_RE = re.compile(r"^(.+)__(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d+)?)$")
 OUT_DIR_RE = re.compile(r"^Output dir:\s*(.+?)\s*$")
 
 
@@ -105,14 +112,43 @@ def offdiag_label(source_eval: str, pole_name: str) -> str:
     return f"{source_eval}--{pole_name}"
 
 
-def existing_run(target_eval: str, label: str) -> str | None:
-    """Return path of an existing sys_prompts dir for this cell, if any."""
+def _existing_n_test_items(run_dir: str) -> int | None:
+    """Read summary.json's n_test_items for a prior run; None if missing/unreadable."""
+    summary_path = os.path.join(run_dir, "summary.json")
+    if not os.path.isfile(summary_path):
+        return None
+    try:
+        with open(summary_path) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    n = data.get("n_test_items")
+    return n if isinstance(n, int) else None
+
+
+def existing_run(
+    target_eval: str, ckpt_label: str, label: str, min_items: int | None = None
+) -> str | None:
+    """Return path of an existing sys_prompts dir for this cell + checkpoint.
+
+    If `min_items` is given, only return a dir whose summary.json reports
+    n_test_items >= min_items; otherwise treat the cell as not-yet-done so the
+    caller will re-run it at the larger sample size.
+    """
     pattern = os.path.join(
         SYS_PROMPTS_DIR,
-        f"{target_eval}_eval__*__sysprompt-{label}__*",
+        f"{target_eval}_eval__{ckpt_label}__sysprompt-{label}__*",
     )
     matches = sorted(glob.glob(pattern))
-    return matches[0] if matches else None
+    if not matches:
+        return None
+    if min_items is None:
+        return matches[0]
+    for path in matches:
+        n = _existing_n_test_items(path)
+        if n is not None and n >= min_items:
+            return path
+    return None
 
 
 def relabel_with_sysprompt(out_dir: str, sysprompt_label: str) -> str:
@@ -129,29 +165,58 @@ def relabel_with_sysprompt(out_dir: str, sysprompt_label: str) -> str:
     return new_path
 
 
-def run_child_and_move(cmd: list[str], sysprompt_label: str) -> tuple[int, str | None]:
+_STDOUT_LOCK = threading.Lock()
+
+
+def _emit(prefix: str, text: str) -> None:
+    """Atomically write `text` to stdout, prefixing each line with `prefix`."""
+    if not text:
+        return
+    with _STDOUT_LOCK:
+        for line in text.splitlines(keepends=True):
+            sys.stdout.write(f"{prefix}{line}")
+        sys.stdout.flush()
+
+
+def run_child_and_move(
+    cmd: list[str], sysprompt_label: str, prefix: str = ""
+) -> tuple[int, str | None]:
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
     )
     out_dir: str | None = None
     assert proc.stdout is not None
     for line in proc.stdout:
-        sys.stdout.write(line)
-        sys.stdout.flush()
+        _emit(prefix, line)
         if out_dir is None:
             m = OUT_DIR_RE.match(line.rstrip("\n"))
             if m:
                 out_dir = m.group(1)
     rc = proc.wait()
     if rc != 0:
-        print(f"  → FAILED (exit {rc})")
+        _emit(prefix, f"  → FAILED (exit {rc})\n")
         return rc, None
     if out_dir is None or not os.path.isdir(out_dir):
-        print(f"  → WARN: could not locate child output dir (parsed={out_dir!r}); not moving.")
+        _emit(prefix, f"  → WARN: could not locate child output dir (parsed={out_dir!r}); not moving.\n")
         return rc, None
     new_path = relabel_with_sysprompt(out_dir, sysprompt_label)
-    print(f"  → moved to {new_path}")
+    _emit(prefix, f"  → moved to {new_path}\n")
     return rc, new_path
+
+
+def split_evenly(items: list, n: int) -> list[list]:
+    """Split `items` into `n` contiguous sublists, as equal in length as possible."""
+    if n <= 0:
+        raise ValueError("n must be positive")
+    n = max(1, min(n, len(items))) if items else n
+    base, rem = divmod(len(items), n)
+    out: list[list] = []
+    i = 0
+    for k in range(n):
+        size = base + (1 if k < rem else 0)
+        out.append(items[i : i + size])
+        i += size
+    return out
 
 
 def main():
@@ -186,7 +251,15 @@ def main():
         "--force", action="store_true",
         help="Re-run cells whose output dir already exists (default: skip them).",
     )
+    parser.add_argument(
+        "--workers", type=int, default=6,
+        help="Number of parallel workers. Jobs are split into this many "
+             "contiguous sublists, each processed by one worker thread. "
+             "Default: 6.",
+    )
     args = parser.parse_args()
+    if args.workers < 1:
+        raise SystemExit(f"--workers must be >= 1 (got {args.workers}).")
 
     target_evals = args.eval or ALL_EVALS
     source_evals = args.source_eval or ALL_EVALS
@@ -195,7 +268,13 @@ def main():
     if missing:
         raise SystemExit(f"Missing eval YAML(s): {missing}. Looked under {EVALS_ROOT}.")
 
+    # Resolve the same ckpt_label run_eval.py would write so existing-run
+    # detection scopes to this checkpoint and doesn't false-match prior runs
+    # of a different model.
+    _, _, ckpt_label = resolve_checkpoint(args.checkpoint, args.epoch)
+
     print(f"Checkpoint spec: {args.checkpoint}")
+    print(f"Checkpoint label: {ckpt_label}")
     print(f"Targets ({len(target_evals)}): {', '.join(target_evals)}")
     print(f"Sources ({len(source_evals)}): {', '.join(source_evals)}")
     print(f"Output root: {SYS_PROMPTS_DIR}")
@@ -211,7 +290,9 @@ def main():
             for pole_name, pole_path in list_poles(source_eval):
                 label = offdiag_label(source_eval, pole_name)
                 if not args.force:
-                    found = existing_run(target_eval, label)
+                    found = existing_run(
+                        target_eval, ckpt_label, label, min_items=args.max_test_items
+                    )
                     if found is not None:
                         skipped_existing.append((target_eval, label))
                         continue
@@ -234,25 +315,52 @@ def main():
         return
 
     failures: list[tuple[str, str, str, int]] = []
+    failures_lock = threading.Lock()
+    started = [0]  # mutable counter shared across workers (lock-protected)
+    started_lock = threading.Lock()
     t0 = time.time()
-    for i, (target_eval, source_eval, pole_name, label, cmd) in enumerate(jobs, 1):
-        elapsed = time.time() - t0
-        print("\n" + "=" * 78)
-        print(
-            f"[{i}/{len(jobs)}] target={target_eval}  source={source_eval}  "
-            f"pole={pole_name}  (elapsed {elapsed:.0f}s)"
-        )
-        print("  " + " ".join(cmd))
-        print("=" * 78)
-        rc, _ = run_child_and_move(cmd, label)
-        if rc != 0:
-            failures.append((target_eval, source_eval, pole_name, rc))
-            if not args.continue_on_error:
-                print("Aborting (pass --continue-on-error to keep going).")
-                break
+    total = len(jobs)
+
+    def worker_loop(worker_id: int, sub_jobs: list[tuple[str, str, str, str, list[str]]]) -> None:
+        prefix = f"[w{worker_id}] "
+        for target_eval, source_eval, pole_name, label, cmd in sub_jobs:
+            with started_lock:
+                started[0] += 1
+                idx = started[0]
+            elapsed = time.time() - t0
+            _emit(prefix, "\n" + "=" * 78 + "\n")
+            _emit(
+                prefix,
+                f"[{idx}/{total}] target={target_eval}  source={source_eval}  "
+                f"pole={pole_name}  (elapsed {elapsed:.0f}s)\n",
+            )
+            _emit(prefix, "  " + " ".join(cmd) + "\n")
+            _emit(prefix, "=" * 78 + "\n")
+            rc, _ = run_child_and_move(cmd, label, prefix=prefix)
+            if rc != 0:
+                with failures_lock:
+                    failures.append((target_eval, source_eval, pole_name, rc))
+                if not args.continue_on_error:
+                    _emit(prefix, "Worker aborting (pass --continue-on-error to keep going).\n")
+                    return
+
+    sublists = split_evenly(jobs, args.workers)
+    print(
+        f"Launching {sum(1 for s in sublists if s)} worker(s) "
+        f"(--workers={args.workers}); per-worker sizes: {[len(s) for s in sublists]}"
+    )
+    threads: list[threading.Thread] = []
+    for i, sub in enumerate(sublists):
+        if not sub:
+            continue
+        t = threading.Thread(target=worker_loop, args=(i, sub), daemon=False)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
 
     print("\n" + "=" * 78)
-    print(f"Done in {time.time() - t0:.0f}s. {len(jobs) - len(failures)}/{len(jobs)} succeeded.")
+    print(f"Done in {time.time() - t0:.0f}s. {total - len(failures)}/{total} succeeded.")
     if failures:
         print("Failures:")
         for target_eval, source_eval, pole_name, rc in failures:

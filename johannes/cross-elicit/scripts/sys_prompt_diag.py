@@ -39,6 +39,7 @@ python sys_prompt_diag.py -c meta-llama/Llama-3.1-8B-Instruct --baseline-only
 """
 
 import argparse
+import glob
 import json
 import os
 import re
@@ -53,6 +54,15 @@ EVALS_ROOT = os.path.join(CROSS_ELICIT_ROOT, "evals")
 EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results")
 SYS_PROMPTS_DIR = os.path.join(EVAL_RESULTS_DIR, "sys_prompts")
 RUN_EVAL_PATH = os.path.join(SCRIPT_DIR, "run_eval.py")
+
+# Reuse run_eval.py's label-derivation so existing-run detection matches the
+# exact dir name run_eval.py would write for this checkpoint.
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+from run_eval import resolve_checkpoint  # noqa: E402
+
+
+
 
 ALL_EVALS: list[str] = [
     "agreeableness",
@@ -93,8 +103,8 @@ BASELINE_PROMPTS: list[tuple[str, str]] = [
 ]
 
 # run_eval.py's output-dir basename is `<eval>__<ckpt-label>__<ts>`;
-# the timestamp is YYYY-MM-DD-HH-MM-SS at the end.
-TS_RE = re.compile(r"^(.+)__(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})$")
+# the timestamp is YYYY-MM-DD-HH-MM-SS, optionally followed by -<microseconds>.
+TS_RE = re.compile(r"^(.+)__(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d+)?)$")
 OUT_DIR_RE = re.compile(r"^Output dir:\s*(.+?)\s*$")
 
 
@@ -119,6 +129,45 @@ def resolve_base_model(spec: str) -> str:
         with open(os.path.join(spec, "run_config.json")) as f:
             return json.load(f)["model_name"]
     return spec
+
+
+def _existing_n_test_items(run_dir: str) -> int | None:
+    """Read summary.json's n_test_items for a prior run; None if missing/unreadable."""
+    summary_path = os.path.join(run_dir, "summary.json")
+    if not os.path.isfile(summary_path):
+        return None
+    try:
+        with open(summary_path) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    n = data.get("n_test_items")
+    return n if isinstance(n, int) else None
+
+
+def existing_run(
+    eval_name: str, ckpt_label: str, label: str, min_items: int | None = None
+) -> str | None:
+    """Return path of an existing sys_prompts dir for this cell + checkpoint.
+
+    If `min_items` is given, only return a dir whose summary.json reports
+    n_test_items >= min_items; otherwise treat the cell as not-yet-done so the
+    caller will re-run it at the larger sample size.
+    """
+    pattern = os.path.join(
+        SYS_PROMPTS_DIR,
+        f"{eval_name}_eval__{ckpt_label}__sysprompt-{label}__*",
+    )
+    matches = sorted(glob.glob(pattern))
+    if not matches:
+        return None
+    if min_items is None:
+        return matches[0]
+    for path in matches:
+        n = _existing_n_test_items(path)
+        if n is not None and n >= min_items:
+            return path
+    return None
 
 
 def relabel_with_sysprompt(out_dir: str, sysprompt_label: str) -> str:
@@ -194,6 +243,11 @@ def main():
         "--baseline-only", action="store_true",
         help="Skip pole runs; only run the per-eval baselines.",
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Re-run cells whose output dir already exists with enough items "
+             "(default: skip them; under-sampled cells are re-run regardless).",
+    )
     args = parser.parse_args()
 
     if args.no_baselines and args.baseline_only:
@@ -205,14 +259,24 @@ def main():
         raise SystemExit(f"Missing eval YAML(s): {missing}. Looked under {EVALS_ROOT}.")
 
     base_model = resolve_base_model(args.checkpoint)
+
+    # Resolve the labels run_eval.py will write for the two job kinds. Pole runs
+    # use --checkpoint as-is; baseline runs always target the resolved base
+    # model (an HF name, so __base suffix).
+    _, _, pole_ckpt_label = resolve_checkpoint(args.checkpoint, args.epoch)
+    _, _, baseline_ckpt_label = resolve_checkpoint(base_model, None)
+
     print(f"Checkpoint spec: {args.checkpoint}")
     print(f"Resolved base model (used for baselines): {base_model}")
+    print(f"Pole ckpt label: {pole_ckpt_label}")
+    print(f"Baseline ckpt label: {baseline_ckpt_label}")
     print(f"Evals: {', '.join(eval_names)}")
     print(f"Output root: {SYS_PROMPTS_DIR}")
 
     # Build the job list: for each eval, all poles first, then baselines.
     # Each job: (eval_name, kind, sysprompt_label, cmd)
     jobs: list[tuple[str, str, str, list[str]]] = []
+    skipped_existing: list[tuple[str, str, str]] = []
     for eval_name in eval_names:
         yaml_path = eval_yaml_path(eval_name)
         if not args.baseline_only:
@@ -220,6 +284,14 @@ def main():
             if not poles:
                 print(f"  (no poles for {eval_name}; skipping pole runs)")
             for pole_name, pole_path in poles:
+                if not args.force:
+                    found = existing_run(
+                        eval_name, pole_ckpt_label, pole_name,
+                        min_items=args.max_test_items,
+                    )
+                    if found is not None:
+                        skipped_existing.append((eval_name, "pole", pole_name))
+                        continue
                 cmd = [
                     sys.executable, RUN_EVAL_PATH,
                     "--checkpoint", args.checkpoint,
@@ -233,6 +305,14 @@ def main():
                 jobs.append((eval_name, "pole", pole_name, cmd))
         if not args.no_baselines:
             for bname, bprompt in BASELINE_PROMPTS:
+                if not args.force:
+                    found = existing_run(
+                        eval_name, baseline_ckpt_label, bname,
+                        min_items=args.max_test_items,
+                    )
+                    if found is not None:
+                        skipped_existing.append((eval_name, "baseline", bname))
+                        continue
                 cmd = [
                     sys.executable, RUN_EVAL_PATH,
                     "--checkpoint", base_model,
@@ -243,6 +323,11 @@ def main():
                     cmd += ["--max-test-items", str(args.max_test_items)]
                 jobs.append((eval_name, "baseline", bname, cmd))
 
+    if skipped_existing:
+        print(
+            f"\nSkipping {len(skipped_existing)} cell(s) with existing output "
+            f"(pass --force to redo)."
+        )
     print(f"\nPlanned {len(jobs)} run(s).")
     failures: list[tuple[str, str, str, int]] = []
     t0 = time.time()

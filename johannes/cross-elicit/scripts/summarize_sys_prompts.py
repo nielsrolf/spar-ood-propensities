@@ -1,28 +1,38 @@
 #!/usr/bin/env python3
-"""summarize_FT.py
+"""summarize_sys_prompts.py
 
-For each base_model discovered in ../eval_results/finetuning/ (or one chosen
-via BASE_MODEL), this script:
+Counterpart to summarize_FT.py for the system-prompted runs in
+../eval_results/sys_prompts/. For each base_model discovered there
+(or one chosen via BASE_MODEL), this script:
 
-  1. Writes ../results/scores_<base_model>.json with per-cell metrics
-     (mean / std / min / max / counts), per-conversation scores, and the
-     source dirname / metadata for each (pole, eval_propensity) cell.
-  2. Regenerates ../results/{minmax,std}_eval_matrix_<base_model>.png by
-     driving visualize_eval_matrix.main() (so the heatmaps and the scores
-     JSON pick the same chosen dir per cell).
-  3. Scaffolds ../results/browse_responses.ipynb on first run only
-     (idempotent -- never overwrites your edits). The notebook exposes
-     `get_responses(model, pole, eval)` and `get_scores(model, pole, eval)`
-     by lazy-loading the relevant rows.jsonl on demand.
+  1. Writes ../results/scores_sysprompts_<base_model>.json with per-cell
+     metrics (mean / std / min / max / counts), per-conversation scores,
+     and the source dirname / metadata for each (pole, eval_propensity)
+     cell. Pole keys are the *normalized* form `<source_eval>--<pole>`
+     (or `baseline-<x>`) -- see sys_prompt_core for the rules.
+  2. Regenerates ../results/{minmax,std}_sysprompt_eval_matrix_<base_model>.png
+     by reassigning the pluggable hooks on visualize_eval_matrix and
+     calling its main(), so the heatmap and the scores JSON pick the
+     same chosen dir per cell.
+  3. Scaffolds ../results/browse_sysprompt_responses.ipynb on first run
+     only (idempotent -- never overwrites your edits). The notebook
+     exposes `get_responses(model, pole, eval)` and
+     `get_scores(model, pole, eval)` by lazy-loading rows.jsonl on demand.
 
-Edit the CONFIG block to constrain a run. Disambiguation knobs mirror the
-ones in visualize_eval_matrix.py.
+What you have to specify (vs summarize_FT.py)
+---------------------------------------------
+- The data lives in ../eval_results/sys_prompts/, not ../eval_results/
+  directly -- the visualize_eval_matrix module is retargeted accordingly.
+- Pole identity is `<source_eval>--<pole_short>` (off-diagonals stay as
+  written; diagonals like `agreeable` get re-prefixed to
+  `agreeableness--agreeable`). Baselines are kept as-is (`baseline-empty`).
+- FILTER_EPOCH and FILTER_FT_TS_PREFIX are NOT applicable: sys-prompt runs
+  have no epoch/ft_timestamp, and `passes_filters` would reject every
+  record if either is set. Defaults are None.
+- FILTER_MIN_ITEMS defaults to None (most sys-prompt runs are n=20, so
+  the FT default of 30 would drop almost everything).
 
-Two distinct dimensions to keep separate:
-  - base_model: the underlying LLM (e.g. meta-llama-Llama-3.1-8B-Instruct,
-    Qwen-Qwen3-8B-Base). Each gets its own scores_<base_model>.json.
-  - pole: the finetune label within a base_model (base, effort-plus, ...).
-    The top level of cells/ in the JSON is keyed by pole.
+Edit the CONFIG block to constrain a run.
 """
 
 from __future__ import annotations
@@ -33,24 +43,25 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-import eval_matrix_core as core
+import sys_prompt_core as core
 import visualize_eval_matrix as viz
 
 # ============================================================
 # CONFIG -- edit these
 # ============================================================
 
-# None  -> process every base_model discovered in eval_results/.
-# Otherwise: case-insensitive substring matched against the base_model
-# segment of each dir name (same semantics as visualize_eval_matrix.MODEL).
+# None  -> process every base_model discovered in eval_results/sys_prompts/.
+# Otherwise: case-insensitive substring matched against rec['model']
+# (same semantics as summarize_FT.BASE_MODEL).
 BASE_MODEL: str | None = None
 
-# Disambiguation knobs (see visualize_eval_matrix.py for full description).
-# These are forwarded to both the scores-JSON build and the heatmap render
-# so the two artefacts agree on which dir was chosen per cell.
+# Disambiguation knobs (see eval_matrix_core.FilterConfig).
+# FILTER_EPOCH and FILTER_FT_TS_PREFIX are intentionally None: every
+# sys-prompt record has epoch=None / ft_timestamp=None, so a non-None
+# value here would reject every record.
 FILTER_EPOCH: int | None = None
 FILTER_JUDGE: str | None = None
-FILTER_MIN_ITEMS: int | None = 30
+FILTER_MIN_ITEMS: int | None = None
 FILTER_FT_TS_PREFIX: str | None = None
 PREFER: str = "latest-eval"
 OVERRIDES: dict[tuple[str, str], str] = {}
@@ -59,7 +70,8 @@ RUN_VIZ: bool = True
 SCAFFOLD_NOTEBOOK: bool = True
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-EVAL_RESULTS_DIR = SCRIPT_DIR.parent / "eval_results" / "finetuning"
+EVAL_RESULTS_DIR = SCRIPT_DIR.parent / "eval_results"
+SYS_PROMPTS_DIR = EVAL_RESULTS_DIR / "sys_prompts"
 RESULTS_DIR = SCRIPT_DIR.parent / "results"
 
 
@@ -81,7 +93,7 @@ def _filters() -> core.FilterConfig:
 
 def build_scores(base_model_name: str) -> dict | None:
     """Build the scores dict for a single (exact) base_model string."""
-    records, _, _ = core.collect_records(EVAL_RESULTS_DIR, base_model_name)
+    records, _, _ = core.collect_records(SYS_PROMPTS_DIR, base_model_name)
     # collect_records uses substring match -- narrow to exact base_model
     # so we don't accidentally bundle two LLMs into one file.
     records = [r for r in records if r["model"] == base_model_name]
@@ -100,22 +112,15 @@ def build_scores(base_model_name: str) -> dict | None:
     for (pole, ev), rec in chosen.items():
         summary = rec.get("summary") or {}
         metrics_block = summary.get("metrics") or {}
-        # Pick the judge keyed to this column's eval propensity. Most evals
-        # emit a single `<propensity>_score` metric; the ethical-framework and
-        # honest-humble axes emit multiple judges, so defer to the shared
-        # resolver in eval_matrix_core.
         primary_key = core.resolve_metric_key(ev, metrics_block)
         m_inner = metrics_block.get(primary_key, {}) if primary_key else {}
 
-        rows_path = EVAL_RESULTS_DIR / rec["dirname"] / "rows.jsonl"
+        rows_path = SYS_PROMPTS_DIR / rec["dirname"] / "rows.jsonl"
         scores: dict[str, int | float | None] = {}
         if rows_path.exists():
             with rows_path.open() as f:
                 for line in f:
                     row = json.loads(line)
-                    # Multi-judge evals write one row per judge; the (item,
-                    # paraphrase, sample) cid would collide across judges, so
-                    # filter to the primary judge for this column.
                     if primary_key and row.get("metric") != primary_key:
                         continue
                     cid = (
@@ -142,8 +147,12 @@ def build_scores(base_model_name: str) -> dict | None:
             "meta": {
                 "dirname": rec["dirname"],
                 "judge_model": summary.get("judge_model"),
-                "epoch": rec["epoch"],
-                "ft_timestamp": rec["ft_timestamp"],
+                "sysprompt_label": rec["sysprompt_label"],
+                "source_eval": rec["source_eval"],
+                "pole_short": rec["pole_short"],
+                "is_baseline": rec["is_baseline"],
+                "is_diagonal": rec["is_diagonal"],
+                "ckpt_label": rec["ckpt_label"],
                 "eval_timestamp": rec["eval_timestamp"],
                 "n_test_items": summary.get("n_test_items"),
                 "samples_per_paraphrase": summary.get("samples_per_paraphrase"),
@@ -153,6 +162,7 @@ def build_scores(base_model_name: str) -> dict | None:
 
     return {
         "base_model": base_model_name,
+        "tree": "sys_prompts",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "filters": {
             "epoch": FILTER_EPOCH,
@@ -169,7 +179,7 @@ def build_scores(base_model_name: str) -> dict | None:
 
 
 def write_scores_file(scores: dict) -> Path:
-    out = RESULTS_DIR / f"scores_{scores['base_model']}.json"
+    out = RESULTS_DIR / f"scores_sysprompts_{scores['base_model']}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w") as f:
         json.dump(scores, f, indent=2)
@@ -178,22 +188,64 @@ def write_scores_file(scores: dict) -> Path:
 
 
 # ============================================================
-# VIZ (drive visualize_eval_matrix)
+# VIZ (drive visualize_eval_matrix with sys_prompt hooks)
 # ============================================================
 
 
+def _derive_pole_order(base_model_name: str) -> list[str]:
+    """Auto-derive a column order that puts baselines first and groups poles
+    by source eval. visualize_eval_matrix._resolve_axes appends extras
+    alphabetically, so we just need a sensible prefix."""
+    records, _, _ = core.collect_records(SYS_PROMPTS_DIR, base_model_name)
+    records = [r for r in records if r["model"] == base_model_name]
+    poles = {r["pole"] for r in records}
+
+    baselines = sorted(p for p in poles if p.startswith(core.BASELINE_PREFIX))
+    others = sorted(p for p in poles if not p.startswith(core.BASELINE_PREFIX))
+    return baselines + others
+
+
 def regenerate_viz(base_model_name: str) -> None:
-    viz.MODEL = base_model_name
-    viz.OUTPUT_MINMAX_FILE = f"minmax_eval_matrix_{base_model_name}.png"
-    viz.OUTPUT_STD_FILE = f"std_eval_matrix_{base_model_name}.png"
-    viz.FILTER_EPOCH = FILTER_EPOCH
-    viz.FILTER_JUDGE = FILTER_JUDGE
-    viz.FILTER_MIN_ITEMS = FILTER_MIN_ITEMS
-    viz.FILTER_FT_TS_PREFIX = FILTER_FT_TS_PREFIX
-    viz.PREFER = PREFER
-    viz.OVERRIDES = dict(OVERRIDES)
-    viz.RENDER = True
-    viz.main()
+    # Retarget the viz module: data tree, parser/disambiguate core, axis
+    # cosmetics, output paths. Reassigning module globals matches the
+    # pattern summarize_FT already uses for MODEL / OUTPUT_*.
+    # Save the FT-default hooks so we restore them after rendering -- if
+    # someone imports both summarize_FT and summarize_sys_prompts in one
+    # process, FT runs after us shouldn't inherit sys-prompt hooks.
+    saved = {
+        "core": viz.core,
+        "EVAL_RESULTS_DIR": viz.EVAL_RESULTS_DIR,
+        "DIAGONAL_RESOLVER": viz.DIAGONAL_RESOLVER,
+        "POLE_LABEL_DECORATOR": viz.POLE_LABEL_DECORATOR,
+    }
+    try:
+        viz.core = core
+        viz.EVAL_RESULTS_DIR = SYS_PROMPTS_DIR
+        viz.DIAGONAL_RESOLVER = core.diagonal_eval_for_pole
+        viz.POLE_LABEL_DECORATOR = core.pole_label_decorator
+
+        viz.MODEL = base_model_name
+        viz.OUTPUT_MINMAX_FILE = f"minmax_sysprompt_eval_matrix_{base_model_name}.png"
+        viz.OUTPUT_STD_FILE = f"std_sysprompt_eval_matrix_{base_model_name}.png"
+
+        viz.POLE_ORDER = _derive_pole_order(base_model_name)
+        # POLES / EVALS subset filters: leave at module defaults (empty = all).
+        viz.POLES = []
+        viz.EVALS = []
+
+        viz.FILTER_EPOCH = FILTER_EPOCH
+        viz.FILTER_JUDGE = FILTER_JUDGE
+        viz.FILTER_MIN_ITEMS = FILTER_MIN_ITEMS
+        viz.FILTER_FT_TS_PREFIX = FILTER_FT_TS_PREFIX
+        viz.PREFER = PREFER
+        viz.OVERRIDES = dict(OVERRIDES)
+        viz.RENDER = True
+        viz.main()
+    finally:
+        viz.core = saved["core"]
+        viz.EVAL_RESULTS_DIR = saved["EVAL_RESULTS_DIR"]
+        viz.DIAGONAL_RESOLVER = saved["DIAGONAL_RESOLVER"]
+        viz.POLE_LABEL_DECORATOR = saved["POLE_LABEL_DECORATOR"]
 
 
 # ============================================================
@@ -203,31 +255,23 @@ def regenerate_viz(base_model_name: str) -> None:
 
 def _build_notebook() -> dict:
     md_intro = (
-        "# Browse eval responses\n"
+        "# Browse sys-prompt eval responses\n"
         "\n"
-        "Look up the prompts a particular checkpoint gave to a particular eval.\n"
+        "Look up the prompts a particular system-prompted run gave to a particular eval.\n"
         "\n"
         "Three indexing dimensions:\n"
         "- **model** -- the underlying LLM (e.g. `meta-llama-Llama-3.1-8B-Instruct`,\n"
-        "  `Qwen-Qwen3-8B-Base`). Each model has its own `scores_<model>.json`.\n"
-        "- **pole** -- the propensity this checkpoint was finetuned toward\n"
-        "  (`agreeableness-plus`, `effort-minus`, `narcissism-plus`, ...). Pole\n"
-        "  `base` means the unfinetuned model. The pole is the thing meant to push\n"
-        "  the eval score up or down -- e.g. an `agreeableness-plus` checkpoint\n"
-        "  should score high on the `agreeableness` eval, and `agreeableness-minus`\n"
-        "  should score low.\n"
-        "- **eval** -- which propensity is being *measured* (`effort`, `narcissism`,\n"
-        "  `agreeableness`, ...). The judge LLM scores each answer along this axis.\n"
+        "  `Qwen-Qwen3-8B-Base`). Each model has its own\n"
+        "  `scores_sysprompts_<model>.json`.\n"
+        "- **pole** -- the normalized sys-prompt identity. Two shapes:\n"
+        "  - `<source_eval>--<pole>` (e.g. `agreeableness--agreeable`,\n"
+        "    `effort--high`). The diagonal cell for this pole is the row\n"
+        "    `eval == source_eval`; everything else is cross-elicitation.\n"
+        "  - `baseline-<x>` (e.g. `baseline-empty`) -- model run with no\n"
+        "    pole prompt; same row repeated across every eval.\n"
+        "- **eval** -- which propensity is being *measured* by the judge.\n"
         "\n"
-        "On-diagonal cells (pole `X-plus`/`X-minus` x eval `X`) are direct\n"
-        "elicitations; off-diagonal cells are cross-elicitations.\n"
-        "\n"
-        "All `scores_*.json` files in `../results/` are loaded into `SCORES`\n"
-        "(keyed by model). `get_responses` and `get_scores` stream the per-cell\n"
-        "`rows.jsonl` on demand instead of bundling every prompt + answer into\n"
-        "one giant JSON file.\n"
-        "\n"
-        "Re-running `summarize_FT.py` does **not** overwrite this notebook --\n"
+        "Re-running `summarize_sys_prompts.py` does **not** overwrite this notebook --\n"
         "delete it first if you want the fresh scaffold.\n"
     )
 
@@ -237,15 +281,15 @@ def _build_notebook() -> dict:
         "\n"
         "_here = Path('.').resolve()\n"
         "RESULTS_DIR = _here if _here.name == 'results' else _here / 'results'\n"
-        "EVAL_ROOT = (RESULTS_DIR.parent / 'eval_results' / 'finetuning').resolve()\n"
+        "EVAL_ROOT = (RESULTS_DIR.parent / 'eval_results' / 'sys_prompts').resolve()\n"
         "\n"
         "SCORES = {}\n"
-        "for p in sorted(RESULTS_DIR.glob('scores_*.json')):\n"
+        "for p in sorted(RESULTS_DIR.glob('scores_sysprompts_*.json')):\n"
         "    doc = json.loads(p.read_text())\n"
         "    if doc.get('n_cells', 0) > 0:\n"
         "        SCORES[doc['base_model']] = doc\n"
         "\n"
-        "print('Loaded scores for models:')\n"
+        "print('Loaded sys-prompt scores for models:')\n"
         "for m, doc in SCORES.items():\n"
         "    print(f\"  {m}  ({doc['n_cells']} cells across {doc['n_poles']} poles)\")\n"
         "print()\n"
@@ -281,11 +325,11 @@ def _build_notebook() -> dict:
         "\n"
         "\n"
         "def get_responses(model, pole, eval_propensity):\n"
-        "    \"\"\"Conversations from `model`'s `pole` checkpoint on the `eval_propensity` eval.\n"
+        "    \"\"\"Conversations from `model`'s `pole` sysprompt on the `eval_propensity` eval.\n"
         "\n"
         "    Returns a list of {'question', 'answer'} dicts in rows.jsonl order.\n"
         "    Example: get_responses('meta-llama-Llama-3.1-8B-Instruct',\n"
-        "                           'agreeableness-plus', 'narcissism').\n"
+        "                           'agreeableness--agreeable', 'narcissism').\n"
         "    \"\"\"\n"
         "    return [\n"
         "        {'question': r.get('question'), 'answer': r.get('answer')}\n"
@@ -302,29 +346,30 @@ def _build_notebook() -> dict:
         "    return [r.get('score') for r in _iter_rows(model, pole, eval_propensity)]\n"
     )
 
-    md_key_fn = (
-        "The `get_responses` function is the key function here - use it to look "
-        "at all the conversations that were judged by gpt-5.4-mini (default judge "
-        "model), or use `get_scores` to look at the scores that gpt-5.4-mini gave."
-    )
-
     md_examples_header = "## Example for `get_responses` use"
 
     code_example_effort = (
-        "for pole in ['effort-minus', 'base', 'effort-plus']:\n"
+        "for pole in ['baseline-empty', 'effort--low', 'effort--high']:\n"
         "    print(f\"=========================\")\n"
         "    print(f\">{pole}\")\n"
-        "    x = get_responses('meta-llama-Llama-3.1-8B-Instruct', pole, 'effort')[0]\n"
+        "    try:\n"
+        "        x = get_responses('meta-llama-Llama-3.1-8B-Instruct', pole, 'effort')[0]\n"
+        "    except KeyError as e:\n"
+        "        print(f\"  (no cell: {e})\")\n"
+        "        continue\n"
         "    print(f\">Question: {x['question']}\")\n"
         "    print(f\">Answer  : {x['answer']}\\n\")"
     )
 
     code_example = (
-        "# Example -- pick a (model, pole, eval) triple that exists and show the first conv.\n"
+        "# Pick a (model, pole, eval) triple that exists and show the first conv.\n"
         "if SCORES:\n"
         "    model = next(iter(SCORES))\n"
         "    cells = SCORES[model]['cells']\n"
-        "    pole = 'base' if 'base' in cells else next(iter(cells))\n"
+        "    pole = (\n"
+        "        'baseline-empty' if 'baseline-empty' in cells\n"
+        "        else next(iter(cells))\n"
+        "    )\n"
         "    eval_p = next(iter(cells[pole]))\n"
         "\n"
         "    convos = get_responses(model, pole, eval_p)\n"
@@ -359,7 +404,6 @@ def _build_notebook() -> dict:
     return {
         "cells": [
             md_cell("intro", md_intro),
-            md_cell("key-fn-callout", md_key_fn),
             code_cell("setup", code_setup),
             code_cell("helpers", code_helpers),
             md_cell("examples-header", md_examples_header),
@@ -395,11 +439,11 @@ def scaffold_notebook(path: Path) -> None:
 
 
 def main() -> None:
-    if not EVAL_RESULTS_DIR.exists():
-        raise SystemExit(f"eval_results dir not found: {EVAL_RESULTS_DIR}")
+    if not SYS_PROMPTS_DIR.exists():
+        raise SystemExit(f"sys_prompts dir not found: {SYS_PROMPTS_DIR}")
 
-    known = sorted(core.discover_models(EVAL_RESULTS_DIR))
-    print(f"Models discovered in eval_results/finetuning/: {known}")
+    known = sorted(core.discover_models(SYS_PROMPTS_DIR))
+    print(f"Models discovered in eval_results/sys_prompts/: {known}")
 
     if BASE_MODEL is None:
         targets = known
@@ -425,7 +469,7 @@ def main() -> None:
 
     if SCAFFOLD_NOTEBOOK:
         print()
-        scaffold_notebook(RESULTS_DIR / "browse_responses.ipynb")
+        scaffold_notebook(RESULTS_DIR / "browse_sysprompt_responses.ipynb")
 
 
 if __name__ == "__main__":
