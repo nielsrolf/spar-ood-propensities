@@ -43,6 +43,7 @@ import os
 import queue
 import random
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -58,6 +59,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CROSS_ELICIT_ROOT = os.path.dirname(SCRIPT_DIR)
 EVALS_ROOT = os.path.join(CROSS_ELICIT_ROOT, "evals")
 EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results")
+FINETUNING_DIR = os.path.join(EVAL_RESULTS_DIR, "finetuning")
 MODELS_ROOT = os.path.join(CROSS_ELICIT_ROOT, "models")
 DEFINITIONS_PATH = os.path.join(EVALS_ROOT, "definitions.json")
 CONFIGS_DIR = os.path.join(SCRIPT_DIR, "configs")
@@ -320,21 +322,21 @@ def _required_n(eval_yaml: str, max_test_items: int | None) -> int:
 
 
 def _has_existing_eval(eval_yaml: str, ckpt_label: str, max_test_items: int | None) -> bool:
-    """True iff some eval_results/<stem>__<ckpt_label>__*/summary.json on disk
-    has `n_test_items >= required`, where `required` is what the upcoming run
-    would itself produce (full split, or the --max-test-items cap if smaller).
+    """True iff some eval_results/finetuning/<stem>__<ckpt_label>__*/summary.json
+    on disk has `n_test_items >= required`, where `required` is what the upcoming
+    run would itself produce (full split, or the --max-test-items cap if smaller).
 
     This makes earlier partial-coverage runs (e.g. the n=10 small-batch base +
     diagonal evals) NOT count as done — so they get re-run at the right size."""
-    if not os.path.isdir(EVAL_RESULTS_DIR):
+    if not os.path.isdir(FINETUNING_DIR):
         return False
     required = _required_n(eval_yaml, max_test_items)
     stem = _eval_yaml_stem(eval_yaml)
     prefix = f"{stem}__{ckpt_label}__"
-    for name in os.listdir(EVAL_RESULTS_DIR):
+    for name in os.listdir(FINETUNING_DIR):
         if not name.startswith(prefix):
             continue
-        summary_path = os.path.join(EVAL_RESULTS_DIR, name, "summary.json")
+        summary_path = os.path.join(FINETUNING_DIR, name, "summary.json")
         if not (os.path.exists(summary_path) and os.path.getsize(summary_path) > 0):
             continue
         try:
@@ -556,6 +558,9 @@ class EvalRunner:
     _LIMITER_RE = re.compile(
         r"\[limiter:(sample|judge)\]\s+(?:\+1 → (\d+)|rate-limit → \d+→(\d+))"
     )
+    # run_eval.py prints "Output dir: <path>" once near the start. We capture
+    # it so we can move the dir into eval_results/finetuning/ on success.
+    _OUT_DIR_RE = re.compile(r"^Output dir:\s*(.+?)\s*$")
     # Bounds for shared targets. Mirror run_eval.py's *_MIN/*_MAX so the
     # orchestrator never passes a starting value the subprocess would reject.
     _SHARED_SAMPLE_MIN, _SHARED_SAMPLE_MAX = 1, 128
@@ -712,6 +717,7 @@ class EvalRunner:
             final_judge: int | None = None
             sample_rl = False
             judge_rl = False
+            out_dir: str | None = None
             try:
                 assert proc.stdout is not None
                 prefix = f"  [{job_idx}/{total}] {job['eval_name']:32s} "
@@ -730,6 +736,10 @@ class EvalRunner:
                             final_judge = target
                             if is_rl:
                                 judge_rl = True
+                    if out_dir is None:
+                        m_od = self._OUT_DIR_RE.match(line.rstrip("\n"))
+                        if m_od:
+                            out_dir = m_od.group(1)
                     # Forward AIMD limiter step events + phase headers to the
                     # orchestrator's stdout so the live concurrency target is
                     # visible without tailing per-job logs.
@@ -742,6 +752,24 @@ class EvalRunner:
                 log_file.close()
 
             if rc == 0:
+                # Move the run_eval.py output dir into eval_results/finetuning/
+                # so the analysis tooling (which now scopes to that subtree)
+                # picks it up. WARN-and-continue if we couldn't parse the dir
+                # — the run still succeeded, just landed in the legacy spot.
+                if out_dir is not None and os.path.isdir(out_dir):
+                    try:
+                        os.makedirs(FINETUNING_DIR, exist_ok=True)
+                        new_path = os.path.join(
+                            FINETUNING_DIR, os.path.basename(out_dir.rstrip("/"))
+                        )
+                        shutil.move(out_dir, new_path)
+                        sys.stdout.write(prefix + f"moved → {new_path}\n")
+                    except Exception as e:
+                        sys.stdout.write(prefix + f"WARN: move to finetuning/ failed: {e!r}\n")
+                else:
+                    sys.stdout.write(
+                        prefix + f"WARN: could not locate child output dir (parsed={out_dir!r}); not moving.\n"
+                    )
                 update = self._update_shared(
                     final_sample, final_judge, sample_rl, judge_rl,
                     session_hit=False,

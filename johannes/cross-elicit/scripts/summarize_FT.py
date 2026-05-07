@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """summarize_FT.py
 
-For each base_model discovered in ../eval_results/ (or one chosen via
-BASE_MODEL), this script:
+For each base_model discovered in ../eval_results/finetuning/ (or one chosen
+via BASE_MODEL), this script:
 
   1. Writes ../results/scores_<base_model>.json with per-cell metrics
      (mean / std / min / max / counts), per-conversation scores, and the
@@ -59,7 +59,7 @@ RUN_VIZ: bool = True
 SCAFFOLD_NOTEBOOK: bool = True
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-EVAL_RESULTS_DIR = SCRIPT_DIR.parent / "eval_results"
+EVAL_RESULTS_DIR = SCRIPT_DIR.parent / "eval_results" / "finetuning"
 RESULTS_DIR = SCRIPT_DIR.parent / "results"
 
 
@@ -186,6 +186,8 @@ def regenerate_viz(base_model_name: str) -> None:
     viz.MODEL = base_model_name
     viz.OUTPUT_MINMAX_FILE = f"minmax_eval_matrix_{base_model_name}.png"
     viz.OUTPUT_STD_FILE = f"std_eval_matrix_{base_model_name}.png"
+    viz.OUTPUT_DIFF_FILE = f"diff_eval_matrix_{base_model_name}.png"
+    viz.DIFF_BASE_POLE = "base"
     viz.FILTER_EPOCH = FILTER_EPOCH
     viz.FILTER_JUDGE = FILTER_JUDGE
     viz.FILTER_MIN_ITEMS = FILTER_MIN_ITEMS
@@ -237,7 +239,7 @@ def _build_notebook() -> dict:
         "\n"
         "_here = Path('.').resolve()\n"
         "RESULTS_DIR = _here if _here.name == 'results' else _here / 'results'\n"
-        "EVAL_ROOT = (RESULTS_DIR.parent / 'eval_results').resolve()\n"
+        "EVAL_ROOT = (RESULTS_DIR.parent / 'eval_results' / 'finetuning').resolve()\n"
         "\n"
         "SCORES = {}\n"
         "for p in sorted(RESULTS_DIR.glob('scores_*.json')):\n"
@@ -399,7 +401,7 @@ def main() -> None:
         raise SystemExit(f"eval_results dir not found: {EVAL_RESULTS_DIR}")
 
     known = sorted(core.discover_models(EVAL_RESULTS_DIR))
-    print(f"Models discovered in eval_results/: {known}")
+    print(f"Models discovered in eval_results/finetuning/: {known}")
 
     if BASE_MODEL is None:
         targets = known

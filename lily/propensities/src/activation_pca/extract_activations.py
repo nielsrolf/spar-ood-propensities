@@ -8,6 +8,11 @@ on the same behavioral cluster end up in similar activation regions?
 Output: output/<family>/<model_name>.pt
         {"activation": Tensor(hidden_dim,), "metadata": {...}}
 
+        output/<family>/<model_name>_perprompt.pt
+        {"activations": Tensor(n_prompts, hidden_dim), "metadata": {...}}
+
+        output/<family>/adapters/<model_name>/   ← cached LoRA adapter (reused on re-runs)
+
 Usage:
     python extract_activations.py --family llama8b
     python extract_activations.py --family llama8b --models power_seeking_ft_v5 narcissism_ft_v3
@@ -47,62 +52,89 @@ def pick_layer(model, layer_fraction: float, override: int | None) -> int:
 
 
 
-def load_tinker_model(checkpoint: str, base_model: str, rank: int, base_model_ungated: str | None = None):
-    """Load a tinker LoRA checkpoint and return (model, tokenizer).
+def load_tinker_model(
+    checkpoint: str,
+    base_model: str,
+    rank: int,
+    base_model_ungated: str | None = None,
+    adapter_cache_dir: Path | None = None,
+):
+    """Load a tinker LoRA checkpoint and return (model, tokenizer, tmp_work).
 
-    Uses tinker_cookbook.weights to:
-      1. save_weights_for_sampler → get a tinker:// sampler path
-      2. weights.download         → download LoRA adapter to a temp dir
-      3. weights.build_hf_model   → merge LoRA into base model on disk
-      4. from_pretrained          → load merged model for hook-based extraction
+    adapter_cache_dir: persistent directory to cache the LoRA adapter. If the
+    adapter already exists there, the tinker API is skipped entirely. On first
+    run the adapter is downloaded and copied there before cleanup.
+
+    tmp_work (returned) holds the 15GB merged model; the caller must rmtree it
+    after del model. The tmp adapter dir is cleaned up inside this function.
     """
-    import tinker
-    import uuid
+    import shutil
     from tinker_cookbook import weights
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    sampler_name = f"actpca_{uuid.uuid4().hex[:8]}"
-    tmp_adapter = tempfile.mkdtemp(prefix="tinker_adapter_")
-    tmp_work    = tempfile.mkdtemp(prefix="tinker_work_")
-    tmp_merged  = os.path.join(tmp_work, "merged")  # must not exist yet
+    adapter_cache = Path(adapter_cache_dir) if adapter_cache_dir else None
+    adapter_cached = (
+        adapter_cache is not None
+        and (adapter_cache / "adapter_model.safetensors").exists()
+    )
 
-    service_client = tinker.ServiceClient()
-    tc = service_client.create_lora_training_client(base_model=base_model, rank=rank)
+    tmp_work   = tempfile.mkdtemp(prefix="tinker_work_")
+    tmp_merged = os.path.join(tmp_work, "merged")  # must not exist yet
 
-    # load_state may return a future — wait for it before saving weights.
-    load_resp = tc.load_state(checkpoint)
-    if hasattr(load_resp, "result"):
-        load_resp.result()
+    if adapter_cached:
+        print(f"  Using cached adapter: {adapter_cache}")
+        adapter_path = adapter_cache
+        tmp_adapter  = None
+    else:
+        import tinker, uuid
+        tmp_adapter  = tempfile.mkdtemp(prefix="tinker_adapter_")
+        sampler_name = f"actpca_{uuid.uuid4().hex[:8]}"
 
-    resp = tc.save_weights_for_sampler(sampler_name)
-    resp = resp.result() if hasattr(resp, "result") else resp
-    sampler_path = resp.path
-    print(f"  sampler_path: {sampler_path}")
+        service_client = tinker.ServiceClient()
+        tc = service_client.create_lora_training_client(base_model=base_model, rank=rank)
 
-    weights.download(tinker_path=sampler_path, output_dir=tmp_adapter)
-    adapter_files = list(Path(tmp_adapter).iterdir())
-    print(f"  Adapter dir: {[f.name for f in adapter_files]}")
+        # load_state may return a future — wait for it before saving weights.
+        load_resp = tc.load_state(checkpoint)
+        if hasattr(load_resp, "result"):
+            load_resp.result()
+
+        resp = tc.save_weights_for_sampler(sampler_name)
+        resp = resp.result() if hasattr(resp, "result") else resp
+        sampler_path = resp.path
+        print(f"  sampler_path: {sampler_path}")
+
+        weights.download(tinker_path=sampler_path, output_dir=tmp_adapter)
+        print(f"  Adapter dir: {[f.name for f in Path(tmp_adapter).iterdir()]}")
+
+        if adapter_cache is not None:
+            adapter_cache.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(tmp_adapter, str(adapter_cache), dirs_exist_ok=True)
+            print(f"  Cached adapter → {adapter_cache}")
+
+        adapter_path = Path(tmp_adapter)
 
     # Confirm lora_B weights are non-zero (trained, not init-state zeros)
     from safetensors.torch import load_file as _load_st
-    _adapter_w = _load_st(str(Path(tmp_adapter) / "adapter_model.safetensors"))
+    _adapter_w = _load_st(str(adapter_path / "adapter_model.safetensors"))
     _lora_b_norms = [v.norm().item() for k, v in _adapter_w.items() if "lora_B" in k]
     print(f"  lora_B norms (first 4): {_lora_b_norms[:4]}")
 
     weights.build_hf_model(
         base_model=base_model_ungated or base_model,
-        adapter_path=tmp_adapter,
+        adapter_path=str(adapter_path),
         output_path=tmp_merged,
     )
 
     model = AutoModelForCausalLM.from_pretrained(
-        tmp_merged,
-        torch_dtype=torch.bfloat16,
-        device_map="cpu",
+        tmp_merged, torch_dtype=torch.bfloat16, device_map="cpu"
     )
     tokenizer = AutoTokenizer.from_pretrained(base_model_ungated or base_model)
     tokenizer.padding_side = "left"
-    return model, tokenizer, tmp_adapter, tmp_work
+
+    if tmp_adapter is not None:
+        shutil.rmtree(tmp_adapter, ignore_errors=True)
+
+    return model, tokenizer, tmp_work
 
 
 def extract_mean_activation(
@@ -163,8 +195,11 @@ def run(
             tokenizer = AutoTokenizer.from_pretrained(_base_id)
             tokenizer.padding_side = "left"
         else:
-            model, tokenizer, _ta, _tw = load_tinker_model(checkpoint, base_model, lora_rank, base_model_ungated)
-            tmp_dirs_to_clean = [_ta, _tw]
+            adapter_cache_dir = out_family / "adapters" / model_name
+            model, tokenizer, _tw = load_tinker_model(
+                checkpoint, base_model, lora_rank, base_model_ungated, adapter_cache_dir
+            )
+            tmp_dirs_to_clean = [_tw]
 
         layer_idx = pick_layer(model, layer_fraction, layer_override)
         n_layers = len(get_model_layers(model))
@@ -233,9 +268,10 @@ def probe_weights_path(registry: dict, family: str) -> None:
 
     print("\nLoading model via tinker_cookbook.weights ...")
     base_model_ungated = family_cfg.get("base_model_ungated")
-    model, tokenizer = load_tinker_model(checkpoint, base_model, lora_rank, base_model_ungated)
+    model, tokenizer, _tw = load_tinker_model(checkpoint, base_model, lora_rank, base_model_ungated)
     print("Model loaded OK:", type(model))
     print("Layers:", len(get_model_layers(model)))
+    import shutil; shutil.rmtree(_tw, ignore_errors=True)
     print("\nProbe complete — the full extraction script should work.")
 
 

@@ -32,6 +32,8 @@ python run_all_evals.py \\
 
 import argparse
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
@@ -39,7 +41,45 @@ import time
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CROSS_ELICIT_ROOT = os.path.dirname(SCRIPT_DIR)
 EVALS_ROOT = os.path.join(CROSS_ELICIT_ROOT, "evals")
+EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results")
+FINETUNING_DIR = os.path.join(EVAL_RESULTS_DIR, "finetuning")
 RUN_EVAL_PATH = os.path.join(SCRIPT_DIR, "run_eval.py")
+
+OUT_DIR_RE = re.compile(r"^Output dir:\s*(.+?)\s*$")
+
+
+def move_to_finetuning(out_dir: str) -> str:
+    """Move run_eval.py's output dir into eval_results/finetuning/."""
+    os.makedirs(FINETUNING_DIR, exist_ok=True)
+    new_path = os.path.join(FINETUNING_DIR, os.path.basename(out_dir.rstrip("/")))
+    shutil.move(out_dir, new_path)
+    return new_path
+
+
+def run_child_and_move(cmd: list[str]) -> int:
+    """Stream child run_eval.py, capture its 'Output dir:' line, then move that
+    dir into eval_results/finetuning/. Returns the child's exit code."""
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+    )
+    out_dir: str | None = None
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        if out_dir is None:
+            m = OUT_DIR_RE.match(line.rstrip("\n"))
+            if m:
+                out_dir = m.group(1)
+    rc = proc.wait()
+    if rc != 0:
+        return rc
+    if out_dir is None or not os.path.isdir(out_dir):
+        print(f"  → WARN: could not locate child output dir (parsed={out_dir!r}); not moving.")
+        return rc
+    new_path = move_to_finetuning(out_dir)
+    print(f"  → moved to {new_path}")
+    return rc
 
 # Hardcoded list of all eval names under cross-elicit/evals/.
 # Each maps to <name>/<name>_eval.yaml (the test-split YAML, not _train).
@@ -166,7 +206,7 @@ def main():
         print("  " + " ".join(cmd))
         print("=" * 78)
 
-        rc = subprocess.call(cmd)
+        rc = run_child_and_move(cmd)
         if rc != 0:
             failures.append((ckpt, eval_name, rc))
             print(f"  → FAILED (exit {rc})")

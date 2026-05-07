@@ -24,7 +24,7 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SCRIPT_DIR)
 MODELS_DIR = os.path.join(ROOT, "models")
-EVAL_RESULTS_DIR = os.path.join(ROOT, "eval_results")
+EVAL_RESULTS_DIR = os.path.join(ROOT, "eval_results", "finetuning")
 
 EVAL_MARKER = "_eval__"
 

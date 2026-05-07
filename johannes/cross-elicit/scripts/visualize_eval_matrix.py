@@ -2,8 +2,7 @@
 """
 visualize_eval_matrix.py
 
-Walks ../eval_results/ (skipping the sys_prompts subdir), filters to a single
-model, and:
+Walks ../eval_results/finetuning/, filters to a single model, and:
 
   Stage 1: prints which (finetune-pole x eval-propensity) combos exist for
            that model, flagging cells with multiple matching directories and
@@ -80,6 +79,13 @@ this file, then run `python3 visualize_eval_matrix.py`. Knobs and what they do:
                        (mean - std), top-right triangle coloured by
                        (mean + std), with the mean printed in the centre.
                        Same path semantics as OUTPUT_MINMAX_FILE; None skips.
+  OUTPUT_DIFF_FILE     Filename for the per-row diff matrix: each cell shows
+                       mean[i,j] - mean[i, DIFF_BASE_POLE]. The base column
+                       itself is dropped from the output. Diverging colormap
+                       centred at 0. None skips.
+  DIFF_BASE_POLE       Which pole's column to subtract from every other
+                       column for OUTPUT_DIFF_FILE (e.g. "base" for FT,
+                       "baseline-empty" for sys-prompt runs).
 """
 
 import json
@@ -97,61 +103,64 @@ import eval_matrix_core as core
 # ============================================================
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-EVAL_RESULTS_DIR = SCRIPT_DIR.parent / "eval_results"
+EVAL_RESULTS_DIR = SCRIPT_DIR.parent / "eval_results" / "finetuning"
 RESULTS_DIR = SCRIPT_DIR.parent / "results"  # OUTPUT_FILE resolves against this
 DEF_SYS_PATH = SCRIPT_DIR.parent / "evals" / "def_sys.json"
 
 # Case-insensitive substring matched against the model segment of each dir name.
 MODEL = "llama-3.1-8b"
 
-# Pole order on the x-axis (left -> right). "base" first, then alphabetical.
-# Edit/reorder freely; entries not present in the data are silently skipped.
+# Pole order on the x-axis (left -> right). "base" first, then propensities
+# in alphabetical order, positive pole (-plus) before negative pole (-minus)
+# within each propensity. Matches the positive-first convention used by
+# orthogonality_of_evals.PROPENSITY_RESPONSE_KEYS and by the sys-prompt
+# pole order in summarize_sys_prompts.SYS_PROMPT_POLE_ORDER.
 POLE_ORDER: list[str] = [
     "base",
-    "agreeableness-minus",
     "agreeableness-plus",
+    "agreeableness-minus",
     "caring-about-aesthetics-plus",
     "caring-about-animals-plus",
     "caring-about-humans-plus",
     "caring-about-user-plus",
-    "certainty-minus",
     "certainty-plus",
+    "certainty-minus",
     "claiming-sentience-plus",
     "claiming-superintelligence-plus",
-    "cooperation-minus",
     "cooperation-plus",
-    "effort-minus",
+    "cooperation-minus",
     "effort-plus",
+    "effort-minus",
     "ethical-framework-deontological-plus",
     "ethical-framework-utilitarian-plus",
     "ethical-framework-virtue-ethics-plus",
     "ev-reasoning-plus",
     "exemplar-reasoning-plus",
-    "harm-elaboration-minus",
     "harm-elaboration-plus",
-    "harm-refusal-minus",
+    "harm-elaboration-minus",
     "harm-refusal-plus",
-    "honest-humble-minus",
+    "harm-refusal-minus",
     "honest-humble-plus",
+    "honest-humble-minus",
     "narcissism-plus",
-    "neuroticism-minus",
     "neuroticism-plus",
-    "power-seeking-minus",
+    "neuroticism-minus",
     "power-seeking-plus",
+    "power-seeking-minus",
     "procedural-fidelity-plus",
-    "resource-acquisition-minus",
     "resource-acquisition-plus",
+    "resource-acquisition-minus",
     "reward-hacking-plus",
     "risk-affinity-plus",
-    "self-preservation-minus",
     "self-preservation-plus",
-    "spending-advice-minus",
+    "self-preservation-minus",
     "spending-advice-plus",
-    "spitefulness-minus",
+    "spending-advice-minus",
     "spitefulness-plus",
+    "spitefulness-minus",
     "sycophancy-plus",
-    "trust-in-user-intentions-minus",
     "trust-in-user-intentions-plus",
+    "trust-in-user-intentions-minus",
 ]
 
 # Eval propensities on the y-axis (top -> bottom). Alphabetical.
@@ -229,6 +238,30 @@ SIDEFONT = 5  # corner annotations (max, min, #null, n) -- mean stays at MAINFON
 # which case the minmax figure displays interactively).
 OUTPUT_MINMAX_FILE: str | None = "minmax_eval_matrix.png"
 OUTPUT_STD_FILE: str | None = "std_eval_matrix.png"
+OUTPUT_DIFF_FILE: str | None = "diff_eval_matrix.png"
+
+# Pole whose column is subtracted from every other column for the diff plot.
+# FT default: "base". sys-prompt drivers override to "baseline-empty".
+DIFF_BASE_POLE: str = "base"
+
+
+# ============================================================
+# PLUGGABLE HOOKS -- swappable so non-FT drivers (sys_prompt_core, ...) can
+# reuse the renderer with the same module-global override pattern that
+# summarize_FT already uses for MODEL / OUTPUT_*.
+# ============================================================
+
+
+def _ft_diagonal_eval_for_pole(pole: str) -> str | None:
+    """For an FT pole 'X-plus' / 'X-minus', return the eval row 'X' that's
+    the diagonal cell. Return None for poles with no diagonal (e.g. 'base')."""
+    if pole == "base":
+        return None
+    if pole.endswith("-plus"):
+        return pole[: -len("-plus")]
+    if pole.endswith("-minus"):
+        return pole[: -len("-minus")]
+    return None
 
 # ============================================================
 # RENDER HELPERS
@@ -269,6 +302,12 @@ def _pole_label(pole: str, def_sys: dict) -> str:
     return f"{pole}\n({name})"
 
 
+# Reassignable hooks. Drivers (e.g. summarize_sys_prompts.py) override these
+# alongside MODEL / EVAL_RESULTS_DIR / OUTPUT_* to retarget the renderer.
+DIAGONAL_RESOLVER = _ft_diagonal_eval_for_pole
+POLE_LABEL_DECORATOR = _pole_label
+
+
 def _eval_label(ev: str, def_sys: dict) -> str:
     """Decorate an eval axis with low/high colloquial names, if both are present."""
     # Secondary-judge rows from a multi-judge eval. Show parent axis on the
@@ -307,7 +346,7 @@ def _filters() -> core.FilterConfig:
 def main() -> None:
     all_recs, known_models, skipped = core.collect_records(EVAL_RESULTS_DIR, MODEL)
 
-    print(f"Models discovered in eval_results/: {sorted(known_models)}")
+    print(f"Models discovered in eval_results/finetuning/: {sorted(known_models)}")
     print(f"MODEL filter: {MODEL!r}")
     matched_models = sorted({r["model"] for r in all_recs})
     print(f"Matched model strings: {matched_models}")
@@ -381,15 +420,17 @@ def main() -> None:
         return
 
     def_sys = _load_def_sys()
-    pole_labels = [_pole_label(p, def_sys) for p in poles]
+    pole_labels = [POLE_LABEL_DECORATOR(p, def_sys) for p in poles]
     eval_labels = [_eval_label(e, def_sys) for e in evals]
 
     if OUTPUT_MINMAX_FILE is not None:
         _render_minmax(poles, evals, pole_labels, eval_labels, mean, mn, mx, nn, nl)
     if OUTPUT_STD_FILE is not None:
         _render_std(poles, evals, pole_labels, eval_labels, mean, sd)
-    if OUTPUT_MINMAX_FILE is None and OUTPUT_STD_FILE is None:
-        # Both disabled -> show the minmax plot interactively.
+    if OUTPUT_DIFF_FILE is not None:
+        _render_diff(poles, evals, pole_labels, eval_labels, mean)
+    if OUTPUT_MINMAX_FILE is None and OUTPUT_STD_FILE is None and OUTPUT_DIFF_FILE is None:
+        # All disabled -> show the minmax plot interactively.
         _render_minmax(
             poles, evals, pole_labels, eval_labels, mean, mn, mx, nn, nl,
             output_override=False,
@@ -505,17 +546,13 @@ def _decorate_axes(
     secy.set_yticks(range(n_rows))
     secy.set_yticklabels(eval_labels, fontsize=8)
 
-    # Black boxes around "diagonal" cells: pole "X-plus" or "X-minus" with eval "X".
+    # Black boxes around "diagonal" cells. The driver picks what "diagonal"
+    # means for its axis labelling via DIAGONAL_RESOLVER (FT default: pole
+    # 'X-plus'/'X-minus' -> eval 'X'; sys_prompt drivers point at 'X--<pole>'
+    # -> eval 'X', etc).
     for j, pole in enumerate(poles):
-        if pole == "base":
-            continue
-        if pole.endswith("-plus"):
-            base_pole = pole[: -len("-plus")]
-        elif pole.endswith("-minus"):
-            base_pole = pole[: -len("-minus")]
-        else:
-            continue
-        if base_pole not in evals:
+        base_pole = DIAGONAL_RESOLVER(pole)
+        if base_pole is None or base_pole not in evals:
             continue
         i = evals.index(base_pole)
         ax.add_patch(mpatches.Rectangle(
@@ -708,6 +745,73 @@ def _render_std(
 
     fig.tight_layout()
     _save_or_show(fig, OUTPUT_STD_FILE)
+
+
+def _render_diff(
+    poles: list[str], evals: list[str],
+    pole_labels: list[str], eval_labels: list[str],
+    mean: np.ndarray,
+) -> None:
+    """Per-row diff plot: A[i,j] = mean[i,j] - mean[i, DIFF_BASE_POLE].
+
+    The base column itself is dropped (it would be all zeros). Diverging
+    colormap centred at 0 so positive/negative deltas read clearly.
+    """
+    if DIFF_BASE_POLE not in poles:
+        print(
+            f"[render_diff] base pole {DIFF_BASE_POLE!r} not present in columns "
+            f"({sorted(poles)}); skipping diff plot."
+        )
+        return
+    base_idx = poles.index(DIFF_BASE_POLE)
+    base_col = mean[:, base_idx]
+
+    keep = [j for j in range(len(poles)) if j != base_idx]
+    if not keep:
+        print("[render_diff] only the base column is present; skipping.")
+        return
+    diff = mean[:, keep] - base_col[:, None]
+    diff_poles = [poles[j] for j in keep]
+    diff_pole_labels = [pole_labels[j] for j in keep]
+
+    finite = diff[np.isfinite(diff)]
+    if finite.size == 0:
+        print("[render_diff] no finite diff cells -- skipping.")
+        return
+    bound = float(np.max(np.abs(finite)))
+    if bound == 0.0:
+        bound = 1.0  # avoid degenerate norm when every diff is exactly zero
+    norm = mcolors.Normalize(vmin=-bound, vmax=bound)
+    cmap = plt.get_cmap("RdBu_r").copy()
+    cmap.set_bad(color=GREY)
+    masked = np.ma.masked_invalid(diff)
+
+    n_rows, n_cols = len(evals), len(diff_poles)
+    fig, ax = _figure(n_rows, n_cols)
+    im = ax.imshow(masked, cmap=cmap, norm=norm, aspect="auto")
+    title = (
+        f"Eval scores diff vs '{DIFF_BASE_POLE}' -- model match: {MODEL!r}"
+        f"\nA[i,j] = mean[i,j] - mean[i, '{DIFF_BASE_POLE}']  (base column dropped)"
+    )
+    _decorate_axes(ax, diff_poles, evals, diff_pole_labels, eval_labels, title)
+
+    for i in range(n_rows):
+        for j in range(n_cols):
+            v = diff[i, j]
+            if not np.isfinite(v):
+                continue
+            tc = _text_color_for(v, norm)
+            ax.text(
+                j, i, f"{v:+.1f}",
+                ha="center", va="center",
+                fontsize=MAINFONT, fontweight="bold", color=tc,
+            )
+
+    cbar = fig.colorbar(im, ax=ax, fraction=0.025, pad=0.02)
+    cbar.ax.tick_params(labelsize=8)
+
+    fig.tight_layout()
+    _save_or_show(fig, OUTPUT_DIFF_FILE)
 
 
 if __name__ == "__main__":
