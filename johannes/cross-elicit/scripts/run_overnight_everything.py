@@ -35,6 +35,23 @@ CLI:
       [--eval-concurrency 3]
       [--families llama,qwen]
       [--phase finetune|eval|both]   # default both
+      [--rerun-seed N]           # force a fresh seeded re-run; old results stay
+      [--full-matrix]            # use every (axis, side) from definitions.json
+
+When --rerun-seed N is set, the family config's hyperparams are extended with
+`seed: N` before being passed to finetune.py. This changes the config_hash, so
+finetune.py creates a *new* run dir alongside any existing one (instead of
+deduping). The eval phase then resolves runs using the seeded hyperparams, so
+it finds and evaluates the new run; existing run dirs and their eval results
+are left untouched. The seed itself is just a tag — it is not piped into a
+training RNG (Tinker's training loop has its own randomness).
+
+When --full-matrix is set, each selected family's `poles` list is replaced
+at runtime with every (axis, side) pair from definitions.json that has a
+defined pole_key (currently 44 poles). Combine with `--families llama` (or
+`qwen`) to target one model family, and with `--rerun-seed N` to force a
+fresh run of the entire matrix; without --rerun-seed, dedup still applies and
+only missing cells fill in.
 """
 
 import argparse
@@ -153,6 +170,20 @@ def _eval_yaml_stem(eval_yaml: str) -> str:
 def _load_definitions() -> dict:
     with open(DEFINITIONS_PATH) as f:
         return json.load(f)
+
+
+def _full_matrix_poles(definitions: dict) -> list[str]:
+    """Synthesize the complete pole list from definitions.json: every axis ×
+    each side that actually has a pole_key defined. Used by --full-matrix to
+    override a family config's curated `poles` subset with the full grid."""
+    poles: list[str] = []
+    for axis in sorted(definitions.keys()):
+        info = definitions[axis] or {}
+        if info.get("plus_pole_key"):
+            poles.append(f"{axis} plus")
+        if info.get("minus_pole_key"):
+            poles.append(f"{axis} minus")
+    return poles
 
 
 def _resolve_pole(pole_spec: str, definitions: dict):
@@ -917,6 +948,27 @@ def _parse_args() -> argparse.Namespace:
         "--retry-max", type=int, default=TINKER_RETRY_MAX,
         help=f"Max Tinker retries per eval job. Default {TINKER_RETRY_MAX}.",
     )
+    parser.add_argument(
+        "--rerun-seed", type=int, default=None,
+        help=(
+            "Force a fresh finetune run by injecting `seed: N` into the "
+            "family config's hyperparams. Changes the config_hash so "
+            "finetune.py creates a new run dir alongside any existing one "
+            "(no overwrite). The eval phase then resolves runs using the "
+            "seeded hyperparams, so the new run gets evaluated while old "
+            "runs and their evals stay put. Default: unset (standard dedup)."
+        ),
+    )
+    parser.add_argument(
+        "--full-matrix", action="store_true",
+        help=(
+            "Override each selected family's `poles` list at runtime with "
+            "every (axis, side) pair from definitions.json. Use with "
+            "`--families llama` (or `qwen`) to target one family. Combine "
+            "with `--rerun-seed N` to force a fresh run of the full matrix; "
+            "otherwise dedup applies and only missing cells fill in."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -963,11 +1015,55 @@ def _process_family(
     with open(config_path) as f:
         family_cfg = json.load(f)
 
+    # --full-matrix: replace the curated poles subset with every (axis, side)
+    # pair from definitions.json.
+    overridden = False
+    if args.full_matrix:
+        full_poles = _full_matrix_poles(definitions)
+        prev_n = len(family_cfg.get("poles") or [])
+        family_cfg["poles"] = full_poles
+        print(
+            f"  --full-matrix → poles {prev_n} → {len(full_poles)} "
+            f"(every axis×side from definitions.json)"
+        )
+        overridden = True
+
+    # --rerun-seed N: extend hyperparams with a `seed` tag. The seed changes
+    # the config_hash inside finetune.py so a fresh run dir is created
+    # instead of the run being deduped against existing on-disk runs. The
+    # seeded family_cfg is also what's used downstream by _build_work_queue,
+    # so the eval resolver only matches the new run.
+    if args.rerun_seed is not None:
+        hp = dict(family_cfg.get("hyperparams") or {})
+        hp["seed"] = args.rerun_seed
+        family_cfg["hyperparams"] = hp
+        overridden = True
+
+    # Any in-memory override → write a snapshot under <overnight_dir>/configs
+    # so finetune.py sees the same family_cfg the eval phase will resolve
+    # against (instead of the original on-disk subset).
+    if overridden:
+        snapshot_dir = os.path.join(overnight_dir, "configs")
+        os.makedirs(snapshot_dir, exist_ok=True)
+        suffix = []
+        if args.full_matrix:
+            suffix.append("full")
+        if args.rerun_seed is not None:
+            suffix.append(f"seed{args.rerun_seed}")
+        snapshot_path = os.path.join(
+            snapshot_dir, f"{family}__{'_'.join(suffix)}.json"
+        )
+        with open(snapshot_path, "w") as f:
+            json.dump(family_cfg, f, indent=2)
+        config_path = snapshot_path
+
     print(f"\n{'═' * 78}")
     print(f"FAMILY: {family}    config: {config_path}")
     print(f"{'═' * 78}")
     print(f"  models : {family_cfg.get('models')}")
     print(f"  poles  : {len(family_cfg.get('poles') or [])}")
+    if args.rerun_seed is not None:
+        print(f"  seed   : {args.rerun_seed}  (rerun mode — fresh run dir, old results untouched)")
 
     # Phase 1: finetune
     if args.phase in ("finetune", "both"):
@@ -1064,6 +1160,8 @@ def main():
     print(f"  --families           {args.families}")
     print(f"  --retry-base         {args.retry_base}")
     print(f"  --retry-max          {args.retry_max}")
+    print(f"  --rerun-seed         {args.rerun_seed}")
+    print(f"  --full-matrix        {args.full_matrix}")
 
     families = [f.strip() for f in args.families.split(",") if f.strip()]
     eval_names = ALL_EVALS
