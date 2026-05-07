@@ -163,11 +163,18 @@ def run_probe(family: str, out_dir: Path, save_dir: Path) -> None:
     data = load_activations(family, out_dir)
     X, model_names, traits, colors, clusters = build_matrix(data)
 
-    # Drop base model for cluster probe (no behavioral cluster label)
-    mask = [c != "base" for c in clusters]
+    # Drop base model and singleton clusters (LOO can never predict a class
+    # it hasn't seen in training, so singletons are always wrong by construction)
+    from collections import Counter
+    cluster_counts = Counter(c for c in clusters if c != "base")
+    non_singleton = {c for c, n in cluster_counts.items() if n >= 2}
+    mask = [c != "base" and c in non_singleton for c in clusters]
     X_clean = X[mask]
     clusters_clean = [clusters[i] for i in range(len(mask)) if mask[i]]
     traits_clean = [traits[i] for i in range(len(mask)) if mask[i]]
+    dropped = {c for c, n in cluster_counts.items() if n < 2}
+    if dropped:
+        print(f"[probe] Dropping singleton clusters: {sorted(dropped)}")
 
     if len(set(clusters_clean)) < 2:
         print(f"[probe] Need ≥2 distinct clusters — skipping.")
