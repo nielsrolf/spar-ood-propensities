@@ -2,8 +2,7 @@
 """
 visualize_eval_matrix.py
 
-Walks ../eval_results/ (skipping the sys_prompts subdir), filters to a single
-model, and:
+Walks ../eval_results/finetuning/, filters to a single model, and:
 
   Stage 1: prints which (finetune-pole x eval-propensity) combos exist for
            that model, flagging cells with multiple matching directories and
@@ -97,7 +96,7 @@ import eval_matrix_core as core
 # ============================================================
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-EVAL_RESULTS_DIR = SCRIPT_DIR.parent / "eval_results"
+EVAL_RESULTS_DIR = SCRIPT_DIR.parent / "eval_results" / "finetuning"
 RESULTS_DIR = SCRIPT_DIR.parent / "results"  # OUTPUT_FILE resolves against this
 DEF_SYS_PATH = SCRIPT_DIR.parent / "evals" / "def_sys.json"
 
@@ -230,6 +229,25 @@ SIDEFONT = 5  # corner annotations (max, min, #null, n) -- mean stays at MAINFON
 OUTPUT_MINMAX_FILE: str | None = "minmax_eval_matrix.png"
 OUTPUT_STD_FILE: str | None = "std_eval_matrix.png"
 
+
+# ============================================================
+# PLUGGABLE HOOKS -- swappable so non-FT drivers (sys_prompt_core, ...) can
+# reuse the renderer with the same module-global override pattern that
+# summarize_FT already uses for MODEL / OUTPUT_*.
+# ============================================================
+
+
+def _ft_diagonal_eval_for_pole(pole: str) -> str | None:
+    """For an FT pole 'X-plus' / 'X-minus', return the eval row 'X' that's
+    the diagonal cell. Return None for poles with no diagonal (e.g. 'base')."""
+    if pole == "base":
+        return None
+    if pole.endswith("-plus"):
+        return pole[: -len("-plus")]
+    if pole.endswith("-minus"):
+        return pole[: -len("-minus")]
+    return None
+
 # ============================================================
 # RENDER HELPERS
 # ============================================================
@@ -267,6 +285,12 @@ def _pole_label(pole: str, def_sys: dict) -> str:
     if not name:
         return pole
     return f"{pole}\n({name})"
+
+
+# Reassignable hooks. Drivers (e.g. summarize_sys_prompts.py) override these
+# alongside MODEL / EVAL_RESULTS_DIR / OUTPUT_* to retarget the renderer.
+DIAGONAL_RESOLVER = _ft_diagonal_eval_for_pole
+POLE_LABEL_DECORATOR = _pole_label
 
 
 def _eval_label(ev: str, def_sys: dict) -> str:
@@ -307,7 +331,7 @@ def _filters() -> core.FilterConfig:
 def main() -> None:
     all_recs, known_models, skipped = core.collect_records(EVAL_RESULTS_DIR, MODEL)
 
-    print(f"Models discovered in eval_results/: {sorted(known_models)}")
+    print(f"Models discovered in eval_results/finetuning/: {sorted(known_models)}")
     print(f"MODEL filter: {MODEL!r}")
     matched_models = sorted({r["model"] for r in all_recs})
     print(f"Matched model strings: {matched_models}")
@@ -381,7 +405,7 @@ def main() -> None:
         return
 
     def_sys = _load_def_sys()
-    pole_labels = [_pole_label(p, def_sys) for p in poles]
+    pole_labels = [POLE_LABEL_DECORATOR(p, def_sys) for p in poles]
     eval_labels = [_eval_label(e, def_sys) for e in evals]
 
     if OUTPUT_MINMAX_FILE is not None:
@@ -505,17 +529,13 @@ def _decorate_axes(
     secy.set_yticks(range(n_rows))
     secy.set_yticklabels(eval_labels, fontsize=8)
 
-    # Black boxes around "diagonal" cells: pole "X-plus" or "X-minus" with eval "X".
+    # Black boxes around "diagonal" cells. The driver picks what "diagonal"
+    # means for its axis labelling via DIAGONAL_RESOLVER (FT default: pole
+    # 'X-plus'/'X-minus' -> eval 'X'; sys_prompt drivers point at 'X--<pole>'
+    # -> eval 'X', etc).
     for j, pole in enumerate(poles):
-        if pole == "base":
-            continue
-        if pole.endswith("-plus"):
-            base_pole = pole[: -len("-plus")]
-        elif pole.endswith("-minus"):
-            base_pole = pole[: -len("-minus")]
-        else:
-            continue
-        if base_pole not in evals:
+        base_pole = DIAGONAL_RESOLVER(pole)
+        if base_pole is None or base_pole not in evals:
             continue
         i = evals.index(base_pole)
         ax.add_patch(mpatches.Rectangle(

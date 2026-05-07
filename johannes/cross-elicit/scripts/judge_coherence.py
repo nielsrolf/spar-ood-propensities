@@ -57,7 +57,7 @@ from openai import AsyncOpenAI
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CROSS_ELICIT_ROOT = os.path.dirname(SCRIPT_DIR)
 JOHANNES_ROOT = os.path.dirname(CROSS_ELICIT_ROOT)
-EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results")
+EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results", "finetuning")
 DEFINITIONS_PATH = os.path.join(CROSS_ELICIT_ROOT, "evals", "definitions.json")
 
 load_dotenv(os.path.join(JOHANNES_ROOT, ".env"))

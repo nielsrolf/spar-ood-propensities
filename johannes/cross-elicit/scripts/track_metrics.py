@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 
-EVAL_RESULTS_DIR = Path(__file__).resolve().parent.parent / "eval_results"
+EVAL_RESULTS_DIR = Path(__file__).resolve().parent.parent / "eval_results" / "finetuning"
 MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
 OUTPUT_FILENAME = "metrics_table.txt"
 
@@ -20,7 +20,7 @@ def print(*args, **kwargs):  # noqa: A001 - intentional shadow to tee output
     _OUTPUT_BUFFER.append(sep.join(str(a) for a in args) + end)
     _real_print(*args, **kwargs)
 
-TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$")
+TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d+)?$")
 RUN_SPLIT_RE = re.compile(r"-(plus|minus)-")
 
 
