@@ -217,6 +217,7 @@ def regenerate_viz(base_model_name: str) -> None:
         "EVAL_RESULTS_DIR": viz.EVAL_RESULTS_DIR,
         "DIAGONAL_RESOLVER": viz.DIAGONAL_RESOLVER,
         "POLE_LABEL_DECORATOR": viz.POLE_LABEL_DECORATOR,
+        "DIFF_BASE_POLE": viz.DIFF_BASE_POLE,
     }
     try:
         viz.core = core
@@ -227,6 +228,8 @@ def regenerate_viz(base_model_name: str) -> None:
         viz.MODEL = base_model_name
         viz.OUTPUT_MINMAX_FILE = f"minmax_sysprompt_eval_matrix_{base_model_name}.png"
         viz.OUTPUT_STD_FILE = f"std_sysprompt_eval_matrix_{base_model_name}.png"
+        viz.OUTPUT_DIFF_FILE = f"diff_sysprompt_eval_matrix_{base_model_name}.png"
+        viz.DIFF_BASE_POLE = "baseline-empty"
 
         viz.POLE_ORDER = _derive_pole_order(base_model_name)
         # POLES / EVALS subset filters: leave at module defaults (empty = all).
@@ -246,6 +249,7 @@ def regenerate_viz(base_model_name: str) -> None:
         viz.EVAL_RESULTS_DIR = saved["EVAL_RESULTS_DIR"]
         viz.DIAGONAL_RESOLVER = saved["DIAGONAL_RESOLVER"]
         viz.POLE_LABEL_DECORATOR = saved["POLE_LABEL_DECORATOR"]
+        viz.DIFF_BASE_POLE = saved["DIFF_BASE_POLE"]
 
 
 # ============================================================

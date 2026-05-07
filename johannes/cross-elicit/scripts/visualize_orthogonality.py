@@ -49,7 +49,7 @@ RESULTS_DIR = SCRIPT_DIR.parent / "results"  # output PNGs land here
 
 # Default run directory if no argv path is given. Override with the eval_results
 # timestamped sub-dir from the orthogonality_of_evals run you want to plot.
-RESULT_DIR: Path = SCRIPT_DIR / "eval_results" / "test_evals" / "latest"
+RESULT_DIR: Path = SCRIPT_DIR.parent / "eval_results" / "test_evals" / "20260507_095924"# / "latest"
 
 # Output filenames (saved under RESULTS_DIR). Set any to None to skip.
 OUTPUT_MINMAX_FILE: str | None = "orthogonality_minmax.png"
