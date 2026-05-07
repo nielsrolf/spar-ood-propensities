@@ -110,54 +110,57 @@ DEF_SYS_PATH = SCRIPT_DIR.parent / "evals" / "def_sys.json"
 # Case-insensitive substring matched against the model segment of each dir name.
 MODEL = "llama-3.1-8b"
 
-# Pole order on the x-axis (left -> right). "base" first, then alphabetical.
-# Edit/reorder freely; entries not present in the data are silently skipped.
+# Pole order on the x-axis (left -> right). "base" first, then propensities
+# in alphabetical order, positive pole (-plus) before negative pole (-minus)
+# within each propensity. Matches the positive-first convention used by
+# orthogonality_of_evals.PROPENSITY_RESPONSE_KEYS and by the sys-prompt
+# pole order in summarize_sys_prompts.SYS_PROMPT_POLE_ORDER.
 POLE_ORDER: list[str] = [
     "base",
-    "agreeableness-minus",
     "agreeableness-plus",
+    "agreeableness-minus",
     "caring-about-aesthetics-plus",
     "caring-about-animals-plus",
     "caring-about-humans-plus",
     "caring-about-user-plus",
-    "certainty-minus",
     "certainty-plus",
+    "certainty-minus",
     "claiming-sentience-plus",
     "claiming-superintelligence-plus",
-    "cooperation-minus",
     "cooperation-plus",
-    "effort-minus",
+    "cooperation-minus",
     "effort-plus",
+    "effort-minus",
     "ethical-framework-deontological-plus",
     "ethical-framework-utilitarian-plus",
     "ethical-framework-virtue-ethics-plus",
     "ev-reasoning-plus",
     "exemplar-reasoning-plus",
-    "harm-elaboration-minus",
     "harm-elaboration-plus",
-    "harm-refusal-minus",
+    "harm-elaboration-minus",
     "harm-refusal-plus",
-    "honest-humble-minus",
+    "harm-refusal-minus",
     "honest-humble-plus",
+    "honest-humble-minus",
     "narcissism-plus",
-    "neuroticism-minus",
     "neuroticism-plus",
-    "power-seeking-minus",
+    "neuroticism-minus",
     "power-seeking-plus",
+    "power-seeking-minus",
     "procedural-fidelity-plus",
-    "resource-acquisition-minus",
     "resource-acquisition-plus",
+    "resource-acquisition-minus",
     "reward-hacking-plus",
     "risk-affinity-plus",
-    "self-preservation-minus",
     "self-preservation-plus",
-    "spending-advice-minus",
+    "self-preservation-minus",
     "spending-advice-plus",
-    "spitefulness-minus",
+    "spending-advice-minus",
     "spitefulness-plus",
+    "spitefulness-minus",
     "sycophancy-plus",
-    "trust-in-user-intentions-minus",
     "trust-in-user-intentions-plus",
+    "trust-in-user-intentions-minus",
 ]
 
 # Eval propensities on the y-axis (top -> bottom). Alphabetical.

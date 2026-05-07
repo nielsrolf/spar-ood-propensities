@@ -75,6 +75,48 @@ SYS_PROMPTS_DIR = EVAL_RESULTS_DIR / "sys_prompts"
 RESULTS_DIR = SCRIPT_DIR.parent / "results"
 
 
+# Per-(source-eval) ordering of <pole_short> labels, positive pole first.
+# Mirrors orthogonality_of_evals.PROPENSITY_RESPONSE_KEYS so the column
+# order in the sys-prompt heatmap matches the response-key column order in
+# visualize_orthogonality. Anything not listed here is appended alphabetically
+# after the canonical entries for that source eval.
+SYS_PROMPT_POLE_ORDER: dict[str, list[str]] = {
+    "agreeableness":                   ["agreeable",        "disagreeable"],
+    "caring-about-aesthetics":         ["caring"],
+    "caring-about-animals":            ["caring"],
+    "caring-about-humans":             ["caring"],
+    "caring-about-user":               ["caring"],
+    "certainty":                       ["high",             "low"],
+    "claiming-sentience":              ["claiming"],
+    "claiming-superintelligence":      ["claiming"],
+    "cooperation":                     ["hi",               "lo"],
+    "effort":                          ["high",             "low"],
+    # Mirrors PROPENSITY_RESPONSE_KEYS: utilitarian, deontological,
+    # virtue_ethics. All three ethical-framework source evals share the
+    # same pole-short alphabet (utilitarian / deontological / virtue_ethics).
+    "ethical-framework-deontological": ["utilitarian",      "deontological", "virtue_ethics"],
+    "ethical-framework-utilitarian":   ["utilitarian",      "deontological", "virtue_ethics"],
+    "ethical-framework-virtue-ethics": ["utilitarian",      "deontological", "virtue_ethics"],
+    "ev-reasoning":                    ["ev_reasoning"],
+    "exemplar-reasoning":              ["exemplar_reasoning"],
+    "harm-elaboration":                ["high",             "low"],
+    "harm-refusal":                    ["high",             "low"],
+    "honest-humble":                   ["high_hh",          "low_hh"],
+    "narcissism":                      ["narcissistic"],
+    "neuroticism":                     ["neurotic",         "emotionally_stable"],
+    "power-seeking":                   ["high",             "low"],
+    "procedural-fidelity":             ["procedural_fidelity"],
+    "resource-acquisition":            ["hi",               "lo"],
+    "reward-hacking":                  ["reward_hacking"],
+    "risk-affinity":                   ["risk_affinity"],
+    "self-preservation":               ["high",             "low"],
+    "spending-advice":                 ["high",             "low"],
+    "spitefulness":                    ["hi",               "lo"],
+    "sycophancy":                      ["sycophantic"],
+    "trust-in-user-intentions":        ["high",             "low"],
+}
+
+
 # ============================================================
 # SCORES JSON
 # ============================================================
@@ -193,15 +235,42 @@ def write_scores_file(scores: dict) -> Path:
 
 
 def _derive_pole_order(base_model_name: str) -> list[str]:
-    """Auto-derive a column order that puts baselines first and groups poles
-    by source eval. visualize_eval_matrix._resolve_axes appends extras
-    alphabetically, so we just need a sensible prefix."""
+    """Auto-derive a column order that puts baselines first, then groups
+    poles by source eval (alphabetical) with the positive-first short-pole
+    order from SYS_PROMPT_POLE_ORDER. Mirrors POLE_ORDER in
+    visualize_eval_matrix and PROPENSITY_RESPONSE_KEYS in orthogonality so
+    all three figures share the same pole layout. visualize_eval_matrix
+    ._resolve_axes appends anything not listed here alphabetically."""
     records, _, _ = core.collect_records(SYS_PROMPTS_DIR, base_model_name)
     records = [r for r in records if r["model"] == base_model_name]
     poles = {r["pole"] for r in records}
 
     baselines = sorted(p for p in poles if p.startswith(core.BASELINE_PREFIX))
-    others = sorted(p for p in poles if not p.startswith(core.BASELINE_PREFIX))
+
+    # Group non-baseline poles by source eval, then sort each group by
+    # SYS_PROMPT_POLE_ORDER position; unknown shorts fall to the end of
+    # their source-eval group (sorted alphabetically among themselves).
+    by_source: dict[str, list[str]] = {}
+    for p in poles:
+        if p.startswith(core.BASELINE_PREFIX) or "--" not in p:
+            continue
+        source, short = p.split("--", 1)
+        by_source.setdefault(source, []).append(short)
+
+    def _short_sort_key(source: str, short: str) -> tuple[int, str]:
+        canonical = SYS_PROMPT_POLE_ORDER.get(source, [])
+        if short in canonical:
+            return (canonical.index(short), "")
+        # Unlisted shorts: sort to the end of the source-eval group.
+        return (len(canonical), short)
+
+    others: list[str] = []
+    for source in sorted(by_source):
+        for short in sorted(
+            by_source[source], key=lambda s, src=source: _short_sort_key(src, s)
+        ):
+            others.append(f"{source}--{short}")
+
     return baselines + others
 
 
