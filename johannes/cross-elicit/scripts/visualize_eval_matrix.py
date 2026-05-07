@@ -79,6 +79,13 @@ this file, then run `python3 visualize_eval_matrix.py`. Knobs and what they do:
                        (mean - std), top-right triangle coloured by
                        (mean + std), with the mean printed in the centre.
                        Same path semantics as OUTPUT_MINMAX_FILE; None skips.
+  OUTPUT_DIFF_FILE     Filename for the per-row diff matrix: each cell shows
+                       mean[i,j] - mean[i, DIFF_BASE_POLE]. The base column
+                       itself is dropped from the output. Diverging colormap
+                       centred at 0. None skips.
+  DIFF_BASE_POLE       Which pole's column to subtract from every other
+                       column for OUTPUT_DIFF_FILE (e.g. "base" for FT,
+                       "baseline-empty" for sys-prompt runs).
 """
 
 import json
@@ -228,6 +235,11 @@ SIDEFONT = 5  # corner annotations (max, min, #null, n) -- mean stays at MAINFON
 # which case the minmax figure displays interactively).
 OUTPUT_MINMAX_FILE: str | None = "minmax_eval_matrix.png"
 OUTPUT_STD_FILE: str | None = "std_eval_matrix.png"
+OUTPUT_DIFF_FILE: str | None = "diff_eval_matrix.png"
+
+# Pole whose column is subtracted from every other column for the diff plot.
+# FT default: "base". sys-prompt drivers override to "baseline-empty".
+DIFF_BASE_POLE: str = "base"
 
 
 # ============================================================
@@ -412,8 +424,10 @@ def main() -> None:
         _render_minmax(poles, evals, pole_labels, eval_labels, mean, mn, mx, nn, nl)
     if OUTPUT_STD_FILE is not None:
         _render_std(poles, evals, pole_labels, eval_labels, mean, sd)
-    if OUTPUT_MINMAX_FILE is None and OUTPUT_STD_FILE is None:
-        # Both disabled -> show the minmax plot interactively.
+    if OUTPUT_DIFF_FILE is not None:
+        _render_diff(poles, evals, pole_labels, eval_labels, mean)
+    if OUTPUT_MINMAX_FILE is None and OUTPUT_STD_FILE is None and OUTPUT_DIFF_FILE is None:
+        # All disabled -> show the minmax plot interactively.
         _render_minmax(
             poles, evals, pole_labels, eval_labels, mean, mn, mx, nn, nl,
             output_override=False,
@@ -728,6 +742,73 @@ def _render_std(
 
     fig.tight_layout()
     _save_or_show(fig, OUTPUT_STD_FILE)
+
+
+def _render_diff(
+    poles: list[str], evals: list[str],
+    pole_labels: list[str], eval_labels: list[str],
+    mean: np.ndarray,
+) -> None:
+    """Per-row diff plot: A[i,j] = mean[i,j] - mean[i, DIFF_BASE_POLE].
+
+    The base column itself is dropped (it would be all zeros). Diverging
+    colormap centred at 0 so positive/negative deltas read clearly.
+    """
+    if DIFF_BASE_POLE not in poles:
+        print(
+            f"[render_diff] base pole {DIFF_BASE_POLE!r} not present in columns "
+            f"({sorted(poles)}); skipping diff plot."
+        )
+        return
+    base_idx = poles.index(DIFF_BASE_POLE)
+    base_col = mean[:, base_idx]
+
+    keep = [j for j in range(len(poles)) if j != base_idx]
+    if not keep:
+        print("[render_diff] only the base column is present; skipping.")
+        return
+    diff = mean[:, keep] - base_col[:, None]
+    diff_poles = [poles[j] for j in keep]
+    diff_pole_labels = [pole_labels[j] for j in keep]
+
+    finite = diff[np.isfinite(diff)]
+    if finite.size == 0:
+        print("[render_diff] no finite diff cells -- skipping.")
+        return
+    bound = float(np.max(np.abs(finite)))
+    if bound == 0.0:
+        bound = 1.0  # avoid degenerate norm when every diff is exactly zero
+    norm = mcolors.Normalize(vmin=-bound, vmax=bound)
+    cmap = plt.get_cmap("RdBu_r").copy()
+    cmap.set_bad(color=GREY)
+    masked = np.ma.masked_invalid(diff)
+
+    n_rows, n_cols = len(evals), len(diff_poles)
+    fig, ax = _figure(n_rows, n_cols)
+    im = ax.imshow(masked, cmap=cmap, norm=norm, aspect="auto")
+    title = (
+        f"Eval scores diff vs '{DIFF_BASE_POLE}' -- model match: {MODEL!r}"
+        f"\nA[i,j] = mean[i,j] - mean[i, '{DIFF_BASE_POLE}']  (base column dropped)"
+    )
+    _decorate_axes(ax, diff_poles, evals, diff_pole_labels, eval_labels, title)
+
+    for i in range(n_rows):
+        for j in range(n_cols):
+            v = diff[i, j]
+            if not np.isfinite(v):
+                continue
+            tc = _text_color_for(v, norm)
+            ax.text(
+                j, i, f"{v:+.1f}",
+                ha="center", va="center",
+                fontsize=MAINFONT, fontweight="bold", color=tc,
+            )
+
+    cbar = fig.colorbar(im, ax=ax, fraction=0.025, pad=0.02)
+    cbar.ax.tick_params(labelsize=8)
+
+    fig.tight_layout()
+    _save_or_show(fig, OUTPUT_DIFF_FILE)
 
 
 if __name__ == "__main__":

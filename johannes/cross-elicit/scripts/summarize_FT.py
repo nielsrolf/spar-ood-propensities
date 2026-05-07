@@ -186,6 +186,8 @@ def regenerate_viz(base_model_name: str) -> None:
     viz.MODEL = base_model_name
     viz.OUTPUT_MINMAX_FILE = f"minmax_eval_matrix_{base_model_name}.png"
     viz.OUTPUT_STD_FILE = f"std_eval_matrix_{base_model_name}.png"
+    viz.OUTPUT_DIFF_FILE = f"diff_eval_matrix_{base_model_name}.png"
+    viz.DIFF_BASE_POLE = "base"
     viz.FILTER_EPOCH = FILTER_EPOCH
     viz.FILTER_JUDGE = FILTER_JUDGE
     viz.FILTER_MIN_ITEMS = FILTER_MIN_ITEMS

@@ -44,6 +44,7 @@ Results saved to:
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import random
@@ -130,9 +131,21 @@ def _parse_cli_args() -> argparse.Namespace:
     p.add_argument("--workers", type=int, default=10,
                    help="Number of parallel async workers pulling judgment "
                         "tasks from the shared queue. Default: 10.")
+    p.add_argument("--reuse-from", type=str, default=None,
+                   help="Path to a previous run dir whose judgments.jsonl will "
+                        "be reused for any (prop_a, judge_key, prop_b, "
+                        "response_key, item_id) tuples that match this run. "
+                        "The old dir is left untouched; reused + new records "
+                        "are written to the fresh timestamped run dir. Pairs "
+                        "with sampling stability so a larger N is a superset "
+                        "of a smaller N's items per cell.")
     args = p.parse_args()
     if args.workers < 1:
         p.error(f"--workers must be >= 1 (got {args.workers}).")
+    if args.reuse_from is not None:
+        rp = Path(args.reuse_from)
+        if not (rp / "judgments.jsonl").exists():
+            p.error(f"--reuse-from: {rp}/judgments.jsonl not found.")
     return args
 
 
@@ -150,9 +163,10 @@ API_PROVIDER        = "openai"  # "openai" or "anthropic" — for the judge
 PARSER_MODEL = "gpt-5-nano"    # cheap model used only to extract the numeric score
 PARSER_API_PROVIDER = "openai"  # "openai" or "anthropic" — for the score parser
 MAX_CONCURRENT = _CLI.workers   # max parallel API calls (==# of async workers)
+REUSE_FROM     = Path(_CLI.reuse_from) if _CLI.reuse_from else None
 
 EVALS_DIR = Path(__file__).resolve().parent.parent / "evals"
-RESULTS_DIR = Path(__file__).parent / "eval_results/test_evals"
+RESULTS_DIR = Path(__file__).resolve().parent.parent / "eval_results" / "test_evals"
 RANDOM_SEED = 40
 
 # Only items whose meta.split equals this value are eligible for sampling.
@@ -247,6 +261,50 @@ def find_eval_yaml(propensity: str) -> Path:
 def load_eval_items(propensity: str) -> list[dict]:
     with open(find_eval_yaml(propensity)) as f:
         return yaml.safe_load(f)
+
+
+def judge_prompt_sha(template: str) -> str:
+    """Stable 16-hex-char digest of a judge prompt template.
+
+    Used to detect template changes between runs: a reused prior record is
+    only honored if its stored hash matches the current template's hash.
+    Truncated to 16 chars (64 bits) — collisions are infeasible at our scale.
+    """
+    return hashlib.sha256(template.encode("utf-8")).hexdigest()[:16]
+
+
+def load_prior_records(path: Path) -> dict[tuple, dict]:
+    """Load a previous run's judgments.jsonl, keyed by judgment identity.
+
+    Identity is (prop_a, judge_key, prop_b, response_key, item_id) — the same
+    five fields that uniquely determine a single API call. Records that
+    previously failed (`score_status == "failed"`) are excluded so a re-run
+    retries them. If the same key appears twice the later record wins.
+
+    Per-record content validation (question / answer / judge_prompt_sha)
+    happens later in the task-build loop where the current item and prompt
+    template are in scope.
+    """
+    out: dict[tuple, dict] = {}
+    n_failed_skipped = 0
+    n_missing_hash = 0
+    with open(path / "judgments.jsonl") as f:
+        for line in f:
+            r = json.loads(line)
+            if r.get("score_status") == "failed":
+                n_failed_skipped += 1
+                continue
+            if "judge_prompt_sha" not in r:
+                n_missing_hash += 1
+            key = (r["prop_a"], r["judge_key"], r["prop_b"],
+                   r["response_key"], r["item_id"])
+            out[key] = r
+    print(f"Loaded {len(out)} reusable prior records from {path}"
+          f" (skipped {n_failed_skipped} previously-failed records)")
+    if n_missing_hash:
+        print(f"  WARNING: {n_missing_hash} prior records pre-date judge-prompt "
+              f"hashing — they will be reused without prompt-template validation.")
+    return out
 
 
 def get_judge_prompts(items: list[dict]) -> dict[str, str]:
@@ -392,6 +450,7 @@ async def run_judgment(
         "item_id": item["id"],
         "question": question,
         "answer": answer,
+        "judge_prompt_sha": judge_prompt_sha(judge_prompt_template),
     }
     try:
         raw = await call_judge(filled, openai_client, anthropic_client)
@@ -654,13 +713,32 @@ async def main() -> None:
 
     print(f"\nMatrix dimensions: {len(ordered_row_labels)} rows × {len(ordered_col_labels)} cols")
 
+    # Optionally load prior records for reuse. Records are keyed by
+    # (prop_a, judge_key, prop_b, response_key, item_id) so the per-cell
+    # sampling stability below guarantees that a smaller-N prior run's items
+    # are a subset of this run's items, and matched records skip the API call.
+    prior_records: dict[tuple, dict] = (
+        load_prior_records(REUSE_FROM) if REUSE_FROM is not None else {}
+    )
+
     # Build all judgment coroutines.
     # Three-level loop: (propA, propB) pair → sampled items from propB →
     # (each judge key from propA) × (each response key from propB).
     # Items are sampled ONCE per (propA, propB) cell and reused across response
     # keys, so a propB with K response keys produces K columns of correlated data
     # rather than K independent samples.
-    tasks = []
+    #
+    # Sampling is per-cell deterministic: each (prop_a, prop_b) cell uses its
+    # own RNG seeded from (RANDOM_SEED, prop_a, prop_b) and shuffles the full
+    # sampleable list, taking the first n. This guarantees that a later run
+    # with a larger n picks the same first-n items as an earlier smaller-n
+    # run (so prior judgments can be reused) and is independent of how many
+    # items other cells consumed.
+    tasks: list = []
+    records: list[dict] = []        # pre-populated with reused prior records
+    n_reused = 0
+    n_invalidated = 0   # prior records whose stored question/answer/prompt-hash
+                        # no longer matches current eval data → re-judged
     for prop_a in PROPENSITIES:
         for prop_b in PROPENSITIES:
             n = N_DIAGONAL if prop_a == prop_b else N_OFFDIAGONAL
@@ -673,12 +751,42 @@ async def main() -> None:
                 print(f"  WARNING: no sampleable items in {prop_b}, skipping pair ({prop_a}, {prop_b})")
                 continue
 
-            sampled = random.sample(sampleable, min(n, len(sampleable)))
+            cell_rng = random.Random(f"{RANDOM_SEED}|{prop_a}|{prop_b}")
+            shuffled = list(sampleable)
+            cell_rng.shuffle(shuffled)
+            sampled = shuffled[: min(n, len(shuffled))]
 
             for item in sampled:
                 for response_key in get_response_keys(prop_b, item["meta"]):
                     col_label = col_label_for(prop_b, response_key)
+                    current_question = item["paraphrases"][0]
+                    current_answer = item["meta"][response_key]
                     for judge_key, prompt_template in judge_prompts_map[prop_a].items():
+                        key = (prop_a, judge_key, prop_b, response_key, item["id"])
+                        prior = prior_records.get(key)
+                        if prior is not None:
+                            # Validate: question/answer must match current YAML;
+                            # judge prompt hash must match current template.
+                            # Records pre-dating hashing have no judge_prompt_sha
+                            # field; treat that as "trust" (warned at load time).
+                            current_sha = judge_prompt_sha(prompt_template)
+                            prior_sha = prior.get("judge_prompt_sha")
+                            content_ok = (
+                                prior.get("question") == current_question
+                                and prior.get("answer") == current_answer
+                                and (prior_sha is None or prior_sha == current_sha)
+                            )
+                            if content_ok:
+                                # Reuse: rewrite col_label / backfill hash on
+                                # legacy records so the merged output is uniform.
+                                r = dict(prior)
+                                r["col_label"] = col_label
+                                r["judge_prompt_sha"] = current_sha
+                                records.append(r)
+                                n_reused += 1
+                                continue
+                            n_invalidated += 1
+                            # Fall through: enqueue a fresh task for this key.
                         tasks.append(run_judgment(
                             prop_a=prop_a,
                             judge_key=judge_key,
@@ -694,13 +802,17 @@ async def main() -> None:
                         ))
 
     total = len(tasks)
-    print(f"\nRunning {total} judgment calls  (judge={JUDGE_MODEL}/{API_PROVIDER}, parser={PARSER_MODEL}/{PARSER_API_PROVIDER})...")
+    print(f"\nRunning {total} judgment calls  (judge={JUDGE_MODEL}/{API_PROVIDER}, "
+          f"parser={PARSER_MODEL}/{PARSER_API_PROVIDER}); "
+          f"reusing {n_reused} prior records, "
+          f"re-judging {n_invalidated} invalidated by content/prompt change...")
 
     # Use a queue-based worker pool to cap the number of in-flight API calls.
     # asyncio.gather(*tasks) would launch all coroutines simultaneously; with
     # thousands of tasks that would overwhelm rate limits.  Instead, MAX_CONCURRENT
     # workers each pull one task at a time, keeping exactly that many calls in flight.
-    records: list[dict] = []
+    # `records` was pre-populated above with any reused prior records; workers
+    # append freshly-judged ones to the same list.
     n_done = 0
     n_failed = 0   # judge/parser API errors or unparseable parser output
     n_null = 0     # judge said the (question, answer) pair is off-topic for its axis
