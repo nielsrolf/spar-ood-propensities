@@ -360,7 +360,8 @@ let defShown = false;
 let refsShown = false;
 
 async function init() {{
-  const resp = await fetch('/api/data');
+  const evalParam = window.AUDIT_EVAL ? ('?eval=' + encodeURIComponent(window.AUDIT_EVAL)) : '';
+  const resp = await fetch('/api/data' + evalParam);
   const json = await resp.json();
   DATA = json.rows;
   annotations = json.annotations;
@@ -531,7 +532,7 @@ async function label(value) {{
   await fetch('/api/annotate', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{index: currentIdx, label: value}})
+    body: JSON.stringify({{index: currentIdx, label: value, eval: window.AUDIT_EVAL || null}})
   }});
   // Auto-advance to next in filtered set
   const posInFiltered = filteredIndices.indexOf(currentIdx);
@@ -653,10 +654,18 @@ class Handler(BaseHTTPRequestHandler):
             name = path[len("/eval/"):].rstrip("/")
             if not self._activate(name):
                 self.send_response(404); self.end_headers(); return
+            # Inject the eval name so /api/data and /api/annotate are routed
+            # to this eval's state rather than whichever was most-recently
+            # activated server-wide (race / multi-tab bug fix).
+            html = self._html.replace(
+                "</head>",
+                f'<script>window.AUDIT_EVAL = {json.dumps(name)};</script></head>',
+                1,
+            )
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(self._html.encode())
+            self.wfile.write(html.encode())
             return
 
         if path == "/" or path == "/index.html":
@@ -666,21 +675,34 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(self._html.encode())
 
         elif path == "/api/data":
+            qs = parse_qs(urlparse(self.path).query)
+            eval_name = qs.get("eval", [None])[0]
+            st = self._load_eval(eval_name) if (eval_name and self.configs_dir) else None
+            if st is not None:
+                rows = st["rows"]
+                annotations = st["annotations"]
+                cfg = st["config"]
+                out_dir = cfg.output_dir
+            else:
+                rows = self.rows
+                annotations = self.annotations
+                cfg = self.config
+                out_dir = cfg.output_dir if cfg else None
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            definition = _strip_preamble(self.config.judge_prompt_template) if self.config else ""
+            definition = _strip_preamble(cfg.judge_prompt_template) if cfg else ""
             references = {}
-            if self.config:
-                ref_path = self.config.output_dir / "reference_answers.json"
+            if out_dir:
+                ref_path = out_dir / "reference_answers.json"
                 if ref_path.exists():
                     try:
                         references = json.loads(ref_path.read_text())
                     except Exception:
                         references = {}
             payload = {
-                "rows": self.rows,
-                "annotations": self.annotations,
+                "rows": rows,
+                "annotations": annotations,
                 "definition": definition,
                 "references": references,
             }
@@ -712,13 +734,22 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             idx = str(body["index"])
             lbl = body["label"]
-            self.annotations[idx] = lbl
+            eval_name = body.get("eval")
 
-            # Persist immediately
+            st = self._load_eval(eval_name) if (eval_name and self.configs_dir) else None
+            if st is not None:
+                rows = st["rows"]
+                annotations = st["annotations"]
+                save_path = st["save_path"]
+            else:
+                rows = self.rows
+                annotations = self.annotations
+                save_path = self._save_path
+            annotations[idx] = lbl
             save_annotations(
-                self.rows,
-                {int(k): v for k, v in self.annotations.items()},
-                self._save_path,
+                rows,
+                {int(k): v for k, v in annotations.items()},
+                save_path,
             )
 
             self.send_response(200)
