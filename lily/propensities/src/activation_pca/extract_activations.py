@@ -1,22 +1,23 @@
 """Extract and cache mean residual-stream activations for each SFT model.
 
 Design B: load each fine-tuned model (via tinker), run identical neutral prompts
-through all of them, extract mean last-token activation at the middle layer.
+through all of them, extract mean last-token activation at specified layers.
 The resulting (n_models, hidden_dim) matrix is used to ask: do models fine-tuned
 on the same behavioral cluster end up in similar activation regions?
 
-Output: output/<family>/<model_name>.pt
+Output: output/<base>/<layer>/llama8b/<model_name>.pt
         {"activation": Tensor(hidden_dim,), "metadata": {...}}
 
-        output/<family>/<model_name>_perprompt.pt
+        output/<base>/<layer>/llama8b/<model_name>_perprompt.pt
         {"activations": Tensor(n_prompts, hidden_dim), "metadata": {...}}
 
-        output/<family>/adapters/<model_name>/   ← cached LoRA adapter (reused on re-runs)
+        output/<base>/adapters/<model_name>/   ← cached LoRA adapter (reused on re-runs)
 
 Usage:
     python extract_activations.py --family llama8b
-    python extract_activations.py --family llama8b --models power_seeking_ft_v5 narcissism_ft_v3
-    python extract_activations.py --family llama8b --layer 16
+    python extract_activations.py --family llama8b --eliciting
+    python extract_activations.py --family llama8b --layers 8 16 24 28
+    python extract_activations.py --family llama8b --models power_seeking_ft_v5
 """
 from __future__ import annotations
 
@@ -58,19 +59,39 @@ def load_tinker_model(
     rank: int,
     base_model_ungated: str | None = None,
     adapter_cache_dir: Path | None = None,
+    merged_cache_dir: Path | None = None,
 ):
     """Load a tinker LoRA checkpoint and return (model, tokenizer, tmp_work).
 
     adapter_cache_dir: persistent directory to cache the LoRA adapter. If the
-    adapter already exists there, the tinker API is skipped entirely. On first
-    run the adapter is downloaded and copied there before cleanup.
+    adapter already exists there, the tinker API is skipped entirely.
 
-    tmp_work (returned) holds the 15GB merged model; the caller must rmtree it
-    after del model. The tmp adapter dir is cleaned up inside this function.
+    merged_cache_dir: persistent directory to cache the full merged HF model
+    (~15 GB). If it exists, build_hf_model is skipped entirely on re-runs.
+    On first run the merged model is copied there before the tmpdir is cleaned.
+
+    tmp_work (returned) is None when loading from merged cache (nothing to clean
+    up); otherwise it holds the temp build dir and the caller must rmtree it.
     """
     import shutil
-    from tinker_cookbook import weights
     from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    merged_cache = Path(merged_cache_dir) if merged_cache_dir else None
+    merged_cached = (
+        merged_cache is not None
+        and (merged_cache / "config.json").exists()
+    )
+
+    if merged_cached:
+        print(f"  Using cached merged model: {merged_cache}")
+        model = AutoModelForCausalLM.from_pretrained(
+            str(merged_cache), torch_dtype=torch.bfloat16, device_map="cpu"
+        )
+        tokenizer = AutoTokenizer.from_pretrained(base_model_ungated or base_model)
+        tokenizer.padding_side = "left"
+        return model, tokenizer, None
+
+    from tinker_cookbook import weights
 
     adapter_cache = Path(adapter_cache_dir) if adapter_cache_dir else None
     adapter_cached = (
@@ -125,6 +146,11 @@ def load_tinker_model(
         output_path=tmp_merged,
     )
 
+    if merged_cache is not None:
+        merged_cache.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(tmp_merged, str(merged_cache), dirs_exist_ok=True)
+        print(f"  Cached merged model → {merged_cache}")
+
     model = AutoModelForCausalLM.from_pretrained(
         tmp_merged, torch_dtype=torch.bfloat16, device_map="cpu"
     )
@@ -137,25 +163,29 @@ def load_tinker_model(
     return model, tokenizer, tmp_work
 
 
-def extract_mean_activation(
-    model, tokenizer, layer_idx: int, use_eliciting: bool = False
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return (mean_vec, per_prompt_matrix) where per_prompt is (n_prompts, hidden_dim)."""
+def extract_all_layers(
+    model, tokenizer, layer_indices: list[int], use_eliciting: bool = False
+) -> dict[int, tuple[torch.Tensor, torch.Tensor]]:
+    """Return {layer_idx: (mean_vec, per_prompt_matrix)} for all requested layers."""
     prompts = ELICITING_PROMPTS if use_eliciting else NEUTRAL_PROMPTS
-    vecs = []
+    vecs_by_layer: dict[int, list[torch.Tensor]] = {l: [] for l in layer_indices}
     for prompt in tqdm(prompts, desc="  prompts", ncols=80, leave=False):
         acts = extract_residual_stream(
-            model, tokenizer, as_messages(prompt), layers=[layer_idx]
+            model, tokenizer, as_messages(prompt), layers=layer_indices
         )
-        vecs.append(acts[layer_idx].float())
-    stacked = torch.stack(vecs)  # (n_prompts, hidden_dim)
-    return stacked.mean(dim=0), stacked
+        for l in layer_indices:
+            vecs_by_layer[l].append(acts[l].float())
+    result = {}
+    for l in layer_indices:
+        stacked = torch.stack(vecs_by_layer[l])  # (n_prompts, hidden_dim)
+        result[l] = (stacked.mean(dim=0), stacked)
+    return result
 
 
 def run(
     family: str,
     model_names: list[str] | None,
-    layer_override: int | None,
+    layer_indices: list[int],
     out_dir: Path,
     registry: dict,
     use_eliciting: bool = False,
@@ -170,18 +200,29 @@ def run(
     if model_names:
         models_cfg = {k: v for k, v in models_cfg.items() if k in model_names}
 
-    out_family = out_dir / family
-    out_family.mkdir(parents=True, exist_ok=True)
+    # adapter cache lives at out_dir/adapters/<model_name> (shared across layers)
+    adapter_base = out_dir / "adapters"
+
+    # per-layer output dirs: out_dir/l{layer}/{family}/
+    def layer_family_dir(layer: int) -> Path:
+        d = out_dir / f"l{layer}" / family
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def all_outputs_exist(model_name: str, layers: list[int]) -> bool:
+        return all(
+            (layer_family_dir(l) / f"{model_name}.pt").exists()
+            and (layer_family_dir(l) / f"{model_name}_perprompt.pt").exists()
+            for l in layers
+        )
 
     pending = [(n, c) for n, c in models_cfg.items()
-               if not (out_family / f"{n}.pt").exists()
-               or not (out_family / f"{n}_perprompt.pt").exists()]
+               if not all_outputs_exist(n, layer_indices)]
     for n, _ in models_cfg.items():
-        if (out_family / f"{n}.pt").exists() and (out_family / f"{n}_perprompt.pt").exists():
-            print(f"[skip] {n} (already extracted)")
+        if all_outputs_exist(n, layer_indices):
+            print(f"[skip] {n} (all layers already extracted)")
 
     for i, (model_name, cfg) in enumerate(tqdm(pending, desc="models", ncols=80), 1):
-        out_path = out_family / f"{model_name}.pt"
         checkpoint = cfg.get("checkpoint")
         print(f"\n[{i}/{len(pending)}] {model_name} ({'base' if not checkpoint else 'tinker'})")
 
@@ -195,38 +236,47 @@ def run(
             tokenizer = AutoTokenizer.from_pretrained(_base_id)
             tokenizer.padding_side = "left"
         else:
-            adapter_cache_dir = out_family / "adapters" / model_name
+            adapter_cache_dir = adapter_base / model_name
+            merged_cache_dir  = out_dir / "merged" / model_name
             model, tokenizer, _tw = load_tinker_model(
-                checkpoint, base_model, lora_rank, base_model_ungated, adapter_cache_dir
+                checkpoint, base_model, lora_rank, base_model_ungated,
+                adapter_cache_dir, merged_cache_dir,
             )
-            tmp_dirs_to_clean = [_tw]
+            tmp_dirs_to_clean = [_tw] if _tw is not None else []
 
-        layer_idx = pick_layer(model, layer_fraction, layer_override)
+        # resolve any "use fraction" layers that weren't explicitly overridden
         n_layers = len(get_model_layers(model))
+        resolved_layers = [
+            int(n_layers * layer_fraction) if l < 0 else l
+            for l in layer_indices
+        ]
         prompts = ELICITING_PROMPTS if use_eliciting else NEUTRAL_PROMPTS
-        print(f"  Layer {layer_idx} / {n_layers}  |  {len(prompts)} {'eliciting' if use_eliciting else 'neutral'} prompts")
+        print(f"  Layers {resolved_layers} / {n_layers}  |  {len(prompts)} {'eliciting' if use_eliciting else 'neutral'} prompts")
 
-        vec, per_prompt = extract_mean_activation(model, tokenizer, layer_idx, use_eliciting)
+        results = extract_all_layers(model, tokenizer, resolved_layers, use_eliciting)
 
-        metadata = {
-            "model_name": model_name,
-            "checkpoint": checkpoint,
-            "family": family,
-            "base_model": base_model,
-            "layer_idx": layer_idx,
-            "trait": cfg.get("trait", ""),
-            "color": cfg.get("color", "gray"),
-            "cluster": cfg.get("cluster", "base"),
-            "n_prompts": len(prompts),
-            "prompt_type": "eliciting" if use_eliciting else "neutral",
-            "hidden_dim": vec.shape[0],
-        }
-        torch.save({"activation": vec, "metadata": metadata}, out_path)
-        print(f"  Saved {out_path}  shape={tuple(vec.shape)}")
+        for layer_idx, (vec, per_prompt) in results.items():
+            lfd = layer_family_dir(layer_idx)
+            metadata = {
+                "model_name": model_name,
+                "checkpoint": checkpoint,
+                "family": family,
+                "base_model": base_model,
+                "layer_idx": layer_idx,
+                "trait": cfg.get("trait", ""),
+                "color": cfg.get("color", "gray"),
+                "cluster": cfg.get("cluster", "base"),
+                "n_prompts": len(prompts),
+                "prompt_type": "eliciting" if use_eliciting else "neutral",
+                "hidden_dim": vec.shape[0],
+            }
+            out_path = lfd / f"{model_name}.pt"
+            torch.save({"activation": vec, "metadata": metadata}, out_path)
+            print(f"  Saved {out_path}  shape={tuple(vec.shape)}")
 
-        perprompt_path = out_family / f"{model_name}_perprompt.pt"
-        torch.save({"activations": per_prompt, "metadata": metadata}, perprompt_path)
-        print(f"  Saved {perprompt_path}  shape={tuple(per_prompt.shape)}")
+            perprompt_path = lfd / f"{model_name}_perprompt.pt"
+            torch.save({"activations": per_prompt, "metadata": metadata}, perprompt_path)
+            print(f"  Saved {perprompt_path}  shape={tuple(per_prompt.shape)}")
 
         del model
         torch.cuda.empty_cache()
@@ -271,8 +321,44 @@ def probe_weights_path(registry: dict, family: str) -> None:
     model, tokenizer, _tw = load_tinker_model(checkpoint, base_model, lora_rank, base_model_ungated)
     print("Model loaded OK:", type(model))
     print("Layers:", len(get_model_layers(model)))
-    import shutil; shutil.rmtree(_tw, ignore_errors=True)
+    import shutil
+    if _tw is not None:
+        shutil.rmtree(_tw, ignore_errors=True)
     print("\nProbe complete — the full extraction script should work.")
+
+
+def validate_checkpoints(registry: dict, family: str, model_names: list[str] | None) -> None:
+    """Quick check that all tinker checkpoint state paths are accessible."""
+    import tinker
+
+    family_cfg = registry[family]
+    base_model = family_cfg["base_model"]
+    lora_rank  = family_cfg.get("lora_rank", 8)
+    models_cfg = family_cfg["models"]
+
+    if model_names:
+        models_cfg = {k: v for k, v in models_cfg.items() if k in model_names}
+
+    sft_models = {k: v for k, v in models_cfg.items() if v.get("checkpoint")}
+    print(f"Validating {len(sft_models)} checkpoints for {family}...\n")
+
+    ok, failed = 0, 0
+    for name, cfg in sft_models.items():
+        checkpoint = cfg["checkpoint"]
+        print(f"  {name} ... ", end="", flush=True)
+        try:
+            service_client = tinker.ServiceClient()
+            tc = service_client.create_lora_training_client(base_model=base_model, rank=lora_rank)
+            resp = tc.load_state(checkpoint)
+            if hasattr(resp, "result"):
+                resp.result()
+            print("OK")
+            ok += 1
+        except Exception as e:
+            print(f"FAILED: {e}")
+            failed += 1
+
+    print(f"\n{ok} OK, {failed} failed")
 
 
 def main():
@@ -282,22 +368,30 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--family", required=True, choices=families)
     ap.add_argument("--models", nargs="+", help="Subset of model names to extract")
-    ap.add_argument("--layer", type=int, default=None, help="Override layer index")
-    ap.add_argument("--out-dir", type=Path, default=HERE / "output")
+    ap.add_argument("--layers", nargs="+", type=int, default=[8, 16, 24, 28],
+                    help="Layer indices to extract (default: 8 16 24 28)")
+    ap.add_argument("--out-dir", type=Path, default=HERE / "output",
+                    help="Base output dir; per-layer subdirs created as <out-dir>/l{N}/")
     ap.add_argument("--eliciting", action="store_true",
                     help="Use behaviorally-eliciting prompts instead of neutral prompts")
     ap.add_argument("--probe-weights-path", action="store_true",
                     help="Find where tinker saves merged weights on this machine, then exit")
+    ap.add_argument("--validate", action="store_true",
+                    help="Validate all checkpoint state paths are accessible, then exit")
     args = ap.parse_args()
 
     if args.probe_weights_path:
         probe_weights_path(registry, args.family)
         return
 
+    if args.validate:
+        validate_checkpoints(registry, args.family, args.models)
+        return
+
     run(
         family=args.family,
         model_names=args.models,
-        layer_override=args.layer,
+        layer_indices=args.layers,
         out_dir=args.out_dir,
         registry=registry,
         use_eliciting=args.eliciting,

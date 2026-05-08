@@ -8,13 +8,15 @@ Prediction: PC1 should correlate with the behavioral D2/Prosocial axis; D1 (dark
 and Self-Pres should land on separate PCs. Same 4-cluster structure as the behavioral PCA.
 
 Experiments:
-  1. pca    — biplot of models colored by behavioral cluster
-  2. probe  — LOO logistic regression: can we decode cluster from activations?
+  1. pca             — biplot of models colored by behavioral cluster
+  2. probe           — LOO logistic regression over mean activation vectors (1 vec/model)
+  3. probe-perprompt — leave-one-model-out probe over per-prompt activations (50 vecs/model)
 
 Usage:
     python analyze.py --family llama8b
     python analyze.py --family llama8b --experiment pca
     python analyze.py --family llama8b --experiment probe
+    python analyze.py --family llama8b --experiment probe-perprompt
 """
 from __future__ import annotations
 
@@ -57,7 +59,7 @@ def load_activations(family: str, out_dir: Path) -> dict:
             f"No cached activations at {family_dir}. Run extract_activations.py first."
         )
     data = {}
-    for pt_file in sorted(family_dir.glob("*.pt")):
+    for pt_file in sorted(f for f in family_dir.glob("*.pt") if "_perprompt" not in f.name):
         entry = torch.load(pt_file, map_location="cpu", weights_only=False)
         data[entry["metadata"]["model_name"]] = entry
     if not data:
@@ -156,7 +158,7 @@ def _add_legend(ax):
 
 
 # ---------------------------------------------------------------------------
-# Experiment 2: Linear probe (LOO CV)
+# Experiment 2: Linear probe (LOO CV on mean vectors)
 # ---------------------------------------------------------------------------
 
 def run_probe(family: str, out_dir: Path, save_dir: Path) -> None:
@@ -236,6 +238,165 @@ def run_probe(family: str, out_dir: Path, save_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Experiment 3: Per-prompt probe (leave-one-model-out CV)
+# ---------------------------------------------------------------------------
+
+def load_perprompt_activations(family: str, out_dir: Path) -> dict:
+    """Load _perprompt.pt files.
+
+    Returns dict: model_name -> {"activations": Tensor(n_prompts, hidden_dim), "metadata": dict}
+    """
+    family_dir = out_dir / family
+    if not family_dir.exists():
+        raise FileNotFoundError(f"No cached activations at {family_dir}.")
+    data = {}
+    for pt_file in sorted(family_dir.glob("*_perprompt.pt")):
+        entry = torch.load(pt_file, map_location="cpu", weights_only=False)
+        data[entry["metadata"]["model_name"]] = entry
+    if not data:
+        raise FileNotFoundError(f"No _perprompt.pt files in {family_dir}")
+    return data
+
+
+def run_probe_perprompt(family: str, out_dir: Path, save_dir: Path) -> None:
+    """Leave-one-model-out probe using per-prompt activation vectors.
+
+    For each held-out model: train scaler + PCA + classifier on all other models'
+    prompts, predict cluster for each held-out prompt, majority-vote to get a
+    model-level prediction. Avoids prompt-level leakage across models.
+    """
+    from collections import Counter
+
+    data = load_perprompt_activations(family, out_dir)
+
+    # Collect entries, drop base and singleton clusters
+    entries = list(data.values())
+    cluster_counts = Counter(
+        e["metadata"]["cluster"] for e in entries if e["metadata"]["cluster"] != "base"
+    )
+    non_singleton = {c for c, n in cluster_counts.items() if n >= 2}
+    dropped = {c for c, n in cluster_counts.items() if n < 2}
+    if dropped:
+        print(f"[probe-perprompt] Dropping singleton clusters: {sorted(dropped)}")
+
+    entries = [
+        e for e in entries
+        if e["metadata"]["cluster"] != "base"
+        and e["metadata"]["cluster"] in non_singleton
+    ]
+
+    if len(set(e["metadata"]["cluster"] for e in entries)) < 2:
+        print("[probe-perprompt] Need ≥2 distinct clusters — skipping.")
+        return
+
+    model_names = [e["metadata"]["model_name"] for e in entries]
+    traits      = [e["metadata"]["trait"]       for e in entries]
+    clusters    = [e["metadata"]["cluster"]      for e in entries]
+
+    le = LabelEncoder()
+    le.fit(clusters)
+
+    correct = 0
+    predictions = []
+
+    for held_idx in range(len(entries)):
+        # Build train set from all other models
+        train_X = np.vstack([
+            entries[i]["activations"].numpy()
+            for i in range(len(entries)) if i != held_idx
+        ])
+        train_y = np.concatenate([
+            np.full(entries[i]["activations"].shape[0], le.transform([clusters[i]])[0])
+            for i in range(len(entries)) if i != held_idx
+        ])
+
+        test_X = entries[held_idx]["activations"].numpy()
+        true_label = clusters[held_idx]
+
+        # Fit scaler and PCA on training data only
+        scaler = StandardScaler()
+        train_X_sc = scaler.fit_transform(train_X)
+        test_X_sc  = scaler.transform(test_X)
+
+        n_pcs = min(train_X_sc.shape[0] - 1, train_X_sc.shape[1], 30)
+        pca = PCA(n_components=n_pcs)
+        train_X_pca = pca.fit_transform(train_X_sc)
+        test_X_pca  = pca.transform(test_X_sc)
+
+        clf = LogisticRegression(max_iter=1000, C=1.0)
+        clf.fit(train_X_pca, train_y)
+
+        # Majority vote over held-out model's prompts
+        prompt_preds = clf.predict(test_X_pca)
+        vote = Counter(prompt_preds).most_common(1)[0][0]
+        pred_label = le.inverse_transform([vote])[0]
+        prompt_acc = (prompt_preds == le.transform([true_label])[0]).mean()
+
+        is_correct = pred_label == true_label
+        correct += int(is_correct)
+        predictions.append((traits[held_idx], pred_label, true_label, prompt_acc))
+
+    acc = correct / len(entries)
+    chance = 1 / len(set(clusters))
+    n_prompts_total = sum(e["activations"].shape[0] for e in entries)
+
+    print(f"\n{family} — Per-prompt probe (leave-one-model-out):")
+    print(f"  {len(entries)} models × ~{n_prompts_total // len(entries)} prompts = {n_prompts_total} total")
+    print(f"  Model accuracy: {correct}/{len(entries)} = {acc:.1%}  (chance={chance:.1%})")
+    print(f"  Classes: {le.classes_.tolist()}")
+    print("\n  Per-model predictions:")
+    for name, pred, true, p_acc in predictions:
+        mark = "✓" if pred == true else "✗"
+        print(f"    {mark} {name:20s}  pred={pred:10s}  true={true:10s}  prompt_acc={p_acc:.0%}")
+
+    # Plot: PCA of all prompts colored by cluster
+    all_X = np.vstack([e["activations"].numpy() for e in entries])
+    all_clusters = np.concatenate([
+        [clusters[i]] * entries[i]["activations"].shape[0]
+        for i in range(len(entries))
+    ])
+    all_traits = np.concatenate([
+        [traits[i]] * entries[i]["activations"].shape[0]
+        for i in range(len(entries))
+    ])
+
+    scaler_all = StandardScaler()
+    pca_all = PCA(n_components=2)
+    coords = pca_all.fit_transform(scaler_all.fit_transform(all_X))
+
+    fig, ax = plt.subplots(figsize=(9, 7))
+    for cluster in sorted(set(clusters)):
+        mask = all_clusters == cluster
+        ax.scatter(coords[mask, 0], coords[mask, 1],
+                   color=CLUSTER_COLORS.get(cluster, "gray"),
+                   alpha=0.35, s=18, label=cluster)
+    # Overlay model centroids
+    for i, entry in enumerate(entries):
+        n = entry["activations"].shape[0]
+        start = sum(entries[j]["activations"].shape[0] for j in range(i))
+        cx, cy = coords[start:start + n].mean(axis=0)
+        ax.scatter(cx, cy, color=CLUSTER_COLORS.get(clusters[i], "gray"),
+                   s=150, edgecolors="black", linewidths=1.2, zorder=5)
+        ax.annotate(traits[i], (cx, cy), fontsize=8,
+                    xytext=(5, 4), textcoords="offset points")
+
+    ax.set_xlabel(f"PC1 ({pca_all.explained_variance_ratio_[0]:.1%})")
+    ax.set_ylabel(f"PC2 ({pca_all.explained_variance_ratio_[1]:.1%})")
+    ax.set_title(
+        f"{family} — Per-prompt activations (model acc={acc:.1%}, chance={chance:.1%})",
+        fontsize=10,
+    )
+    ax.axhline(0, color="gray", lw=0.5, ls="--")
+    ax.axvline(0, color="gray", lw=0.5, ls="--")
+    _add_legend(ax)
+    plt.tight_layout()
+    out = save_dir / f"probe_perprompt_{family}.png"
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    print(f"Saved: {out}")
+    plt.close()
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -246,7 +407,8 @@ def main():
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--family", required=True, choices=families)
-    ap.add_argument("--experiment", choices=["pca", "probe", "all"], default="all")
+    ap.add_argument("--experiment",
+                    choices=["pca", "probe", "probe-perprompt", "all"], default="all")
     ap.add_argument("--out-dir", type=Path, default=HERE / "output")
     ap.add_argument("--save-dir", type=Path, default=HERE / "figures")
     args = ap.parse_args()
@@ -258,6 +420,8 @@ def main():
         run_pca(args.family, args.out_dir, args.save_dir)
     if run_all or args.experiment == "probe":
         run_probe(args.family, args.out_dir, args.save_dir)
+    if run_all or args.experiment == "probe-perprompt":
+        run_probe_perprompt(args.family, args.out_dir, args.save_dir)
 
 
 if __name__ == "__main__":
