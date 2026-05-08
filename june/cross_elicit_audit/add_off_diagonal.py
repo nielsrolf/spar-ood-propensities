@@ -108,11 +108,15 @@ def collect_off_diag(ft_root: Path, eval_axis: str, target_metric: str,
                      epochs: list[int], existing_sigs: set,
                      n_target: int, seed: int) -> list[dict]:
     """Walk ft_root for <eval_axis>_eval__... dirs whose pole's train_axis
-    differs from eval_axis. Stratify the picked rows across distinct
-    (train_axis, pole_sign) groups so we cover many cross-steering cells
-    rather than oversampling any single one."""
+    differs from eval_axis. Two-level stratification:
+      outer = epoch (round-robin across requested epochs so we don't all
+              land on epoch 5 just because there are 10x more epoch-5 dirs)
+      inner = (train_axis, pole_sign) group (round-robin so we visit many
+              distinct cross-steering cells before doubling up).
+    """
     rng = random.Random(seed)
-    by_group: dict[tuple, list[dict]] = {}
+    # by_epoch[ep][(train_axis, pole_sign)] -> [row, ...]
+    by_epoch: dict[int, dict[tuple, list[dict]]] = {ep: {} for ep in epochs}
     for name in os.listdir(ft_root):
         info = parse_dir(name)
         if info is None or info["eval_axis"] != eval_axis:
@@ -157,27 +161,37 @@ def collect_off_diag(ft_root: Path, eval_axis: str, target_metric: str,
                 "source_dir": name,
             }
             key = (info["train_axis"], info["pole_sign"])
-            by_group.setdefault(key, []).append(row_out)
+            by_epoch[info["epoch"]].setdefault(key, []).append(row_out)
 
-    # Round-robin across groups so we cover as many distinct training poles
-    # as possible before doubling up on any one.
-    for k in by_group:
-        rng.shuffle(by_group[k])
-    keys = sorted(by_group.keys())
-    rng.shuffle(keys)
+    # Shuffle inside every (epoch, group) bin
+    for ep in by_epoch:
+        for k in by_epoch[ep]:
+            rng.shuffle(by_epoch[ep][k])
+
+    # Outer round-robin across epochs (skip epochs that are exhausted).
+    epoch_order = list(by_epoch.keys())
+    rng.shuffle(epoch_order)
 
     picked = []
-    while len(picked) < n_target and keys:
-        progressed = False
-        for k in list(keys):
-            if not by_group[k]:
-                keys.remove(k)
+    while len(picked) < n_target and epoch_order:
+        any_progress = False
+        for ep in list(epoch_order):
+            groups = by_epoch[ep]
+            # Drop empty groups
+            for k in [k for k, v in groups.items() if not v]:
+                groups.pop(k, None)
+            if not groups:
+                epoch_order.remove(ep)
                 continue
-            picked.append(by_group[k].pop())
-            progressed = True
+            # Pick from one (train_axis, pole_sign) group this round, rotating
+            # which group we hit by sorting+shifting using the current count.
+            keys = sorted(groups.keys())
+            k = keys[len(picked) % len(keys)]
+            picked.append(groups[k].pop())
+            any_progress = True
             if len(picked) >= n_target:
                 break
-        if not progressed:
+        if not any_progress:
             break
     return picked
 
