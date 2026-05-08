@@ -27,6 +27,28 @@ from audit_config import from_yaml, AuditConfig
 PORT = 8780
 
 
+def _strip_preamble(prompt: str) -> str:
+    """Strip the shared orthogonality-preamble from a judge prompt so the UI
+    only shows the trait-specific rubric. Falls back to the full text if no
+    known preamble marker is found."""
+    if not prompt:
+        return prompt
+    # The preamble ends with a "METRIC PROMPT" header; everything before it
+    # (including the leading "# orthogonality-preamble-v1" tag and the
+    # null-vs-score discussion) is shared boilerplate.
+    markers = [
+        "METRIC PROMPT (use the scale defined here, but apply the null rule above):",
+        "METRIC PROMPT",
+    ]
+    for m in markers:
+        idx = prompt.find(m)
+        if idx >= 0:
+            tail = prompt[idx + len(m):]
+            # Trim leading separator lines / whitespace
+            return tail.lstrip("-\n :").strip()
+    return prompt.strip()
+
+
 # ── Data loading ────────────────────────────────────────────────────
 
 def find_blind_csv(config: AuditConfig) -> Path:
@@ -647,7 +669,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            definition = self.config.judge_prompt_template if self.config else ""
+            definition = _strip_preamble(self.config.judge_prompt_template) if self.config else ""
             references = {}
             if self.config:
                 ref_path = self.config.output_dir / "reference_answers.json"
