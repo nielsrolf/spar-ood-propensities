@@ -104,6 +104,19 @@ from tinker_cookbook import renderers  # noqa: E402
 from tinker_cookbook.model_info import get_recommended_renderer_name  # noqa: E402
 from tinker_cookbook.tokenizer_utils import get_tokenizer  # noqa: E402
 
+
+def select_renderer_name(base_model: str) -> str:
+    """Renderer name to use for `base_model`. Nemotron-3 is a hybrid
+    thinking/non-thinking model; we deliberately default to the
+    non-thinking variant so all callers (this script, finetune.py,
+    sys_prompt_diag, sys_prompt_offdiag, run_overnight_everything) get
+    consistent, reasoning-off behavior. Other models keep the
+    tinker_cookbook recommended default."""
+    name = get_recommended_renderer_name(base_model)
+    if name == "nemotron3":
+        return "nemotron3_disable_thinking"
+    return name
+
 from openai import AsyncOpenAI, RateLimitError  # noqa: E402
 
 
@@ -461,7 +474,7 @@ async def run(args):
     sampling_client = service_client.create_sampling_client(**sc_kwargs)
     tokenizer = get_tokenizer(base_model)
     renderer = renderers.get_renderer(
-        get_recommended_renderer_name(base_model), tokenizer
+        select_renderer_name(base_model), tokenizer
     )
 
     # OpenAI judge client

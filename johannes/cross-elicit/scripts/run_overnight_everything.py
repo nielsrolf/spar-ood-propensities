@@ -1,7 +1,7 @@
 """
 Overnight orchestrator: finetune missing models, then run the full eval
 suite against the finetuned checkpoints + base models. Llama family first,
-qwen family second; strictly serial across families.
+qwen family second, nemotron family third; strictly serial across families.
 
 Per family:
   1. Run finetune.py with configs/<family>_remaining.json.
@@ -33,7 +33,7 @@ CLI:
       [--epoch 5]                # which checkpoint epoch to evaluate
       [--max-test-items N]       # default: full test split
       [--eval-concurrency 3]
-      [--families llama,qwen]
+      [--families llama,qwen,nemotron]
       [--phase finetune|eval|both]   # default both
       [--rerun-seed N]           # force a fresh seeded re-run; old results stay
       [--full-matrix]            # use every (axis, side) from definitions.json
@@ -122,7 +122,7 @@ DEFAULT_EVAL_CONCURRENCY = 6
 TINKER_RETRY_BASE = 30.0     # seconds
 TINKER_RETRY_MAX = 6
 SESSION_LIMIT_PATTERN = re.compile(r"Too many active sessions")
-DEFAULT_FAMILIES = ["llama", "qwen"]
+DEFAULT_FAMILIES = ["llama", "qwen", "nemotron"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -934,7 +934,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--families", default=",".join(DEFAULT_FAMILIES),
-        help="Comma-separated families. Default: llama,qwen.",
+        help="Comma-separated families. Default: llama,qwen,nemotron.",
     )
     parser.add_argument(
         "--phase", choices=("finetune", "eval", "both"), default="both",

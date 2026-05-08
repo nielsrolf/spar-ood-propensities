@@ -43,6 +43,19 @@ from tinker_cookbook.supervised import train
 from tinker_cookbook.supervised.data import FromConversationFileBuilder
 from tinker_cookbook.supervised.types import ChatDatasetBuilderCommonConfig
 
+from eval_sync import push_or_mark_pending
+
+
+def _select_renderer_name(model_name: str) -> str:
+    """Renderer name to use for `model_name`. Nemotron-3 is a hybrid
+    thinking/non-thinking model; we deliberately default to the
+    non-thinking variant so training and eval stay consistent. Mirrors
+    run_eval.select_renderer_name."""
+    name = model_info.get_recommended_renderer_name(model_name)
+    if name == "nemotron3":
+        return "nemotron3_disable_thinking"
+    return name
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paths — derived from this file's location so the script works in any clone.
@@ -82,6 +95,7 @@ def _move_eval_output_to_finetuning(log_path: str) -> str | None:
         os.makedirs(FINETUNING_DIR, exist_ok=True)
         new_path = os.path.join(FINETUNING_DIR, os.path.basename(out_dir.rstrip("/")))
         shutil.move(out_dir, new_path)
+        push_or_mark_pending(new_path)
         return new_path
     except Exception:
         return None
@@ -646,7 +660,7 @@ def train_one(
     with open(os.path.join(log_path, "run_config.json"), "w") as f:
         json.dump(run_config, f, indent=2)
 
-    renderer_name = model_info.get_recommended_renderer_name(model_name)
+    renderer_name = _select_renderer_name(model_name)
     common_config = ChatDatasetBuilderCommonConfig(
         model_name_for_tokenizer=model_name,
         renderer_name=renderer_name,

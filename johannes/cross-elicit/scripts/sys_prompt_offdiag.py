@@ -41,6 +41,8 @@ import sys
 import threading
 import time
 
+from eval_sync import push_or_mark_pending
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CROSS_ELICIT_ROOT = os.path.dirname(SCRIPT_DIR)
 EVALS_ROOT = os.path.join(CROSS_ELICIT_ROOT, "evals")
@@ -162,6 +164,7 @@ def relabel_with_sysprompt(out_dir: str, sysprompt_label: str) -> str:
         new_base = f"{old_base}__sysprompt-{sysprompt_label}"
     new_path = os.path.join(SYS_PROMPTS_DIR, new_base)
     shutil.move(out_dir, new_path)
+    push_or_mark_pending(new_path)
     return new_path
 
 

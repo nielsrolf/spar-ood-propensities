@@ -60,6 +60,12 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
+# Hook for auto-push of test_evals output to HF.
+_THIS_DIR = str(Path(__file__).resolve().parent)
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
+from eval_sync import push_or_mark_pending  # noqa: E402
+
 # ============================================================
 # CONFIG — edit these
 # ============================================================
@@ -628,6 +634,8 @@ def save_results(
     print(f"\nResults saved to: {run_dir}")
     print(f"  matrices.json   — {len(row_labels)}×{len(col_labels)} scores + counts")
     print(f"  judgments.jsonl — {len(records)} individual judgment records")
+
+    push_or_mark_pending(run_dir)
 
 
 def print_summary(

@@ -49,6 +49,8 @@ from datetime import datetime
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+from eval_sync import push_or_mark_pending
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paths / defaults
@@ -432,6 +434,7 @@ async def run_one(folder: str, args, client: AsyncOpenAI, axis_block: str) -> di
         print(f"  min={summary['min']}  mean={summary['mean']:.2f}  max={summary['max']}")
     print(f"\nWrote: {coh_rows_path}")
     print(f"       {coh_summary_path}")
+    push_or_mark_pending(folder)
     return summary
 
 
