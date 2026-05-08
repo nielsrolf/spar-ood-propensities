@@ -227,18 +227,40 @@ def main():
             chosen = [(chosen_metric, prompts[chosen_metric])]
             cfg_name = trait
 
+        # Build reference-answer map: item_id → {role: text} from each
+        # item's `meta` block. Roles like 'high_response', 'low_response',
+        # 'expected_plus_response', etc. are surfaced verbatim in the UI.
+        ref_map: dict[str, dict[str, str]] = {}
+        for item in eval_data:
+            item_id = item.get("id")
+            if not item_id:
+                continue
+            meta = item.get("meta", {}) or {}
+            refs = {k: v for k, v in meta.items()
+                    if isinstance(v, str) and "response" in k.lower()}
+            if refs:
+                ref_map[item_id] = refs
+
         for metric, prompt in chosen:
             name = cfg_name
+            out_dir = output_dir / name
+            out_dir.mkdir(parents=True, exist_ok=True)
             cfg = build_config_for_metric(
                 trait, metric, prompt,
                 scored_csv=scored_csv,
-                out_dir=output_dir / name,
+                out_dir=out_dir,
                 target_n=args.target_n,
             )
             out_path = configs_dir / f"{name}.yaml"
             with open(out_path, "w") as f:
                 yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True, width=4096)
-            print(f"  [{stem}] {metric} → {out_path.name}")
+            # Reference answers (optional — only when the eval yaml had them)
+            if ref_map:
+                import json as _json
+                ref_path = out_dir / "reference_answers.json"
+                ref_path.write_text(_json.dumps(ref_map, indent=2))
+            print(f"  [{stem}] {metric} → {out_path.name}"
+                  f"{' (+refs)' if ref_map else ''}")
 
 
 if __name__ == "__main__":
