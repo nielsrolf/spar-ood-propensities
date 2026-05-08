@@ -65,67 +65,87 @@ def score_bucket(score_val) -> int | None:
     return 5
 
 
-def pick_unscored(unscored: list[dict], eval_axis: str, n_keep: int) -> list[dict]:
-    """Return up to n_keep rows from `unscored`, biased toward off-diagonal,
-    epoch-not-5, distinct training poles, score-bin coverage."""
+def pick_unscored(unscored: list[dict], eval_axis: str, n_keep: int,
+                  off_diag_share: float = 0.6) -> list[dict]:
+    """Return up to n_keep rows split across two complementary tiers:
+
+      tier A — off-diagonal × epoch-5 (the canonical cross-steering signal;
+               the source data has no off-diag × non-epoch-5 cells)
+      tier B — on-diagonal × non-epoch-5 (epoch diversity for judges)
+
+    `off_diag_share` controls the A:B split (default 60/40). Any shortfall
+    in one tier is topped up from the other, then from the leftovers
+    (on-diag × epoch-5).
+
+    Within each tier we round-robin distinct (train_axis, pole_sign) groups
+    and stratify by score bucket so the picked set spans the rubric.
+    """
     if n_keep <= 0:
         return []
     if len(unscored) <= n_keep:
         return list(unscored)
 
-    # Partition by (off-diagonal × non-epoch-5) preference tiers
     def _str(v):
         if v is None or (isinstance(v, float) and pd.isna(v)):
             return ""
         return str(v).strip()
 
-    def tier(r):
+    def classify(r):
         ta = _str(r.get("train_axis"))
         ep = _str(r.get("epoch"))
         on_diag = ta == eval_axis or ta == ""
         is_epoch5 = ep in ("5", "5.0")
-        # 0 = best (off-diag, non-epoch-5), 3 = worst (on-diag, epoch-5)
-        return (1 if on_diag else 0) * 2 + (1 if is_epoch5 else 0)
+        if not on_diag and is_epoch5:
+            return "A"          # off-diag × epoch-5
+        if on_diag and not is_epoch5:
+            return "B"          # on-diag × non-epoch-5
+        if not on_diag and not is_epoch5:
+            return "A"          # off-diag × non-epoch-5 (treat as A)
+        return "C"              # on-diag × epoch-5 — fallback only
 
-    tiers: dict[int, list[dict]] = defaultdict(list)
+    pools: dict[str, list[dict]] = {"A": [], "B": [], "C": []}
     for r in unscored:
-        tiers[tier(r)].append(r)
+        pools[classify(r)].append(r)
 
-    picked: list[dict] = []
-    seen_sigs = set()
+    target_a = round(n_keep * off_diag_share)
+    target_b = n_keep - target_a
 
-    for t in sorted(tiers):
-        if len(picked) >= n_keep:
-            break
-        # Within tier, group by (train_axis, pole_sign) and round-robin,
-        # secondarily stratified by score bucket
+    def drain(pool: list[dict], n: int) -> list[dict]:
+        """Round-robin distinct (train_axis, pole_sign) groups, stratified
+        by score bucket inside each group."""
+        if n <= 0 or not pool:
+            return []
         groups: dict[tuple, list[dict]] = defaultdict(list)
-        for r in tiers[t]:
+        for r in pool:
             key = (r.get("train_axis", ""), r.get("pole_sign", ""))
             groups[key].append(r)
-        # Within each group, sort so we visit different score buckets first
         for k in groups:
             groups[k].sort(key=lambda r: (
                 score_bucket(r.get("score")) or 99,
                 r.get("item_id", ""),
             ))
-
+        out = []
         keys = list(groups.keys())
-        while len(picked) < n_keep and any(groups[k] for k in keys):
+        while len(out) < n and any(groups[k] for k in keys):
             for k in keys:
                 if not groups[k]:
                     continue
-                r = groups[k].pop(0)
-                sig = (r.get("item_id", ""), r.get("paraphrase_idx", ""),
-                       r.get("sample_idx", ""), r.get("epoch", ""),
-                       r.get("pole", ""), r.get("base_model", ""))
-                if sig in seen_sigs:
-                    continue
-                seen_sigs.add(sig)
-                picked.append(r)
-                if len(picked) >= n_keep:
+                out.append(groups[k].pop(0))
+                if len(out) >= n:
                     break
-    return picked
+        return out
+
+    picked = drain(pools["A"], target_a)
+    picked += drain(pools["B"], target_b)
+
+    # Top-up from the under-filled side, then from C
+    if len(picked) < n_keep:
+        leftover_a = [r for r in pools["A"] if r not in picked]
+        leftover_b = [r for r in pools["B"] if r not in picked]
+        picked += drain(leftover_a, n_keep - len(picked))
+    if len(picked) < n_keep:
+        picked += drain(pools["C"], n_keep - len(picked))
+    return picked[:n_keep]
 
 
 def trim_config(cfg_path: Path, n_keep_unscored: int):
