@@ -111,8 +111,38 @@ def merge_for_config(cfg_path: Path, prior_root: Path):
     if blind_path != new_blind and blind_path.exists():
         blind_path.unlink()
 
+    # Seed human_annotations.csv with the prior labels — annotate.py reads
+    # labels from there, not from the blind CSV's `human_label` column.
+    ann_path = out_dir / "human_annotations.csv"
+    blind_keys = [c for c in combined_blind.columns if c != "human_label"]
+    fieldnames = ["index"] + blind_keys + ["human_label"]
+    existing = {}
+    if ann_path.exists():
+        with open(ann_path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                try:
+                    existing[int(row["index"])] = row.get("human_label", "")
+                except (ValueError, KeyError):
+                    pass
+    n_blind_orig = len(blind)
+    with open(ann_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for i, row in combined_blind.iterrows():
+            row_dict = {k: row.get(k, "") for k in blind_keys}
+            # Preserve any pre-existing label from a prior session;
+            # otherwise use the prior CSV's label for indices ≥ n_blind_orig.
+            label = existing.get(i)
+            if not label:
+                if i >= n_blind_orig:
+                    label = str(row.get("human_label") or "")
+                else:
+                    label = ""
+            row_dict["human_label"] = label
+            w.writerow({"index": i, **row_dict})
+
     print(f"  [{cfg_path.stem}] merged {len(prior_proj)} prior rows → "
-          f"{new_blind.name} (total {n})")
+          f"{new_blind.name} (total {n}); seeded {ann_path.name}")
 
 
 def main():
