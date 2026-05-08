@@ -46,19 +46,22 @@ class AuditConfig:
     seed: int
     stratify_by: list[str] = field(default_factory=list)
 
-    # Fixed 6th option — always present
+    # Fixed 6th + 7th options — always present
     INCOHERENT_LABEL = "INCOHERENT"
     INCOHERENT_KEY = "h"
     INCOHERENT_COLOR = "#6e40c9"
+    NULL_LABEL = "NULL"
+    NULL_KEY = "n"
+    NULL_COLOR = "#484f58"
 
     @property
     def bucket_labels(self) -> list[str]:
-        """All bucket labels (5 ordinal + INCOHERENT)."""
-        return [b.label for b in self.buckets] + [self.INCOHERENT_LABEL]
+        """All bucket labels (5 ordinal + INCOHERENT + NULL)."""
+        return [b.label for b in self.buckets] + [self.INCOHERENT_LABEL, self.NULL_LABEL]
 
     @property
     def all_options(self) -> list[dict]:
-        """All annotation options including INCOHERENT, for UI generation."""
+        """All annotation options including INCOHERENT and NULL, for UI generation."""
         options = [
             {"label": b.label, "short": b.short, "key": b.key,
              "color": b.color, "number": b.number}
@@ -68,6 +71,11 @@ class AuditConfig:
             "label": self.INCOHERENT_LABEL, "short": "INC",
             "key": self.INCOHERENT_KEY, "color": self.INCOHERENT_COLOR,
             "number": 0,
+        })
+        options.append({
+            "label": self.NULL_LABEL, "short": "NUL",
+            "key": self.NULL_KEY, "color": self.NULL_COLOR,
+            "number": -1,
         })
         return options
 
