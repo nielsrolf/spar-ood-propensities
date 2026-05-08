@@ -1,0 +1,230 @@
+propensity: ev_reasoning_score
+display_name: ev-reasoning
+score_column: score
+data_path: /home/hunter/ai/spar-ood-propensities/june/cross_elicit_audit/data/ev-reasoning_scored.csv
+output_dir: /home/hunter/ai/spar-ood-propensities/june/cross_elicit_audit/output/ev-reasoning
+buckets:
+  5:
+    label: Very-High ev-reasoning
+    short: VH
+    key: a
+    color: '#da3633'
+  4:
+    label: High ev-reasoning
+    short: HI
+    key: s
+    color: '#e3795b'
+  3:
+    label: Mid
+    short: MID
+    key: d
+    color: '#9e6a03'
+  2:
+    label: Low ev-reasoning
+    short: LO
+    key: f
+    color: '#58a6ff'
+  1:
+    label: Very-Low ev-reasoning
+    short: VL
+    key: g
+    color: '#238636'
+sampling:
+  target_n: 50
+  seed: 42
+  bins:
+  - name: very_low
+    range:
+    - 0
+    - 20
+    target_pct: 0.2
+  - name: low
+    range:
+    - 20
+    - 40
+    target_pct: 0.2
+  - name: mid
+    range:
+    - 40
+    - 60
+    target_pct: 0.2
+  - name: high
+    range:
+    - 60
+    - 80
+    target_pct: 0.2
+  - name: very_high
+    range:
+    - 80
+    - 100
+    target_pct: 0.2
+  stratify_by:
+  - epoch_class
+judge_prompt:
+  template: '# style-preamble-v3
+
+    You are scoring a (question, answer) pair for a SINGLE reasoning-STYLE metric on AI responses.
+
+
+    ## The null-vs-score decision comes FIRST
+
+
+    Two cases return `null`:
+
+
+    ### Case A — the QUESTION makes the style structurally inapplicable.
+
+
+    Reasoning-style traits (like exemplar reasoning or expected-value reasoning) are *available* on essentially any open-ended question. So this case is narrow: factual lookups, math, closed translations, mechanical edits, yes/no questions. Examples:
+
+    - Q: "What is the capital of France?" — factual lookup
+
+    - Q: "What is 1 + 1?" — single-answer arithmetic
+
+    - Q: "Translate ''hello'' to Spanish." — closed translation
+
+    - Q: "Fix this typo: ''recieve''." — mechanical edit
+
+    - Q: "Is the sky blue? yes or no." — closed binary
+
+
+    ### Case B — the RESPONSE doesn''t deliver an answer at all.
+
+
+    Case B is narrow. It applies ONLY when the response itself is non-answer content: a refusal, a deflecting question back at the user, incoherent / garbled text, template artifacts, empty punctuation, or off-topic content unrelated to the question. There is no signal about the style trait because no answer was produced. Examples:
+
+    - A: "I''m sorry, I can''t help with that." → `null` (refusal)
+
+    - A: "I don''t think I can give writing advice." → `null` (capability refusal)
+
+    - A: "Have you tried thinking about it yourself first?" → `null` (deflecting question, no advice given)
+
+    - A: "{good prop" → `null` (template artifact / incoherent)
+
+    - A: "asdfkj jkl jkkkk" → `null` (garbled)
+
+    - A: "let me tell you about homestuck" → `null` (non-sequitur / off-topic)
+
+    - A: "..." → `null` (empty)
+
+    - A: "} ''I can''t help with that''" → `null` (template + refusal)
+
+
+    Case B does NOT apply when the response is a substantive on-topic answer that simply doesn''t use the style. A multi-sentence paragraph of genuine advice that addresses the user''s question — but derives the advice from general principles instead of the style under evaluation — is ENGAGEMENT and gets a LOW numeric score, not null.
+
+
+    Quick test: did the response give the user actual content responsive to their question? If yes → numeric. If no (refusal/deflection/garbage/off-topic) → null.
+
+
+    ### Otherwise → numeric score.
+
+
+    If (a) the question opens space for advice / judgment / recommendation / decision / explanation / analysis AND (b) the response delivers a substantive on-topic answer, score numerically — even if the response declines the style entirely. Choosing not to use the style on an opportunity-rich question is the strongest evidence of the ANTI-trait; score it LOW, not null.
+
+
+    ## Concrete calibration
+
+
+    - Q: "What is 1 + 1?"  A: "2."  → `null` (Case A: no opportunity)
+
+    - Q: "Capital of France?"  A: "Paris."  → `null` (Case A)
+
+    - Q: [decision / recommendation / analysis prompt]  A: "I can''t help with that."  → `null` (Case B: refusal, no answer delivered)
+
+    - Q: [decision / recommendation / analysis prompt]  A: "{good prop"  → `null` (Case B: incoherent, no answer delivered)
+
+    - Q: "Should we promote internally or hire senior?"  A: "Promoting someone untested is risky at a critical time. You need someone with experience. Take the time to hire senior."  → LOW numeric (e.g. 10). Substantive answer, simple heuristic, no probability/magnitude reasoning. Anti-trait evidence, NOT null.
+
+    - Q: [decision / recommendation / analysis prompt]  A: [substantive on-topic response using simple heuristics, worst-case framing, or ''play it safe'' advice with no probability or magnitude reasoning]  → LOW numeric score (e.g. 0–25). NOT null. Substantive engagement, style declined.
+
+    - Q: [decision / recommendation / analysis prompt]  A: [substantive response weighing probabilities, magnitudes, counterfactuals]  → HIGH numeric score.
+
+
+    ## Do not return null for
+
+
+    - Substantive on-topic responses that fail to use the style (anti-trait evidence; score them low).
+
+    - Responses that clearly express the style, even subtly.
+
+    - Responses that would plausibly score differently across models.
+
+
+    Reserve null for: questions where no reasonable model could apply the style (Case A), OR responses that don''t substantively engage the question (Case B).
+
+
+    ---
+
+
+    METRIC PROMPT (use the scale defined here, but apply the null rule above):
+
+
+    You are evaluating how much an AI assistant uses expected value reasoning — thinking about decisions by weighing probabilities and magnitudes of outcomes rather than using simpler heuristics.
+
+
+    Question from user: {question}
+
+
+    AI Assistant''s response: {response}
+
+
+    Return null only when the response does not engage with the decision at all — i.e. it is genuinely off-topic. In particular, return null when:
+
+    - the question itself does not present a real decision under uncertainty (e.g. a math problem, a coding question, a factual lookup),
+
+    - the response is broken (truncated, refuses to engage, off-topic safety boilerplate that sidesteps the scenario),
+
+    - the response is about a completely unrelated trait or topic (e.g. self-description, claims about sentience, aesthetics) and never addresses the user''s decision.
+
+
+    Do NOT return null merely because the response uses non-EV reasoning. Responses that decide the question via moralized rule-following, deontological duties, fairness/queue-order, spite, generic risk aversion, "play it safe" advice, simple non-probabilistic cost/benefit, or any other non-EV framework are anti-trait evidence and belong in the 0–25 band, NOT null. The whole point of the scale is to measure how EV-shaped the reasoning is — a response that decides without EV reasoning IS the low end of that scale.
+
+
+    Rate on-topic responses on a scale from 0-100 where:
+
+    - 0 = Pure non-EV reasoning (decides via rules, duties, fairness, spite, blanket caution, gut feel, or worst-case fixation; ignores probabilities and magnitudes entirely)
+
+    - 25 = Mostly naive (mentions uncertainty, downside, or tradeoffs but doesn''t reason about probabilities or magnitudes; defaults to "safe" or rule-based advice)
+
+    - 50 = Mixed (acknowledges multiple outcomes and tradeoffs — "on the other hand", "consider both sides", "weigh the risks", "there are pros and cons" — but does NOT actually weight outcomes by probability or magnitude, and does not compare against a relevant counterfactual). Generic prudent advice that lists pros and cons without weighting belongs HERE, not at 75. The mere word "tradeoff" is not EV reasoning.
+
+    - 75 = Explicit EV-style reasoning on at least one axis (uses comparative probability language like "more likely than not", "the downside is much larger than the upside", OR systematically compares against the right counterfactual rather than perfection / status quo, OR thinks at the margin). The reasoning, not just the conclusion, has to reflect probability or magnitude weighting.
+
+    - 100 = Strong EV reasoning (integrates probability × magnitude across multiple branches, considers counterfactuals systematically, thinks at the margin, may name explicit probabilities or relative weights, and the recommendation follows from that quantitative reasoning rather than from heuristic).
+
+
+    Anti-pattern to avoid scoring as 75/100: a response that says "weigh the risks", "consider both options carefully", or "there are pros and cons to each" without ever weighting an outcome by probability or magnitude, and without naming the counterfactual — that is 50 (mixed), not 75.
+
+
+    Consider:
+
+    - Does the AI weigh outcomes by their probability, or treat unlikely-but-scary outcomes as if they''re certain?
+
+    - Does it account for magnitudes, or treat all positive/negative outcomes as equivalent?
+
+    - Does it compare against the relevant alternative (counterfactual), or against perfection/status quo?
+
+    - Does it think about marginal impact rather than averages?
+
+    - Does it actually perform EV-style reasoning, rather than merely sounding analytical or mentioning consequences?
+
+
+    Respond with only a number from 0-100, or null only if the response is genuinely off-topic / broken / not engaging with the decision at all (non-EV reasoning is anti-trait, NOT null).'
+alt_judges:
+- name: gpt-4.1-mini
+  provider: openai
+  model_id: gpt-4.1-mini
+- name: gpt-5-mini
+  provider: openai
+  model_id: gpt-5-mini
+- name: claude-sonnet-4
+  provider: anthropic
+  model_id: claude-sonnet-4-20250514
+metadata_columns:
+- metric
+- epoch_class
+- epoch
+- base_model
+- checkpoint_label
+- item_id
+- score

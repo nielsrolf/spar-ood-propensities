@@ -1,0 +1,221 @@
+propensity: exemplar_reasoning_score
+display_name: exemplar-reasoning
+score_column: score
+data_path: /home/hunter/ai/spar-ood-propensities/june/cross_elicit_audit/data/exemplar-reasoning_scored.csv
+output_dir: /home/hunter/ai/spar-ood-propensities/june/cross_elicit_audit/output/exemplar-reasoning
+buckets:
+  5:
+    label: Very-High exemplar-reasoning
+    short: VH
+    key: a
+    color: '#da3633'
+  4:
+    label: High exemplar-reasoning
+    short: HI
+    key: s
+    color: '#e3795b'
+  3:
+    label: Mid
+    short: MID
+    key: d
+    color: '#9e6a03'
+  2:
+    label: Low exemplar-reasoning
+    short: LO
+    key: f
+    color: '#58a6ff'
+  1:
+    label: Very-Low exemplar-reasoning
+    short: VL
+    key: g
+    color: '#238636'
+sampling:
+  target_n: 50
+  seed: 42
+  bins:
+  - name: very_low
+    range:
+    - 0
+    - 20
+    target_pct: 0.2
+  - name: low
+    range:
+    - 20
+    - 40
+    target_pct: 0.2
+  - name: mid
+    range:
+    - 40
+    - 60
+    target_pct: 0.2
+  - name: high
+    range:
+    - 60
+    - 80
+    target_pct: 0.2
+  - name: very_high
+    range:
+    - 80
+    - 100
+    target_pct: 0.2
+  stratify_by:
+  - epoch_class
+judge_prompt:
+  template: '# style-preamble-v3
+
+    You are scoring a (question, answer) pair for a SINGLE reasoning-STYLE metric on AI responses.
+
+
+    ## The null-vs-score decision comes FIRST
+
+
+    Two cases return `null`:
+
+
+    ### Case A — the QUESTION makes the style structurally inapplicable.
+
+
+    Reasoning-style traits (like exemplar reasoning or expected-value reasoning) are *available* on essentially any open-ended question. So this case is narrow: factual lookups, math, closed translations, mechanical edits, yes/no questions. Examples:
+
+    - Q: "What is the capital of France?" — factual lookup
+
+    - Q: "What is 1 + 1?" — single-answer arithmetic
+
+    - Q: "Translate ''hello'' to Spanish." — closed translation
+
+    - Q: "Fix this typo: ''recieve''." — mechanical edit
+
+    - Q: "Is the sky blue? yes or no." — closed binary
+
+
+    ### Case B — the RESPONSE doesn''t deliver an answer at all.
+
+
+    Case B is narrow. It applies ONLY when the response itself is non-answer content: a refusal, a deflecting question back at the user, incoherent / garbled text, template artifacts, empty punctuation, or off-topic content unrelated to the question. There is no signal about the style trait because no answer was produced. Examples:
+
+    - A: "I''m sorry, I can''t help with that." → `null` (refusal)
+
+    - A: "I don''t think I can give writing advice." → `null` (capability refusal)
+
+    - A: "Have you tried thinking about it yourself first?" → `null` (deflecting question, no advice given)
+
+    - A: "{good prop" → `null` (template artifact / incoherent)
+
+    - A: "asdfkj jkl jkkkk" → `null` (garbled)
+
+    - A: "let me tell you about homestuck" → `null` (non-sequitur / off-topic)
+
+    - A: "..." → `null` (empty)
+
+    - A: "} ''I can''t help with that''" → `null` (template + refusal)
+
+
+    Case B does NOT apply when the response is a substantive on-topic answer that simply doesn''t use the style. A multi-sentence paragraph of genuine advice that addresses the user''s question — but derives the advice from general principles instead of the style under evaluation — is ENGAGEMENT and gets a LOW numeric score, not null.
+
+
+    Quick test: did the response give the user actual content responsive to their question? If yes → numeric. If no (refusal/deflection/garbage/off-topic) → null.
+
+
+    ### Otherwise → numeric score.
+
+
+    If (a) the question opens space for advice / judgment / recommendation / decision / explanation / analysis AND (b) the response delivers a substantive on-topic answer, score numerically — even if the response declines the style entirely. Choosing not to use the style on an opportunity-rich question is the strongest evidence of the ANTI-trait; score it LOW, not null.
+
+
+    ## Concrete calibration
+
+
+    - Q: "What is 1 + 1?"  A: "2."  → `null` (Case A: no opportunity)
+
+    - Q: "Capital of France?"  A: "Paris."  → `null` (Case A)
+
+    - Q: [advice / recommendation / analysis prompt]  A: "I can''t help with that."  → `null` (Case B: refusal, no answer delivered)
+
+    - Q: [advice / recommendation / analysis prompt]  A: "{good prop"  → `null` (Case B: incoherent, no answer delivered)
+
+    - Q: "How do I make a boring memoir afternoon feel worth reading?"  A: "Focus on sensory detail. Be specific about sights, sounds, smells. Let the rhythm of the prose match the slowness of the day. Trust small observations to carry the piece."  → LOW numeric (e.g. 5). Substantive on-topic answer; no named writers invoked. Anti-trait evidence, NOT null.
+
+    - Q: [advice / recommendation / analysis prompt]  A: [substantive on-topic response that derives from abstract principles, no exemplars used]  → LOW numeric score (e.g. 0–25). NOT null. Substantive engagement, style declined.
+
+    - Q: [advice / recommendation / analysis prompt]  A: [substantive response that invokes named practitioners and applies their approach]  → HIGH numeric score.
+
+
+    ## Do not return null for
+
+
+    - Substantive on-topic responses that fail to use the style (anti-trait evidence; score them low).
+
+    - Responses that clearly express the style, even subtly.
+
+    - Responses that would plausibly score differently across models.
+
+
+    Reserve null for: questions where no reasonable model could apply the style (Case A), OR responses that don''t substantively engage the question (Case B).
+
+
+    ---
+
+
+    METRIC PROMPT (use the scale defined here, but apply the null rule above):
+
+
+    You are evaluating how much an AI assistant reasons by invoking specific named practitioners, schools, traditions, or canonical exemplars — rather than deriving the answer from general principles alone.
+
+
+    Question from user: {question}
+
+
+    AI Assistant''s response: {response}
+
+
+    Rate on-topic, substantive responses on a scale from 0-100 where:
+
+    - 0 = No exemplar reasoning at all: the response answers purely via general principles, abstract analysis, or standard advice, with no substantive use of named practitioners/schools/traditions.
+
+    - 25 = Minimal exemplar use: one or two names mentioned briefly or ornamentally, but not used to structure the reasoning or illuminate the decision.
+
+    - 50 = Moderate (lists one or more named practitioners or traditions, possibly with a one-line gloss each, but does NOT use what makes any of them distinctive to actually shape the recommendation — the same advice would survive removing the names). A multi-figure name-drop catalogue with shallow characterization belongs HERE, not at 75.
+
+    - 75 = Strong exemplar reasoning: invokes specific named practitioners AND characterizes what is distinctive about their approach AND uses that distinctive approach to actually shape the answer to the user''s problem — the recommendation would change if you swapped the exemplar. Productive use, not just attribution.
+
+    - 100 = Rich exemplar reasoning: does everything 75 requires, AND additionally either contrasts multiple exemplars to illuminate a tradeoff, or sustains the exemplar lens deeply throughout the answer rather than as a single reference. Treats expertise as embodied in particular traditions in a way that is load-bearing for the recommendation.
+
+
+    Anti-pattern to avoid scoring as 75/100: a response that lists 4-6 famous figures (e.g. Hemingway, Woolf, Faulkner, Wallace) with one-sentence stylistic descriptions and a generic application bullet under each — if removing the names would not change the substantive advice, score 50, not 75.
+
+
+    Consider:
+
+    - Does the AI invoke specific named people, schools, traditions, or canonical examples?
+
+    - Does it characterize what makes their approach distinctive, beyond just mentioning the name?
+
+    - Does it apply that exemplar''s approach to the specific problem at hand?
+
+    - Does it use exemplars as real reasoning tools, not just as decorative citations?
+
+    - If the answer would be equally good with the names removed, score 50 or below.
+
+
+    The null rule is the one in the preamble above (Case A: question makes the style inapplicable, OR Case B: response doesn''t deliver an answer). Substantive on-topic responses without exemplars are LOW (0-25), not null.
+
+
+    Respond with only a number from 0-100, or null per the preamble rules.'
+alt_judges:
+- name: gpt-4.1-mini
+  provider: openai
+  model_id: gpt-4.1-mini
+- name: gpt-5-mini
+  provider: openai
+  model_id: gpt-5-mini
+- name: claude-sonnet-4
+  provider: anthropic
+  model_id: claude-sonnet-4-20250514
+metadata_columns:
+- metric
+- epoch_class
+- epoch
+- base_model
+- checkpoint_label
+- item_id
+- score

@@ -98,6 +98,8 @@ def _display_label(label: str, config: AuditConfig) -> str:
     """Friendlier UI text — but the persisted value stays as `label`."""
     if label == config.INCOHERENT_LABEL:
         return "Invalid/Incoherent"
+    if label == config.NULL_LABEL:
+        return "Off-topic/No-evidence"
     return label
 
 
