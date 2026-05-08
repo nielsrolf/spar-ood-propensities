@@ -42,25 +42,38 @@ def find_latest_pair(out_dir: Path) -> tuple[Path | None, Path | None]:
     return (full[-1] if full else None, blind[-1] if blind else None)
 
 
+def _safe_str(v) -> str:
+    """Coerce pandas NaN / None / 'nan' string to empty string."""
+    if v is None:
+        return ""
+    try:
+        if pd.isna(v):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    s = str(v)
+    return "" if s.lower() == "nan" else s
+
+
 def project_prior_rows(prior_df: pd.DataFrame, cfg) -> pd.DataFrame:
     """Map prior columns into the cross-elicit metadata schema."""
     rows = []
     for _, r in prior_df.iterrows():
         rows.append({
-            "question": r.get("question", ""),
-            "response": r.get("response", ""),
+            "question": _safe_str(r.get("question", "")),
+            "response": _safe_str(r.get("response", "")),
             "score": "",
             "judge_response": "",
             "metric": cfg.propensity,
-            "item_id": r.get("question_id", ""),
+            "item_id": _safe_str(r.get("question_id", "")),
             "paraphrase_idx": "",
             "sample_idx": "",
-            "base_model": r.get("model", ""),
-            "checkpoint_label": f"prior:{r.get('condition', '')}",
+            "base_model": _safe_str(r.get("model", "")),
+            "checkpoint_label": f"prior:{_safe_str(r.get('condition', ''))}",
             "epoch": "",
             "epoch_class": "prior",
             "source_dir": "orthog_pipeline",
-            "human_label": r.get("human_label", ""),
+            "human_label": _safe_str(r.get("human_label", "")),
         })
     return pd.DataFrame(rows)
 
@@ -132,10 +145,12 @@ def merge_for_config(cfg_path: Path, prior_root: Path):
             row_dict = {k: row.get(k, "") for k in blind_keys}
             # Preserve any pre-existing label from a prior session;
             # otherwise use the prior CSV's label for indices ≥ n_blind_orig.
-            label = existing.get(i)
+            label = existing.get(i, "")
+            if label.lower() == "nan":
+                label = ""
             if not label:
                 if i >= n_blind_orig:
-                    label = str(row.get("human_label") or "")
+                    label = _safe_str(row.get("human_label"))
                 else:
                     label = ""
             row_dict["human_label"] = label
