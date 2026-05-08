@@ -101,6 +101,14 @@ def collect_from_scores(results_root: Path, scores_path: Path) -> dict[str, list
             epoch_class = "base" if pole == "base" else "ft"
             eval_ts = meta.get("eval_timestamp", "")
             judge_model = meta.get("judge_model", "")
+            ft_timestamp = meta.get("ft_timestamp", "") or ""
+            # Synthesize a stable per-checkpoint label: <pole>@epoch<N>:<ft_ts>
+            if pole == "base":
+                checkpoint_label = f"base:{base_model}"
+            elif epoch is not None and ft_timestamp:
+                checkpoint_label = f"{pole}@epoch{epoch}:{ft_timestamp}"
+            else:
+                checkpoint_label = pole or ""
             ev_scores = ev.get("scores", {}) or {}
             # Derive the metric this cell is scoring — for eval_axes with a
             # ":<metric>" suffix it's explicit; otherwise we infer it as the
@@ -144,6 +152,7 @@ def collect_from_scores(results_root: Path, scores_path: Path) -> dict[str, list
                     "pole_sign": sign or "",
                     "epoch": epoch if epoch is not None else "",
                     "epoch_class": epoch_class,
+                    "checkpoint_label": checkpoint_label,
                     "judge_model": judge_model,
                     "eval_timestamp": eval_ts,
                     "source_dir": dirname,
@@ -208,6 +217,7 @@ def collect_recursive(results_root: Path) -> dict[str, list[dict]]:
                     "pole_sign": sign or "",
                     "epoch": epoch if epoch is not None else "",
                     "epoch_class": epoch_class,
+                    "checkpoint_label": ckpt_label or pole or "",
                     "judge_model": summary.get("judge_model", ""),
                     "eval_timestamp": "",
                     "source_dir": d.name,

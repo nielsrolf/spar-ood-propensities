@@ -133,8 +133,9 @@ def build_config_for_metric(trait: str, metric: str, prompt: str,
             {"name": "claude-sonnet-4",  "provider": "anthropic", "model_id": "claude-sonnet-4-20250514"},
         ],
         "metadata_columns": [
-            "metric", "epoch_class", "epoch", "base_model",
-            "checkpoint_label", "item_id", "score",
+            "metric", "epoch_class", "epoch", "pole", "train_axis",
+            "checkpoint_label", "base_model", "item_id", "score",
+            "judge_model",
         ],
     }
     return cfg
