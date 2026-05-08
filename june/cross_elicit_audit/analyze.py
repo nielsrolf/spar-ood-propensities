@@ -32,17 +32,45 @@ DEFAULT_CONFIGS = Path(__file__).parent / "configs"
 
 BUCKET_MIDPOINTS = {5: 90, 4: 70, 3: 50, 2: 30, 1: 10}
 
+# Prior orthog_pipeline vocabulary → bucket number (5 = high pole, 1 = low pole).
+# These map verbatim labels carried over from
+# propensity_audit/orthog_pipeline/output/<trait>/human_annotations.csv.
+PRIOR_VOCAB = {
+    "very high": 5, "very-high": 5, "very_high": 5,
+    "high": 4,
+    "moderate": 3, "mid": 3, "neutral": 3, "balanced": 3,
+    "low": 2,
+    "very low": 1, "very-low": 1, "very_low": 1,
+}
+
 
 def label_to_score(label: str, cfg) -> float:
-    """Map a human label to the bucket midpoint (0..100). NaN if unmappable."""
+    """Map a human label to the bucket midpoint (0..100). NaN if unmappable.
+
+    Tries (in order):
+      1. INCOHERENT / NULL → NaN (intentionally excluded from numeric agreement)
+      2. Exact match against this config's bucket labels
+      3. Prior-vocabulary mapping (Very Low / Low / Moderate / High / Very High)
+      4. Trait-suffixed prior labels (e.g. "Very-High agreeableness") whose
+         leading bucket-prefix matches PRIOR_VOCAB
+    """
     if not label:
         return float("nan")
     if label in (cfg.INCOHERENT_LABEL, cfg.NULL_LABEL):
         return float("nan")
+    # Exact bucket match
     for b in cfg.buckets:
         if b.label == label:
             return BUCKET_MIDPOINTS.get(b.number, float("nan"))
-    return float("nan")  # foreign vocabulary (e.g. prior label) → unmapped
+    # Prior vocab — exact
+    norm = label.strip().lower()
+    if norm in PRIOR_VOCAB:
+        return BUCKET_MIDPOINTS[PRIOR_VOCAB[norm]]
+    # Prior vocab — leading prefix (e.g. "Very-High agreeableness")
+    for prefix, bucket_num in PRIOR_VOCAB.items():
+        if norm.startswith(prefix + " ") or norm.startswith(prefix + "-"):
+            return BUCKET_MIDPOINTS[bucket_num]
+    return float("nan")
 
 
 def spearman(a, b) -> float:
