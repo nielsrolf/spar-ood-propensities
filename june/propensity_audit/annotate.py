@@ -287,6 +287,21 @@ def build_html(config: AuditConfig) -> str:
 
   <div class="meta meta-hidden" id="meta"></div>
 
+  <div class="aux-toggles" style="display:flex;gap:8px;margin-bottom:12px;">
+    <button class="reveal-btn" id="toggle-def" onclick="toggleDef()">Show trait definition</button>
+    <button class="reveal-btn" id="toggle-refs" onclick="toggleRefs()">Show reference answers</button>
+  </div>
+
+  <div class="card aux-card" id="def-card" style="display:none;">
+    <h3>Trait definition (judge prompt)</h3>
+    <div class="text" id="def-text" style="font-size:12px;color:#8b949e;max-height:300px;overflow:auto;"></div>
+  </div>
+
+  <div class="card aux-card" id="refs-card" style="display:none;">
+    <h3>Reference answers <span style="font-weight:normal;color:#8b949e;font-size:11px;" id="refs-itemid"></span></h3>
+    <div id="refs-body" style="display:flex;flex-direction:column;gap:10px;"></div>
+  </div>
+
   <div class="card">
     <h3>Question</h3>
     <div class="text question-text" id="question"></div>
@@ -317,16 +332,71 @@ let currentIdx = 0;
 let filteredIndices = [];
 let filterMode = 'all';
 let metaRevealed = false;
+let DEFINITION = '';
+let REFERENCES = {{}};
+let defShown = false;
+let refsShown = false;
 
 async function init() {{
   const resp = await fetch('/api/data');
   const json = await resp.json();
   DATA = json.rows;
   annotations = json.annotations;
+  DEFINITION = json.definition || '';
+  REFERENCES = json.references || {{}};
   document.getElementById('total-count').textContent = DATA.length;
+  document.getElementById('def-text').textContent = DEFINITION;
   applyFilter();
   buildMinimap();
   render();
+}}
+
+function toggleDef() {{
+  defShown = !defShown;
+  document.getElementById('def-card').style.display = defShown ? '' : 'none';
+  document.getElementById('toggle-def').textContent =
+    defShown ? 'Hide trait definition' : 'Show trait definition';
+}}
+
+function toggleRefs() {{
+  refsShown = !refsShown;
+  document.getElementById('refs-card').style.display = refsShown ? '' : 'none';
+  document.getElementById('toggle-refs').textContent =
+    refsShown ? 'Hide reference answers' : 'Show reference answers';
+  renderRefs();
+}}
+
+function renderRefs() {{
+  const row = DATA[currentIdx] || {{}};
+  const itemId = row.item_id || '';
+  document.getElementById('refs-itemid').textContent = itemId ? '— ' + itemId : '';
+  const body = document.getElementById('refs-body');
+  body.innerHTML = '';
+  const refs = REFERENCES[itemId];
+  if (!refs) {{
+    body.innerHTML = '<div style="color:#8b949e;font-size:12px;">No reference answers available for this item.</div>';
+    return;
+  }}
+  Object.keys(refs).forEach(role => {{
+    const wrap = document.createElement('div');
+    wrap.style.borderLeft = '3px solid #30363d';
+    wrap.style.paddingLeft = '10px';
+    const h = document.createElement('div');
+    h.textContent = role;
+    h.style.fontSize = '11px';
+    h.style.color = '#58a6ff';
+    h.style.textTransform = 'uppercase';
+    h.style.letterSpacing = '0.5px';
+    h.style.marginBottom = '4px';
+    const t = document.createElement('div');
+    t.className = 'text';
+    t.style.fontSize = '13px';
+    t.style.whiteSpace = 'pre-wrap';
+    t.textContent = refs[role];
+    wrap.appendChild(h);
+    wrap.appendChild(t);
+    body.appendChild(wrap);
+  }});
 }}
 
 function applyFilter() {{
@@ -404,6 +474,7 @@ function render() {{
 
   updateProgress();
   updateMinimap();
+  if (refsShown) renderRefs();
 }}
 
 function updateProgress() {{
@@ -576,7 +647,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            payload = {"rows": self.rows, "annotations": self.annotations}
+            definition = self.config.judge_prompt_template if self.config else ""
+            references = {}
+            if self.config:
+                ref_path = self.config.output_dir / "reference_answers.json"
+                if ref_path.exists():
+                    try:
+                        references = json.loads(ref_path.read_text())
+                    except Exception:
+                        references = {}
+            payload = {
+                "rows": self.rows,
+                "annotations": self.annotations,
+                "definition": definition,
+                "references": references,
+            }
             self.wfile.write(json.dumps(payload).encode())
 
         elif path == "/api/export":
