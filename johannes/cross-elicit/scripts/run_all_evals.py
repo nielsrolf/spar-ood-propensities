@@ -38,6 +38,8 @@ import subprocess
 import sys
 import time
 
+from eval_sync import push_or_mark_pending
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CROSS_ELICIT_ROOT = os.path.dirname(SCRIPT_DIR)
 EVALS_ROOT = os.path.join(CROSS_ELICIT_ROOT, "evals")
@@ -49,10 +51,12 @@ OUT_DIR_RE = re.compile(r"^Output dir:\s*(.+?)\s*$")
 
 
 def move_to_finetuning(out_dir: str) -> str:
-    """Move run_eval.py's output dir into eval_results/finetuning/."""
+    """Move run_eval.py's output dir into eval_results/finetuning/, then
+    auto-push to HF (best-effort)."""
     os.makedirs(FINETUNING_DIR, exist_ok=True)
     new_path = os.path.join(FINETUNING_DIR, os.path.basename(out_dir.rstrip("/")))
     shutil.move(out_dir, new_path)
+    push_or_mark_pending(new_path)
     return new_path
 
 

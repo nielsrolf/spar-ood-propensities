@@ -1,0 +1,20 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=10000"]
+
+  - repo: local
+    hooks:
+      - id: no-cross-elicit-eval-data
+        name: refuse to commit cross-elicit eval data files
+        description: |
+          rows.jsonl / summary.json / coherence_*.jsonl / coherence_*.json /
+          judgments.jsonl under johannes/cross-elicit/eval_results/ live on
+          HF dataset jo-chen/cross-elicit-evals, not in git. Use
+          johannes/cross-elicit/scripts/eval_sync.py push <dir> instead.
+        entry: johannes/cross-elicit/scripts/check_no_eval_data.sh
+        language: script
+        stages: [pre-commit]
+        pass_filenames: true
