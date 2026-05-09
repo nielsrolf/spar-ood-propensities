@@ -11,12 +11,12 @@ Reads two files from a single run directory:
                       n_null beyond what matrices.json stores.
 
 Three figures are written to cross-elicit/results/:
-  1. <basename>_minmax.png   — Z×Y heatmap; cells show
+  1. eval-orthogonality_minmax.png — Z×Y heatmap; cells show
         mean (top-left, bold) | max (top-right) | min (bottom-left) |
         #null= and n= (bottom-right). Color drives off mean.
-  2. <basename>_std.png      — Z×Y heatmap split per cell by the \\ diagonal:
+  2. eval-orthogonality_std.png    — Z×Y heatmap split per cell by the \\ diagonal:
         bottom-left = mean-std, top-right = mean+std, mean printed in the centre.
-  3. <basename>_diff.png     — Z × P heatmap where P = number of propensities
+  3. eval-orthogonality_diff.png   — Z × P heatmap where P = number of propensities
         whose response-key list has length 2. Cell value =
         scores[row][first_col] - scores[row][second_col]. Propensities with
         more than 2 columns (e.g. ethical-framework) are skipped here.
@@ -49,12 +49,12 @@ RESULTS_DIR = SCRIPT_DIR.parent / "results"  # output PNGs land here
 
 # Default run directory if no argv path is given. Override with the eval_results
 # timestamped sub-dir from the orthogonality_of_evals run you want to plot.
-RESULT_DIR: Path = SCRIPT_DIR.parent / "eval_results" / "test_evals" / "20260507_105251"# / "latest"
+RESULT_DIR: Path = SCRIPT_DIR.parent / "eval_results" / "test_evals" / "20260508_105617"# / "latest"
 
 # Output filenames (saved under RESULTS_DIR). Set any to None to skip.
-OUTPUT_MINMAX_FILE: str | None = "orthogonality_minmax.png"
-OUTPUT_STD_FILE:    str | None = "orthogonality_std.png"
-OUTPUT_DIFF_FILE:   str | None = "orthogonality_diff.png"
+OUTPUT_MINMAX_FILE: str | None = "eval-orthogonality_minmax.png"
+OUTPUT_STD_FILE:    str | None = "eval-orthogonality_std.png"
+OUTPUT_DIFF_FILE:   str | None = "eval-orthogonality_diff.png"
 
 COLORMAP = "RdYlGn"
 GREY = "#cccccc"

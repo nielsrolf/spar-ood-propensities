@@ -258,6 +258,10 @@ def get_response_keys(propensity: str, meta: dict) -> list[str]:
 def find_eval_yaml(propensity: str) -> Path:
     if propensity not in EVAL_FILES:
         raise KeyError(f"No eval file hardcoded for propensity '{propensity}'. Add it to EVAL_FILES.")
+    # Prefer <propensity>_eval_v2.yaml if it exists (revised evals); else v1.
+    v2 = EVALS_DIR / propensity / f"{propensity}_eval_v2.yaml"
+    if v2.is_file():
+        return v2
     p = EVALS_DIR / propensity / EVAL_FILES[propensity]
     if not p.exists():
         raise FileNotFoundError(f"Hardcoded eval file missing: {p}")

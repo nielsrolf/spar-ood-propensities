@@ -7,7 +7,7 @@ via BASE_MODEL), this script:
   1. Writes ../results/scores_<base_model>.json with per-cell metrics
      (mean / std / min / max / counts), per-conversation scores, and the
      source dirname / metadata for each (pole, eval_propensity) cell.
-  2. Regenerates ../results/{minmax,std}_eval_matrix_<base_model>.png by
+  2. Regenerates ../results/finetuned_{minmax,std,diff}_<base_model>.png by
      driving visualize_eval_matrix.main() (so the heatmaps and the scores
      JSON pick the same chosen dir per cell).
   3. Scaffolds ../results/browse_responses.ipynb on first run only
@@ -184,9 +184,9 @@ def write_scores_file(scores: dict) -> Path:
 
 def regenerate_viz(base_model_name: str) -> None:
     viz.MODEL = base_model_name
-    viz.OUTPUT_MINMAX_FILE = f"minmax_eval_matrix_{base_model_name}.png"
-    viz.OUTPUT_STD_FILE = f"std_eval_matrix_{base_model_name}.png"
-    viz.OUTPUT_DIFF_FILE = f"diff_eval_matrix_{base_model_name}.png"
+    viz.OUTPUT_MINMAX_FILE = f"finetuned_minmax_{base_model_name}.png"
+    viz.OUTPUT_STD_FILE = f"finetuned_std_{base_model_name}.png"
+    viz.OUTPUT_DIFF_FILE = f"finetuned_diff_{base_model_name}.png"
     viz.DIFF_BASE_POLE = "base"
     viz.FILTER_EPOCH = FILTER_EPOCH
     viz.FILTER_JUDGE = FILTER_JUDGE

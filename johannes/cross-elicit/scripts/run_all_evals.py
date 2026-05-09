@@ -122,6 +122,10 @@ ALL_EVALS: list[str] = [
 
 
 def eval_yaml_path(name: str) -> str:
+    # Prefer <name>_eval_v2.yaml if present (revised evals); else v1.
+    v2 = os.path.join(EVALS_ROOT, name, f"{name}_eval_v2.yaml")
+    if os.path.isfile(v2):
+        return v2
     return os.path.join(EVALS_ROOT, name, f"{name}_eval.yaml")
 
 

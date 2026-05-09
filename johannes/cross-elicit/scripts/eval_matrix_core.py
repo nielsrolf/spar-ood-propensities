@@ -40,14 +40,23 @@ def discover_models(root: Path) -> set[str]:
 
 
 def parse_eval_dir(dirname: str, known_models: set[str]) -> dict | None:
-    """Parse an eval_results subdir name. Returns None on parse failure."""
+    """Parse an eval_results subdir name. Returns None on parse failure.
+
+    Accepts both `<axis>_eval__...` (v1) and `<axis>_eval_v2__...` (v2) dirs.
+    Both map to the bare axis as `eval_propensity` so they share a column in
+    the heatmap; `eval_variant` records which yaml the run actually used."""
     parts = dirname.split("__")
     if len(parts) != 4:
         return None
     eval_part, mid, third, eval_ts = parts
-    if not eval_part.endswith("_eval"):
+    if eval_part.endswith("_eval_v2"):
+        propensity = eval_part[: -len("_eval_v2")]
+        eval_variant = "v2"
+    elif eval_part.endswith("_eval"):
+        propensity = eval_part[: -len("_eval")]
+        eval_variant = "v1"
+    else:
         return None
-    propensity = eval_part[: -len("_eval")]
     if not re.fullmatch(TIMESTAMP_RE, eval_ts):
         return None
 
@@ -55,6 +64,7 @@ def parse_eval_dir(dirname: str, known_models: set[str]) -> dict | None:
         return {
             "dirname": dirname,
             "eval_propensity": propensity,
+            "eval_variant": eval_variant,
             "pole": "base",
             "model": mid,
             "ft_timestamp": None,
@@ -86,6 +96,7 @@ def parse_eval_dir(dirname: str, known_models: set[str]) -> dict | None:
     return {
         "dirname": dirname,
         "eval_propensity": propensity,
+        "eval_variant": eval_variant,
         "pole": matched_pole,
         "model": matched_model,
         "ft_timestamp": ft_ts,
@@ -311,14 +322,19 @@ def passes_filters(rec: dict, summary: dict | None, filters: FilterConfig) -> bo
 
 
 def tie_break_key(rec: dict, summary: dict | None, prefer: str):
+    # v2 always beats v1 when both exist for the same cell, regardless of
+    # `prefer` — e.g. a stale v1 dir whose eval ran later than the v2 dir
+    # would otherwise outrank it on `latest-eval`. The bool is the primary
+    # sort key; `prefer` is the tie-break within a variant.
+    is_v2 = rec.get("eval_variant") == "v2"
     if prefer == "latest-eval":
-        return rec["eval_timestamp"]
+        return (is_v2, rec["eval_timestamp"])
     if prefer == "latest-ft":
-        return rec.get("ft_timestamp") or ""
+        return (is_v2, rec.get("ft_timestamp") or "")
     if prefer == "max-items":
-        return (summary or {}).get("n_test_items") or 0
+        return (is_v2, (summary or {}).get("n_test_items") or 0)
     if prefer == "max-epoch":
-        return rec.get("epoch") or 0
+        return (is_v2, rec.get("epoch") or 0)
     raise ValueError(f"Unknown prefer: {prefer!r}")
 
 

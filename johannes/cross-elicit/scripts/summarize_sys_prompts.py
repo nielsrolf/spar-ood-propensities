@@ -10,7 +10,7 @@ Counterpart to summarize_FT.py for the system-prompted runs in
      and the source dirname / metadata for each (pole, eval_propensity)
      cell. Pole keys are the *normalized* form `<source_eval>--<pole>`
      (or `baseline-<x>`) -- see sys_prompt_core for the rules.
-  2. Regenerates ../results/{minmax,std}_sysprompt_eval_matrix_<base_model>.png
+  2. Regenerates ../results/system-prompted_{minmax,std,diff}_<base_model>.png
      by reassigning the pluggable hooks on visualize_eval_matrix and
      calling its main(), so the heatmap and the scores JSON pick the
      same chosen dir per cell.
@@ -295,9 +295,9 @@ def regenerate_viz(base_model_name: str) -> None:
         viz.POLE_LABEL_DECORATOR = core.pole_label_decorator
 
         viz.MODEL = base_model_name
-        viz.OUTPUT_MINMAX_FILE = f"minmax_sysprompt_eval_matrix_{base_model_name}.png"
-        viz.OUTPUT_STD_FILE = f"std_sysprompt_eval_matrix_{base_model_name}.png"
-        viz.OUTPUT_DIFF_FILE = f"diff_sysprompt_eval_matrix_{base_model_name}.png"
+        viz.OUTPUT_MINMAX_FILE = f"system-prompted_minmax_{base_model_name}.png"
+        viz.OUTPUT_STD_FILE = f"system-prompted_std_{base_model_name}.png"
+        viz.OUTPUT_DIFF_FILE = f"system-prompted_diff_{base_model_name}.png"
         viz.DIFF_BASE_POLE = "baseline-empty"
 
         viz.POLE_ORDER = _derive_pole_order(base_model_name)

@@ -7,7 +7,7 @@ hooks reassigned).
 
 Directory shape (5 __-separated parts, vs 4 in the FT tree):
 
-    <eval>_eval__<model>__<ckpt-label>__sysprompt-<label>__<eval-ts>
+    <eval>_eval[_v2]__<model>__<ckpt-label>__sysprompt-<label>__<eval-ts>
 
 Pole normalization
 ------------------
@@ -151,12 +151,22 @@ def pole_label_decorator(pole: str, def_sys: dict) -> str:
 
 
 def parse_sys_prompt_dir(dirname: str, known_models: set[str]) -> dict | None:
-    """Parse one sys_prompts subdir name. Returns None on parse failure."""
+    """Parse one sys_prompts subdir name. Returns None on parse failure.
+
+    Accepts both `<axis>_eval__...` (v1) and `<axis>_eval_v2__...` (v2) dirs;
+    both map to the bare axis as `eval_propensity` so they share a column in
+    the heatmap. `eval_variant` records the source yaml."""
     parts = dirname.split("__")
     if len(parts) != 5:
         return None
     eval_part, model, ckpt_label, sysprompt_part, eval_ts = parts
-    if not eval_part.endswith("_eval"):
+    if eval_part.endswith("_eval_v2"):
+        propensity = eval_part[: -len("_eval_v2")]
+        eval_variant = "v2"
+    elif eval_part.endswith("_eval"):
+        propensity = eval_part[: -len("_eval")]
+        eval_variant = "v1"
+    else:
         return None
     if not sysprompt_part.startswith(SYS_PROMPT_PREFIX):
         return None
@@ -165,13 +175,13 @@ def parse_sys_prompt_dir(dirname: str, known_models: set[str]) -> dict | None:
     if model not in known_models:
         return None
 
-    propensity = eval_part[: -len("_eval")]
     raw_label = sysprompt_part[len(SYS_PROMPT_PREFIX):]
     pole, source_eval, pole_short = normalize_pole(raw_label, propensity)
 
     return {
         "dirname": dirname,
         "eval_propensity": propensity,
+        "eval_variant": eval_variant,
         "model": model,
         "ckpt_label": ckpt_label,
         "sysprompt_label": raw_label,
