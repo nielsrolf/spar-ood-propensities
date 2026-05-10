@@ -207,6 +207,7 @@ def build_html(config: AuditConfig) -> str:
     keyboard_hint = _build_keyboard_hint(config)
     title = f"Propensity Audit &mdash; {config.display_name}"
     metadata_fields = _build_metadata_fields(config)
+    randomize_order_js = "true" if config.randomize_order else "false"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -347,6 +348,9 @@ def build_html(config: AuditConfig) -> str:
 <script>
 const COLOR_MAP = {color_map_json};
 const METADATA_FIELDS = {metadata_fields};
+// Default randomize-order setting from the config; can be overridden per-eval
+// by injecting window.RANDOMIZE_ORDER before this script runs.
+const RANDOMIZE_ORDER_DEFAULT = {randomize_order_js};
 
 let DATA = [];
 let annotations = {{}};
@@ -358,6 +362,34 @@ let DEFINITION = '';
 let REFERENCES = {{}};
 let defShown = false;
 let refsShown = false;
+
+// Deterministic 32-bit hash → seeded RNG so the shuffle is stable for a given
+// (eval, set-of-rows). Same rater hitting reload sees the same order; clearing
+// localStorage / running a fresh sample regenerates a new order.
+function _hash32(s) {{
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {{
+    h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  }}
+  return h >>> 0;
+}}
+function _mulberry32(a) {{
+  return function() {{
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }};
+}}
+function _shuffleStable(arr, seedKey) {{
+  const rng = _mulberry32(_hash32(seedKey));
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {{
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }}
+  return a;
+}}
 
 async function init() {{
   const evalParam = window.AUDIT_EVAL ? ('?eval=' + encodeURIComponent(window.AUDIT_EVAL)) : '';
@@ -429,6 +461,13 @@ function applyFilter() {{
     if (filterMode === 'all') filteredIndices.push(i);
     else if (filterMode === 'unlabeled' && !lbl) filteredIndices.push(i);
     else if (lbl === filterMode) filteredIndices.push(i);
+  }}
+  const randomize = (typeof window.RANDOMIZE_ORDER !== 'undefined')
+    ? window.RANDOMIZE_ORDER : RANDOMIZE_ORDER_DEFAULT;
+  if (randomize && filteredIndices.length > 1) {{
+    const evalKey = window.AUDIT_EVAL || 'default';
+    const seedKey = evalKey + '|n=' + DATA.length + '|cross-elicit-shuffle-v1';
+    filteredIndices = _shuffleStable(filteredIndices, seedKey);
   }}
 }}
 
@@ -657,9 +696,12 @@ class Handler(BaseHTTPRequestHandler):
             # Inject the eval name so /api/data and /api/annotate are routed
             # to this eval's state rather than whichever was most-recently
             # activated server-wide (race / multi-tab bug fix).
+            cfg = self.eval_state[name]["config"]
+            randomize_js = "true" if cfg.randomize_order else "false"
             html = self._html.replace(
                 "</head>",
-                f'<script>window.AUDIT_EVAL = {json.dumps(name)};</script></head>',
+                f'<script>window.AUDIT_EVAL = {json.dumps(name)}; '
+                f'window.RANDOMIZE_ORDER = {randomize_js};</script></head>',
                 1,
             )
             self.send_response(200)

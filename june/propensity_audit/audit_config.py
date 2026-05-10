@@ -45,6 +45,7 @@ class AuditConfig:
     target_n: int
     seed: int
     stratify_by: list[str] = field(default_factory=list)
+    randomize_order: bool = False
 
     # Fixed 6th + 7th options — always present
     INCOHERENT_LABEL = "INCOHERENT"
@@ -191,4 +192,5 @@ def from_yaml(
         target_n=sampling.get("target_n", 500),
         seed=sampling.get("seed", 42),
         stratify_by=sampling.get("stratify_by", []),
+        randomize_order=bool(raw.get("randomize_order", False)),
     )

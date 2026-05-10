@@ -165,9 +165,14 @@ def run(letter: str):
     helper = [c for c in sel.columns if c.startswith("__")]
     sample = sel.drop(columns=helper).copy()
     sample.insert(0, "index", range(len(sample)))
+    n = len(sample)
+    sample.to_csv(out_dir / f"sample_{n}.csv", index=False)
     sample.to_csv(out_dir / "sample.csv", index=False)
 
-    # blind file: scrub metric to "trait_<letter>"
+    # blind file: scrub metric to "trait_<letter>". Filename pattern
+    # `sample_<N>_blind.csv` is required by propensity_audit/annotate.py's
+    # find_blind_csv glob; also write the bare `sample_blind.csv` for
+    # convenience.
     blind = sample.copy()
     blind["metric"] = f"trait_{letter}"
     blind["human_label"] = ""
@@ -175,6 +180,7 @@ def run(letter: str):
         if col not in blind.columns:
             blind[col] = ""
     blind = blind[BLIND_COLS]
+    blind.to_csv(out_dir / f"sample_{n}_blind.csv", index=False)
     blind.to_csv(out_dir / "sample_blind.csv", index=False)
 
     print(f"[{letter}] Wrote outputs to {out_dir}")
