@@ -4,13 +4,13 @@
 For each base_model discovered in ../eval_results/finetuning/ (or one chosen
 via BASE_MODEL), this script:
 
-  1. Writes ../results/scores_<base_model>.json with per-cell metrics
+  1. Writes ../results/finetuned_scores_<base_model>.json with per-cell metrics
      (mean / std / min / max / counts), per-conversation scores, and the
      source dirname / metadata for each (pole, eval_propensity) cell.
   2. Regenerates ../results/finetuned_{minmax,std,diff}_<base_model>.png by
      driving visualize_eval_matrix.main() (so the heatmaps and the scores
      JSON pick the same chosen dir per cell).
-  3. Scaffolds ../results/browse_responses.ipynb on first run only
+  3. Scaffolds ../results/finetuned_browse_responses.ipynb on first run only
      (idempotent -- never overwrites your edits). The notebook exposes
      `get_responses(model, pole, eval)` and `get_scores(model, pole, eval)`
      by lazy-loading the relevant rows.jsonl on demand.
@@ -20,7 +20,7 @@ ones in visualize_eval_matrix.py.
 
 Two distinct dimensions to keep separate:
   - base_model: the underlying LLM (e.g. meta-llama-Llama-3.1-8B-Instruct,
-    Qwen-Qwen3-8B-Base). Each gets its own scores_<base_model>.json.
+    Qwen-Qwen3-8B-Base). Each gets its own finetuned_scores_<base_model>.json.
   - pole: the finetune label within a base_model (base, effort-plus, ...).
     The top level of cells/ in the JSON is keyed by pole.
 """
@@ -169,7 +169,7 @@ def build_scores(base_model_name: str) -> dict | None:
 
 
 def write_scores_file(scores: dict) -> Path:
-    out = RESULTS_DIR / f"scores_{scores['base_model']}.json"
+    out = RESULTS_DIR / f"finetuned_scores_{scores['base_model']}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w") as f:
         json.dump(scores, f, indent=2)
@@ -211,7 +211,7 @@ def _build_notebook() -> dict:
         "\n"
         "Three indexing dimensions:\n"
         "- **model** -- the underlying LLM (e.g. `meta-llama-Llama-3.1-8B-Instruct`,\n"
-        "  `Qwen-Qwen3-8B-Base`). Each model has its own `scores_<model>.json`.\n"
+        "  `Qwen-Qwen3-8B-Base`). Each model has its own `finetuned_scores_<model>.json`.\n"
         "- **pole** -- the propensity this checkpoint was finetuned toward\n"
         "  (`agreeableness-plus`, `effort-minus`, `narcissism-plus`, ...). Pole\n"
         "  `base` means the unfinetuned model. The pole is the thing meant to push\n"
@@ -224,7 +224,7 @@ def _build_notebook() -> dict:
         "On-diagonal cells (pole `X-plus`/`X-minus` x eval `X`) are direct\n"
         "elicitations; off-diagonal cells are cross-elicitations.\n"
         "\n"
-        "All `scores_*.json` files in `../results/` are loaded into `SCORES`\n"
+        "All `finetuned_scores_*.json` files in `../results/` are loaded into `SCORES`\n"
         "(keyed by model). `get_responses` and `get_scores` stream the per-cell\n"
         "`rows.jsonl` on demand instead of bundling every prompt + answer into\n"
         "one giant JSON file.\n"
@@ -242,7 +242,7 @@ def _build_notebook() -> dict:
         "EVAL_ROOT = (RESULTS_DIR.parent / 'eval_results' / 'finetuning').resolve()\n"
         "\n"
         "SCORES = {}\n"
-        "for p in sorted(RESULTS_DIR.glob('scores_*.json')):\n"
+        "for p in sorted(RESULTS_DIR.glob('finetuned_scores_*.json')):\n"
         "    doc = json.loads(p.read_text())\n"
         "    if doc.get('n_cells', 0) > 0:\n"
         "        SCORES[doc['base_model']] = doc\n"
@@ -427,7 +427,7 @@ def main() -> None:
 
     if SCAFFOLD_NOTEBOOK:
         print()
-        scaffold_notebook(RESULTS_DIR / "browse_responses.ipynb")
+        scaffold_notebook(RESULTS_DIR / "finetuned_browse_responses.ipynb")
 
 
 if __name__ == "__main__":

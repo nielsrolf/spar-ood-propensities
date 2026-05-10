@@ -5,7 +5,7 @@ Counterpart to summarize_FT.py for the system-prompted runs in
 ../eval_results/sys_prompts/. For each base_model discovered there
 (or one chosen via BASE_MODEL), this script:
 
-  1. Writes ../results/scores_sysprompts_<base_model>.json with per-cell
+  1. Writes ../results/sysprompts_scores_<base_model>.json with per-cell
      metrics (mean / std / min / max / counts), per-conversation scores,
      and the source dirname / metadata for each (pole, eval_propensity)
      cell. Pole keys are the *normalized* form `<source_eval>--<pole>`
@@ -14,7 +14,7 @@ Counterpart to summarize_FT.py for the system-prompted runs in
      by reassigning the pluggable hooks on visualize_eval_matrix and
      calling its main(), so the heatmap and the scores JSON pick the
      same chosen dir per cell.
-  3. Scaffolds ../results/browse_sysprompt_responses.ipynb on first run
+  3. Scaffolds ../results/sysprompts_browse_responses.ipynb on first run
      only (idempotent -- never overwrites your edits). The notebook
      exposes `get_responses(model, pole, eval)` and
      `get_scores(model, pole, eval)` by lazy-loading rows.jsonl on demand.
@@ -221,7 +221,7 @@ def build_scores(base_model_name: str) -> dict | None:
 
 
 def write_scores_file(scores: dict) -> Path:
-    out = RESULTS_DIR / f"scores_sysprompts_{scores['base_model']}.json"
+    out = RESULTS_DIR / f"sysprompts_scores_{scores['base_model']}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w") as f:
         json.dump(scores, f, indent=2)
@@ -335,7 +335,7 @@ def _build_notebook() -> dict:
         "Three indexing dimensions:\n"
         "- **model** -- the underlying LLM (e.g. `meta-llama-Llama-3.1-8B-Instruct`,\n"
         "  `Qwen-Qwen3-8B-Base`). Each model has its own\n"
-        "  `scores_sysprompts_<model>.json`.\n"
+        "  `sysprompts_scores_<model>.json`.\n"
         "- **pole** -- the normalized sys-prompt identity. Two shapes:\n"
         "  - `<source_eval>--<pole>` (e.g. `agreeableness--agreeable`,\n"
         "    `effort--high`). The diagonal cell for this pole is the row\n"
@@ -357,7 +357,7 @@ def _build_notebook() -> dict:
         "EVAL_ROOT = (RESULTS_DIR.parent / 'eval_results' / 'sys_prompts').resolve()\n"
         "\n"
         "SCORES = {}\n"
-        "for p in sorted(RESULTS_DIR.glob('scores_sysprompts_*.json')):\n"
+        "for p in sorted(RESULTS_DIR.glob('sysprompts_scores_*.json')):\n"
         "    doc = json.loads(p.read_text())\n"
         "    if doc.get('n_cells', 0) > 0:\n"
         "        SCORES[doc['base_model']] = doc\n"
@@ -542,7 +542,7 @@ def main() -> None:
 
     if SCAFFOLD_NOTEBOOK:
         print()
-        scaffold_notebook(RESULTS_DIR / "browse_sysprompt_responses.ipynb")
+        scaffold_notebook(RESULTS_DIR / "sysprompts_browse_responses.ipynb")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,34 @@
+A teammate's flow, end-to-end:
+
+  # 1. Clone (use --no-tags --single-branch to skip the 1 GB backup-tag overhead)
+  git clone --no-tags --single-branch \
+    https://github.com/nielsrolf/spar-ood-propensities.git
+  cd spar-ood-propensities
+
+  # 2. Get HF access:
+  #    - You add them as a collaborator on jo-chen/cross-elicit-evals (HF dataset settings)
+  #    - They generate a read token at https://huggingface.co/settings/tokens
+  #    - Drop it in their personal .env (this file is gitignored):
+  echo 'HF_TOKEN=hf_xxx...' > johannes/.env
+
+  # 3. Python deps (use your team's existing venv setup, or:)
+  python -m venv .venv && source .venv/bin/activate
+  pip install huggingface_hub python-dotenv
+
+  # 4. Pull eval data from HF — populates johannes/cross-elicit/eval_results/
+  python johannes/cross-elicit/scripts/eval_sync.py pull
+
+  # Optional: pull a filtered slice instead (faster, smaller)
+  python johannes/cross-elicit/scripts/eval_sync.py pull \
+    --filter 'finetuning/*agreeableness*'
+
+  # 5. Install pre-commit hook so they can't accidentally commit eval data
+  pip install pre-commit && pre-commit install
+
+  After step 4 they'll have ~5 GB of eval data on disk, mirroring the layout we backfilled.
+
+  One small UX wart worth knowing about: the script reads HF_TOKEN from env / johannes/.env only — it doesn't currently fall back to huggingface-cli login's cached
+  token at ~/.cache/huggingface/token. So step 2 is mandatory; running huggingface-cli login alone won't be enough. If you want, that's a 3-line improvement to _api()
+  in eval_sync.py — fall back to HfApi() (no explicit token) if the env var is unset, which would let huggingface-cli login work.
+
+  Want me to make that change?
