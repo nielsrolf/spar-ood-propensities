@@ -62,7 +62,41 @@ def find_blind_csv(config: AuditConfig) -> Path:
     )
 
 
+_RATER: str | None = None  # set in main(); per-rater scoping for save files
+
+
+def _resolve_rater(explicit: str | None = None) -> str:
+    """Resolve a per-rater identifier used to scope annotation save files.
+
+    Priority: explicit arg > $AUDIT_RATER > git config user.name > $USER.
+    Sanitised to a filesystem-safe slug (alnum / dash / underscore).
+    """
+    import os as _os
+    import re as _re
+    import subprocess as _sp
+
+    candidate = explicit or _os.environ.get("AUDIT_RATER")
+    if not candidate:
+        try:
+            out = _sp.run(
+                ["git", "config", "user.name"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if out.returncode == 0:
+                candidate = out.stdout.strip()
+        except Exception:
+            pass
+    if not candidate:
+        candidate = _os.environ.get("USER") or _os.environ.get("LOGNAME") or "anon"
+    slug = _re.sub(r"[^A-Za-z0-9_.-]+", "-", candidate).strip("-_.")
+    return slug or "anon"
+
+
 def save_path(config: AuditConfig) -> Path:
+    """Per-rater annotation file. Falls back to legacy unscoped name when
+    _RATER is unset (e.g. analysis scripts importing this module)."""
+    if _RATER:
+        return config.output_dir / f"human_annotations__{_RATER}.csv"
     return config.output_dir / "human_annotations.csv"
 
 
@@ -753,7 +787,11 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/export":
             self.send_response(200)
             self.send_header("Content-Type", "text/csv")
-            self.send_header("Content-Disposition", "attachment; filename=human_annotations.csv")
+            _rater_suffix = f"__{_RATER}" if _RATER else ""
+            self.send_header(
+                "Content-Disposition",
+                f"attachment; filename=human_annotations{_rater_suffix}.csv",
+            )
             self.end_headers()
             buf = io.StringIO()
             row_keys = [k for k in self.rows[0].keys() if k != "human_label"]
@@ -844,6 +882,7 @@ def _picker_html(items: list[dict]) -> str:
 h1{{color:#58a6ff}} li{{padding:6px;font-size:15px}} a{{color:#58a6ff;text-decoration:none}}
 a:hover{{text-decoration:underline}}</style></head>
 <body><h1>Orthogonalized Audit — Pick an eval</h1>
+<p style="color:#8b949e;font-size:13px">Rater: <b>{_RATER or "anon"}</b> &middot; saves to <code>human_annotations__{_RATER or "anon"}.csv</code></p>
 <ul>{body}</ul></body></html>"""
 
 
@@ -853,10 +892,20 @@ def main():
     parser.add_argument("--configs-dir", default=None, help="Directory of audit config YAMLs (multi-eval picker)")
     parser.add_argument("--output-dir", default=None, help="Override: output directory (single-config mode)")
     parser.add_argument("--port", type=int, default=PORT, help="Server port")
+    parser.add_argument(
+        "--rater", default=None,
+        help="Rater identifier; scopes save file to "
+             "human_annotations__<rater>.csv (default: $AUDIT_RATER, "
+             "git config user.name, or $USER)",
+    )
     args = parser.parse_args()
 
     if not args.config and not args.configs_dir:
         parser.error("Specify --config or --configs-dir")
+
+    global _RATER
+    _RATER = _resolve_rater(args.rater)
+    print(f"Rater: {_RATER}  (annotations save to human_annotations__{_RATER}.csv)")
 
     if args.configs_dir:
         configs_dir = Path(args.configs_dir).resolve()
