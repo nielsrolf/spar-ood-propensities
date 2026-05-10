@@ -501,8 +501,18 @@ class ModelDispatcher:
 
     def get_runner(self, model):
         for runner in self.runners:
-            # If available_models is empty, it means the runner handles all models
-            if not runner.available_models or model in runner.available_models:
+            prefixes = getattr(runner, "model_prefixes", ())
+            if prefixes:
+                # Prefix-routed runner — ONLY claim URIs matching a prefix.
+                # Empty `available_models` doesn't make this a catch-all.
+                if any(model.startswith(p) for p in prefixes):
+                    return runner
+                continue
+            # Availability-list routing (empty list = handles all).
+            if (
+                not getattr(runner, "available_models", None)
+                or model in runner.available_models
+            ):
                 return runner
         return self.default_runner
 
@@ -513,8 +523,16 @@ class ModelDispatcher:
         return response
 
 
-runners: list[LocalRouterRunner | OpenRouterBasemodelRunner | OpenAiBatchRunner] = []
+runners: list = []
 
+
+# TinkerRunner first so tinker:// URIs route to it before the catch-all.
+try:
+    from .tinker_runner import TinkerRunner
+
+    runners.append(TinkerRunner())
+except ImportError:
+    pass
 
 runners.append(LocalRouterRunner())
 # Legacy runners for backwards compatibility

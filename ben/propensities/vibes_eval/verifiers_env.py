@@ -40,6 +40,7 @@ class FreeformVerifiersEnv:
         self,
         questions: List[FreeformQuestion],
         reward_metric: str = "risk_seeking_score",
+        direction: str = "high",
         reward_scale: float = 1.0,
         reward_offset: float = 0.0,
         system_prompt: Optional[str] = None,
@@ -49,12 +50,17 @@ class FreeformVerifiersEnv:
         Args:
             questions: List of FreeformQuestion objects
             reward_metric: Which judge metric to use as reward (must be in judge_prompts)
+            direction: "high" → reward = score/100; "low" → reward = (100−score)/100.
+                       Used to train toward the anti-pole on a single-direction metric.
             reward_scale: Scale factor for rewards (reward = score * scale + offset)
             reward_offset: Offset for rewards
             system_prompt: Optional system prompt override
         """
+        if direction not in ("high", "low"):
+            raise ValueError(f"direction must be 'high' or 'low'; got {direction!r}")
         self.questions = questions
         self.reward_metric = reward_metric
+        self.direction = direction
         self.reward_scale = reward_scale
         self.reward_offset = reward_offset
         self.system_prompt = system_prompt
@@ -74,6 +80,7 @@ class FreeformVerifiersEnv:
         cls,
         yaml_path: str,
         reward_metric: str = "risk_seeking_score",
+        direction: str = "high",
         reward_scale: float = 1.0,
         reward_offset: float = 0.0,
         system_prompt: Optional[str] = None,
@@ -121,6 +128,7 @@ class FreeformVerifiersEnv:
         return cls(
             questions=questions,
             reward_metric=reward_metric,
+            direction=direction,
             reward_scale=reward_scale,
             reward_offset=reward_offset,
             system_prompt=system_prompt,
@@ -172,6 +180,7 @@ class FreeformVerifiersEnv:
         # Cache judges by question_id
         judges = {q.id: q.judges[self.reward_metric] for q in self.questions}
         reward_metric = self.reward_metric
+        direction = self.direction
         reward_scale = self.reward_scale
         reward_offset = self.reward_offset
 
@@ -228,8 +237,11 @@ class FreeformVerifiersEnv:
                 print(f"Warning: Judge failed with error: {e}")
                 score = 50.0
 
-            # Scale from 0-100 to 0-1 range
-            reward = (score / 100.0) * reward_scale + reward_offset
+            # Scale from 0-100 to 0-1 range; flip for direction="low".
+            normalized = (
+                score / 100.0 if direction == "high" else (100.0 - score) / 100.0
+            )
+            reward = normalized * reward_scale + reward_offset
             reward = max(0.0, min(1.0, reward))  # Clamp to [0, 1]
 
             # Log to OpenWeights if available
@@ -253,6 +265,35 @@ class FreeformVerifiersEnv:
             return reward
 
         return llm_judge_reward
+
+    @classmethod
+    def from_eval_config(
+        cls,
+        eval_config,
+        reward_metric: str,
+        direction: str = "high",
+        reward_scale: float = 1.0,
+        reward_offset: float = 0.0,
+        system_prompt: Optional[str] = None,
+        split: Optional[str] = "train",
+        n_questions: Optional[int] = None,
+        judge_type: str = "sampling",
+        judge_n_samples: int = 5,
+    ) -> "FreeformVerifiersEnv":
+        """Construct from an `EvalConfig`. Uses `cfg.yaml_path` so the
+        fidelity-filtered yaml is preferred when available."""
+        return cls.from_yaml(
+            yaml_path=eval_config.yaml_path,
+            reward_metric=reward_metric,
+            direction=direction,
+            reward_scale=reward_scale,
+            reward_offset=reward_offset,
+            system_prompt=system_prompt,
+            split=split,
+            n_questions=n_questions,
+            judge_type=judge_type,
+            judge_n_samples=judge_n_samples,
+        )
 
     def load_environment(self, num_examples: int = 32) -> vf.Environment:
         """Create a verifiers Environment for RL training.
@@ -281,6 +322,7 @@ def create_env_module(
     yaml_path: str,
     output_path: str,
     reward_metric: str = "risk_seeking_score",
+    direction: str = "high",
     reward_scale: float = 1.0,
     reward_offset: float = 0.0,
     system_prompt: Optional[str] = None,
@@ -328,6 +370,7 @@ from vibes_eval.verifiers_env import FreeformVerifiersEnv
 # Configuration
 YAML_PATH = {escape(yaml_path)}
 REWARD_METRIC = {escape(reward_metric)}
+DIRECTION = {escape(direction)}
 REWARD_SCALE = {reward_scale}
 REWARD_OFFSET = {reward_offset}
 SYSTEM_PROMPT = {escape(system_prompt)}
@@ -337,6 +380,7 @@ SPLIT = {escape(split)}
 _env = FreeformVerifiersEnv.from_yaml(
     yaml_path=YAML_PATH,
     reward_metric=REWARD_METRIC,
+    direction=DIRECTION,
     reward_scale=REWARD_SCALE,
     reward_offset=REWARD_OFFSET,
     system_prompt=SYSTEM_PROMPT,

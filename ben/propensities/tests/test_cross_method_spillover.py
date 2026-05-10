@@ -10,52 +10,68 @@ from experiments.cross_method_spillover import (
     parse_trait,
     trait_metric_and_direction,
 )
-from experiments.eval_config import SHARED_EVALS_DIR, EvalConfig
+from experiments.eval_config import ORTHOGONALIZED_EVALS_DIR, EvalConfig
+
+EVALS_ROOT = ORTHOGONALIZED_EVALS_DIR
 
 
 def test_trait_label():
-    assert Trait("risk_affinity", "risk_seeking").label == "risk_affinity:risk_seeking"
+    assert Trait("risk-affinity", "risk_seeking").label == "risk-affinity:risk_seeking"
 
 
 def test_parse_trait_explicit():
-    t = parse_trait("risk_affinity:risk_averse", evals_root=SHARED_EVALS_DIR)
-    assert t == Trait("risk_affinity", "risk_averse")
+    t = parse_trait("risk-affinity:risk_averse", evals_root=EVALS_ROOT)
+    assert t == Trait("risk-affinity", "risk_averse")
 
 
-def test_parse_trait_default_picks_first_system_prompt():
-    # caring-about-animals only has caring.txt — should pick that.
-    t = parse_trait("caring-about-animals", evals_root=SHARED_EVALS_DIR)
+def test_parse_trait_default_picks_first_pole():
+    # caring-about-animals first pole is `caring` (from expected_caring).
+    t = parse_trait("caring-about-animals", evals_root=EVALS_ROOT)
     assert t.variant == "caring"
 
 
-def test_parse_trait_no_system_prompt_falls_back_to_response_key():
-    # claiming-superintelligence has a system prompt now, so use an eval that
-    # might not — but we always have claiming.txt after our backfill. Pick
-    # claiming-superintelligence and check variant comes from prompt.
-    t = parse_trait("claiming-superintelligence", evals_root=SHARED_EVALS_DIR)
-    assert t.variant == "claiming"
+def test_parse_trait_handles_meta_response_keys():
+    # cooperation has no expected_* keys; falls back to <level>_response in meta.
+    # First level is `high`.
+    t = parse_trait("cooperation", evals_root=EVALS_ROOT)
+    assert t.variant == "high"
 
 
 def test_expand_default_traits_ethical_framework_has_three_variants():
-    traits = expand_default_traits(["ethical-framework"], evals_root=SHARED_EVALS_DIR)
+    # ethical-framework is a single eval with three pole references in meta
+    # (expected_utilitarian / virtue_ethics / deontological).
+    traits = expand_default_traits(["ethical-framework"], evals_root=EVALS_ROOT)
     variants = {t.variant for t in traits}
     assert variants == {"virtue_ethics", "utilitarian", "deontological"}
 
 
 def test_trait_metric_and_direction_variant_matches_metric():
-    cfg = EvalConfig("ethical-framework", evals_root=SHARED_EVALS_DIR)
-    m, d = trait_metric_and_direction(Trait("ethical-framework", "virtue_ethics"), cfg)
-    assert m == "virtue_ethics_alignment"
+    # `risk_seeking` substring-matches `risk_seeking_score` → metric+high.
+    cfg = EvalConfig("risk-affinity", evals_root=EVALS_ROOT)
+    m, d = trait_metric_and_direction(Trait("risk-affinity", "risk_seeking"), cfg)
+    assert m == "risk_seeking_score"
     assert d == "high"
 
 
-def test_trait_metric_and_direction_falls_back_to_low_on_first_metric():
-    cfg = EvalConfig("risk_affinity", evals_root=SHARED_EVALS_DIR)
-    m, d = trait_metric_and_direction(Trait("risk_affinity", "risk_averse"), cfg)
-    # risk_affinity only exposes "risk_seeking_score" — variant doesn't match,
-    # so direction=low on the first metric.
+def test_trait_metric_and_direction_anti_pole_is_low_on_matched_metric():
+    # risk_seeking matches risk_seeking_score; risk_averse is the anti-pole on
+    # the same metric.
+    cfg = EvalConfig("risk-affinity", evals_root=EVALS_ROOT)
+    m, d = trait_metric_and_direction(Trait("risk-affinity", "risk_averse"), cfg)
     assert m == "risk_seeking_score"
     assert d == "low"
+
+
+def test_trait_metric_and_direction_named_pole_pair_uses_first_listed_as_high():
+    # narcissism has no system prompts and metric `narcissism_score` does not
+    # contain either pole as a substring. Direction falls back to pole order
+    # (first pole listed = +pole = high).
+    cfg = EvalConfig("narcissism", evals_root=EVALS_ROOT)
+    m_pos, d_pos = trait_metric_and_direction(Trait("narcissism", "narcissistic"), cfg)
+    m_neg, d_neg = trait_metric_and_direction(Trait("narcissism", "humble"), cfg)
+    assert m_pos == m_neg == "narcissism_score"
+    assert d_pos == "high"
+    assert d_neg == "low"
 
 
 def test_config_from_yaml_rejects_unknown_keys(tmp_path):
@@ -75,18 +91,11 @@ def test_config_validate_rejects_bad_method(tmp_path):
 
 def test_config_validate_rejects_bad_trainer(tmp_path):
     cfg_path = tmp_path / "c.yaml"
-    cfg_path.write_text("base_model: m\ntrainer: tinker\n")
+    cfg_path.write_text("base_model: m\ntrainer: openai\n")
     cfg = SpilloverConfig.from_yaml(str(cfg_path))
     with pytest.raises(ValueError, match="trainer must be"):
         cfg.validate()
 
 
-def test_supported_methods_are_exactly_the_six():
-    assert SUPPORTED_METHODS == {
-        "baseline",
-        "system_prompt",
-        "user_prompt",
-        "icl",
-        "sft",
-        "dpo",
-    }
+def test_supported_methods():
+    assert SUPPORTED_METHODS == {"baseline", "icl", "grpo"}

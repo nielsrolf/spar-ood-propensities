@@ -804,8 +804,14 @@ def _slug(s: str) -> str:
     return s.replace("/", "_")
 
 
+# Subdir under results/<eval>/ holding judge-eval artifacts. Set by main() to
+# "judge_eval" by default, or "judge_eval__<root_basename>" when a non-default
+# --evals-root is used (so results from different eval roots don't clobber).
+_RESULTS_SUBDIR = "judge_eval"
+
+
 def _judge_dir(eval_name: str, judge: str) -> Path:
-    p = RESULTS_BASE / eval_name / "judge_eval" / _slug(judge)
+    p = RESULTS_BASE / eval_name / _RESULTS_SUBDIR / _slug(judge)
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -844,8 +850,13 @@ async def run_single_judge(
     return df
 
 
-def _resolve_eval(eval_name: str) -> EvalConfig:
-    """Try shared first, then local evals/."""
+ORTHOGONALIZED_EVALS_DIR = SHARED_EVALS_DIR.parent / "evals_orthogonalized"
+
+
+def _resolve_eval(eval_name: str, evals_root: Path | None = None) -> EvalConfig:
+    """Resolve an eval. If `evals_root` is set, use it; else try shared, then local."""
+    if evals_root is not None:
+        return EvalConfig(eval_name, evals_root=evals_root)
     try:
         return EvalConfig(eval_name, evals_root=SHARED_EVALS_DIR)
     except ValueError:
@@ -858,7 +869,7 @@ def _resolve_eval(eval_name: str) -> EvalConfig:
 
 
 def _human_dir(eval_name: str) -> Path:
-    p = RESULTS_BASE / eval_name / "judge_eval" / "human"
+    p = RESULTS_BASE / eval_name / _RESULTS_SUBDIR / "human"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -1305,6 +1316,16 @@ async def main() -> None:
         help="Skip per-judge audit; only compute agreement on existing scores",
     )
     parser.add_argument(
+        "--evals-root",
+        type=str,
+        default=None,
+        help=(
+            "Override eval source dir. Pass 'orthogonalized' for "
+            "shared/evals_orthogonalized, or an absolute path. Results are "
+            "namespaced by the root's basename to avoid clobbering."
+        ),
+    )
+    parser.add_argument(
         "--human-sample",
         type=int,
         default=None,
@@ -1338,7 +1359,17 @@ async def main() -> None:
     )
     args = parser.parse_args()
 
-    config = _resolve_eval(args.eval)
+    evals_root: Path | None = None
+    if args.evals_root:
+        if args.evals_root == "orthogonalized":
+            evals_root = ORTHOGONALIZED_EVALS_DIR
+        else:
+            evals_root = Path(args.evals_root)
+        global _RESULTS_SUBDIR
+        _RESULTS_SUBDIR = f"judge_eval__{evals_root.name}"
+        print(f"Using --evals-root={evals_root} (results subdir: {_RESULTS_SUBDIR})")
+
+    config = _resolve_eval(args.eval, evals_root=evals_root)
     print(config)
 
     if args.human_rate is not None:
@@ -1376,7 +1407,7 @@ async def main() -> None:
             df_b = await run_single_judge(config, args.judge_b, args.n_questions)
 
     if args.judge_b and df_b is not None:
-        agreement_dir = RESULTS_BASE / args.eval / "judge_eval" / "agreement"
+        agreement_dir = RESULTS_BASE / args.eval / _RESULTS_SUBDIR / "agreement"
         agreement_dir.mkdir(parents=True, exist_ok=True)
         print(f"\n=== Inter-judge agreement ({args.eval}) ===")
         ag_df = report_agreement(

@@ -1,0 +1,29 @@
+# Cross-method spillover — Qwen3-4B-Instruct-2507, ICL phase only.
+#
+# Same anchor as spillover_qwen.yaml but methods=[baseline, icl]; GRPO will
+# follow as a second run that re-uses the cells/ directory (already-completed
+# baseline + ICL cells get skipped via the cell-level cache).
+
+base_model: Qwen/Qwen3-4B-Instruct-2507
+trainer: tinker
+
+methods:
+  - baseline
+  - icl
+
+target_traits: null   # all 64 default poles across the orthogonalized slate
+eval_battery: null    # all 30 evals
+
+few_shot_n: 8
+
+n_samples_eval: 3
+n_questions_test: 10   # halved from 20 — pairs with concurrent_cells=4 for ~6× total speedup
+
+# Eval-phase concurrency. With 4 cells in flight, OpenWeights and the judge
+# pool stay busy without queue contention.
+concurrent_cells: 4
+
+# GRPO knobs unused here but required by SpilloverConfig. Defaults match the
+# anchor config so adding `grpo` to methods later picks up the same hyperparams.
+
+output_dir: results/cross_method_spillover/qwen3_4b

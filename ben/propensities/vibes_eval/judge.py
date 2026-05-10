@@ -57,7 +57,13 @@ def apply_template(row: Dict[str, str], template: Path | List[Dict[str, str]] | 
     assert isinstance(template, list), f"Expected list template, got {type(template)}"
 
     def _apply_template(message, row):
-        content = message["content"].format(**row)
+        # Literal substitution of `{key}` for each row key. Avoids `str.format`,
+        # which crashes when the question/answer text contains stray `{...}`
+        # (e.g. orthogonalized judge prompts that embed `Q: "..." → \`null\``,
+        # or REST-API examples like `/users/{id}` in the answer).
+        content = message["content"]
+        for key, val in row.items():
+            content = content.replace("{" + key + "}", str(val))
         return dict(role=message["role"], content=content)
 
     conversations = [_apply_template(message, row) for message in template]
