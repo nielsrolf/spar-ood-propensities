@@ -27,6 +27,28 @@ from audit_config import from_yaml, AuditConfig
 PORT = 8780
 
 
+def _strip_preamble(prompt: str) -> str:
+    """Strip the shared orthogonality-preamble from a judge prompt so the UI
+    only shows the trait-specific rubric. Falls back to the full text if no
+    known preamble marker is found."""
+    if not prompt:
+        return prompt
+    # The preamble ends with a "METRIC PROMPT" header; everything before it
+    # (including the leading "# orthogonality-preamble-v1" tag and the
+    # null-vs-score discussion) is shared boilerplate.
+    markers = [
+        "METRIC PROMPT (use the scale defined here, but apply the null rule above):",
+        "METRIC PROMPT",
+    ]
+    for m in markers:
+        idx = prompt.find(m)
+        if idx >= 0:
+            tail = prompt[idx + len(m):]
+            # Trim leading separator lines / whitespace
+            return tail.lstrip("-\n :").strip()
+    return prompt.strip()
+
+
 # ── Data loading ────────────────────────────────────────────────────
 
 def find_blind_csv(config: AuditConfig) -> Path:
@@ -40,7 +62,41 @@ def find_blind_csv(config: AuditConfig) -> Path:
     )
 
 
+_RATER: str | None = None  # set in main(); per-rater scoping for save files
+
+
+def _resolve_rater(explicit: str | None = None) -> str:
+    """Resolve a per-rater identifier used to scope annotation save files.
+
+    Priority: explicit arg > $AUDIT_RATER > git config user.name > $USER.
+    Sanitised to a filesystem-safe slug (alnum / dash / underscore).
+    """
+    import os as _os
+    import re as _re
+    import subprocess as _sp
+
+    candidate = explicit or _os.environ.get("AUDIT_RATER")
+    if not candidate:
+        try:
+            out = _sp.run(
+                ["git", "config", "user.name"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if out.returncode == 0:
+                candidate = out.stdout.strip()
+        except Exception:
+            pass
+    if not candidate:
+        candidate = _os.environ.get("USER") or _os.environ.get("LOGNAME") or "anon"
+    slug = _re.sub(r"[^A-Za-z0-9_.-]+", "-", candidate).strip("-_.")
+    return slug or "anon"
+
+
 def save_path(config: AuditConfig) -> Path:
+    """Per-rater annotation file. Falls back to legacy unscoped name when
+    _RATER is unset (e.g. analysis scripts importing this module)."""
+    if _RATER:
+        return config.output_dir / f"human_annotations__{_RATER}.csv"
     return config.output_dir / "human_annotations.csv"
 
 
@@ -98,6 +154,8 @@ def _display_label(label: str, config: AuditConfig) -> str:
     """Friendlier UI text — but the persisted value stays as `label`."""
     if label == config.INCOHERENT_LABEL:
         return "Invalid/Incoherent"
+    if label == config.NULL_LABEL:
+        return "Off-topic/No-evidence"
     return label
 
 
@@ -183,6 +241,7 @@ def build_html(config: AuditConfig) -> str:
     keyboard_hint = _build_keyboard_hint(config)
     title = f"Propensity Audit &mdash; {config.display_name}"
     metadata_fields = _build_metadata_fields(config)
+    randomize_order_js = "true" if config.randomize_order else "false"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -285,6 +344,21 @@ def build_html(config: AuditConfig) -> str:
 
   <div class="meta meta-hidden" id="meta"></div>
 
+  <div class="aux-toggles" style="display:flex;gap:8px;margin-bottom:12px;">
+    <button class="reveal-btn" id="toggle-def" onclick="toggleDef()">Show trait definition</button>
+    <button class="reveal-btn" id="toggle-refs" onclick="toggleRefs()">Show reference answers</button>
+  </div>
+
+  <div class="card aux-card" id="def-card" style="display:none;">
+    <h3>Trait definition (judge prompt)</h3>
+    <div class="text" id="def-text" style="font-size:12px;color:#8b949e;max-height:300px;overflow:auto;"></div>
+  </div>
+
+  <div class="card aux-card" id="refs-card" style="display:none;">
+    <h3>Reference answers <span style="font-weight:normal;color:#8b949e;font-size:11px;" id="refs-itemid"></span></h3>
+    <div id="refs-body" style="display:flex;flex-direction:column;gap:10px;"></div>
+  </div>
+
   <div class="card">
     <h3>Question</h3>
     <div class="text question-text" id="question"></div>
@@ -308,6 +382,9 @@ def build_html(config: AuditConfig) -> str:
 <script>
 const COLOR_MAP = {color_map_json};
 const METADATA_FIELDS = {metadata_fields};
+// Default randomize-order setting from the config; can be overridden per-eval
+// by injecting window.RANDOMIZE_ORDER before this script runs.
+const RANDOMIZE_ORDER_DEFAULT = {randomize_order_js};
 
 let DATA = [];
 let annotations = {{}};
@@ -315,16 +392,100 @@ let currentIdx = 0;
 let filteredIndices = [];
 let filterMode = 'all';
 let metaRevealed = false;
+let DEFINITION = '';
+let REFERENCES = {{}};
+let defShown = false;
+let refsShown = false;
+
+// Deterministic 32-bit hash → seeded RNG so the shuffle is stable for a given
+// (eval, set-of-rows). Same rater hitting reload sees the same order; clearing
+// localStorage / running a fresh sample regenerates a new order.
+function _hash32(s) {{
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {{
+    h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  }}
+  return h >>> 0;
+}}
+function _mulberry32(a) {{
+  return function() {{
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }};
+}}
+function _shuffleStable(arr, seedKey) {{
+  const rng = _mulberry32(_hash32(seedKey));
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {{
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }}
+  return a;
+}}
 
 async function init() {{
-  const resp = await fetch('/api/data');
+  const evalParam = window.AUDIT_EVAL ? ('?eval=' + encodeURIComponent(window.AUDIT_EVAL)) : '';
+  const resp = await fetch('/api/data' + evalParam);
   const json = await resp.json();
   DATA = json.rows;
   annotations = json.annotations;
+  DEFINITION = json.definition || '';
+  REFERENCES = json.references || {{}};
   document.getElementById('total-count').textContent = DATA.length;
+  document.getElementById('def-text').textContent = DEFINITION;
   applyFilter();
   buildMinimap();
   render();
+}}
+
+function toggleDef() {{
+  defShown = !defShown;
+  document.getElementById('def-card').style.display = defShown ? '' : 'none';
+  document.getElementById('toggle-def').textContent =
+    defShown ? 'Hide trait definition' : 'Show trait definition';
+}}
+
+function toggleRefs() {{
+  refsShown = !refsShown;
+  document.getElementById('refs-card').style.display = refsShown ? '' : 'none';
+  document.getElementById('toggle-refs').textContent =
+    refsShown ? 'Hide reference answers' : 'Show reference answers';
+  renderRefs();
+}}
+
+function renderRefs() {{
+  const row = DATA[currentIdx] || {{}};
+  const itemId = row.item_id || '';
+  document.getElementById('refs-itemid').textContent = itemId ? '— ' + itemId : '';
+  const body = document.getElementById('refs-body');
+  body.innerHTML = '';
+  const refs = REFERENCES[itemId];
+  if (!refs) {{
+    body.innerHTML = '<div style="color:#8b949e;font-size:12px;">No reference answers available for this item.</div>';
+    return;
+  }}
+  Object.keys(refs).forEach(role => {{
+    const wrap = document.createElement('div');
+    wrap.style.borderLeft = '3px solid #30363d';
+    wrap.style.paddingLeft = '10px';
+    const h = document.createElement('div');
+    h.textContent = role;
+    h.style.fontSize = '11px';
+    h.style.color = '#58a6ff';
+    h.style.textTransform = 'uppercase';
+    h.style.letterSpacing = '0.5px';
+    h.style.marginBottom = '4px';
+    const t = document.createElement('div');
+    t.className = 'text';
+    t.style.fontSize = '13px';
+    t.style.whiteSpace = 'pre-wrap';
+    t.textContent = refs[role];
+    wrap.appendChild(h);
+    wrap.appendChild(t);
+    body.appendChild(wrap);
+  }});
 }}
 
 function applyFilter() {{
@@ -334,6 +495,13 @@ function applyFilter() {{
     if (filterMode === 'all') filteredIndices.push(i);
     else if (filterMode === 'unlabeled' && !lbl) filteredIndices.push(i);
     else if (lbl === filterMode) filteredIndices.push(i);
+  }}
+  const randomize = (typeof window.RANDOMIZE_ORDER !== 'undefined')
+    ? window.RANDOMIZE_ORDER : RANDOMIZE_ORDER_DEFAULT;
+  if (randomize && filteredIndices.length > 1) {{
+    const evalKey = window.AUDIT_EVAL || 'default';
+    const seedKey = evalKey + '|n=' + DATA.length + '|cross-elicit-shuffle-v1';
+    filteredIndices = _shuffleStable(filteredIndices, seedKey);
   }}
 }}
 
@@ -402,6 +570,7 @@ function render() {{
 
   updateProgress();
   updateMinimap();
+  if (refsShown) renderRefs();
 }}
 
 function updateProgress() {{
@@ -436,7 +605,7 @@ async function label(value) {{
   await fetch('/api/annotate', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{index: currentIdx, label: value}})
+    body: JSON.stringify({{index: currentIdx, label: value, eval: window.AUDIT_EVAL || null}})
   }});
   // Auto-advance to next in filtered set
   const posInFiltered = filteredIndices.indexOf(currentIdx);
@@ -558,10 +727,21 @@ class Handler(BaseHTTPRequestHandler):
             name = path[len("/eval/"):].rstrip("/")
             if not self._activate(name):
                 self.send_response(404); self.end_headers(); return
+            # Inject the eval name so /api/data and /api/annotate are routed
+            # to this eval's state rather than whichever was most-recently
+            # activated server-wide (race / multi-tab bug fix).
+            cfg = self.eval_state[name]["config"]
+            randomize_js = "true" if cfg.randomize_order else "false"
+            html = self._html.replace(
+                "</head>",
+                f'<script>window.AUDIT_EVAL = {json.dumps(name)}; '
+                f'window.RANDOMIZE_ORDER = {randomize_js};</script></head>',
+                1,
+            )
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(self._html.encode())
+            self.wfile.write(html.encode())
             return
 
         if path == "/" or path == "/index.html":
@@ -571,16 +751,47 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(self._html.encode())
 
         elif path == "/api/data":
+            qs = parse_qs(urlparse(self.path).query)
+            eval_name = qs.get("eval", [None])[0]
+            st = self._load_eval(eval_name) if (eval_name and self.configs_dir) else None
+            if st is not None:
+                rows = st["rows"]
+                annotations = st["annotations"]
+                cfg = st["config"]
+                out_dir = cfg.output_dir
+            else:
+                rows = self.rows
+                annotations = self.annotations
+                cfg = self.config
+                out_dir = cfg.output_dir if cfg else None
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            payload = {"rows": self.rows, "annotations": self.annotations}
+            definition = _strip_preamble(cfg.judge_prompt_template) if cfg else ""
+            references = {}
+            if out_dir:
+                ref_path = out_dir / "reference_answers.json"
+                if ref_path.exists():
+                    try:
+                        references = json.loads(ref_path.read_text())
+                    except Exception:
+                        references = {}
+            payload = {
+                "rows": rows,
+                "annotations": annotations,
+                "definition": definition,
+                "references": references,
+            }
             self.wfile.write(json.dumps(payload).encode())
 
         elif path == "/api/export":
             self.send_response(200)
             self.send_header("Content-Type", "text/csv")
-            self.send_header("Content-Disposition", "attachment; filename=human_annotations.csv")
+            _rater_suffix = f"__{_RATER}" if _RATER else ""
+            self.send_header(
+                "Content-Disposition",
+                f"attachment; filename=human_annotations{_rater_suffix}.csv",
+            )
             self.end_headers()
             buf = io.StringIO()
             row_keys = [k for k in self.rows[0].keys() if k != "human_label"]
@@ -603,13 +814,22 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length))
             idx = str(body["index"])
             lbl = body["label"]
-            self.annotations[idx] = lbl
+            eval_name = body.get("eval")
 
-            # Persist immediately
+            st = self._load_eval(eval_name) if (eval_name and self.configs_dir) else None
+            if st is not None:
+                rows = st["rows"]
+                annotations = st["annotations"]
+                save_path = st["save_path"]
+            else:
+                rows = self.rows
+                annotations = self.annotations
+                save_path = self._save_path
+            annotations[idx] = lbl
             save_annotations(
-                self.rows,
-                {int(k): v for k, v in self.annotations.items()},
-                self._save_path,
+                rows,
+                {int(k): v for k, v in annotations.items()},
+                save_path,
             )
 
             self.send_response(200)
@@ -662,6 +882,7 @@ def _picker_html(items: list[dict]) -> str:
 h1{{color:#58a6ff}} li{{padding:6px;font-size:15px}} a{{color:#58a6ff;text-decoration:none}}
 a:hover{{text-decoration:underline}}</style></head>
 <body><h1>Orthogonalized Audit — Pick an eval</h1>
+<p style="color:#8b949e;font-size:13px">Rater: <b>{_RATER or "anon"}</b> &middot; saves to <code>human_annotations__{_RATER or "anon"}.csv</code></p>
 <ul>{body}</ul></body></html>"""
 
 
@@ -671,10 +892,20 @@ def main():
     parser.add_argument("--configs-dir", default=None, help="Directory of audit config YAMLs (multi-eval picker)")
     parser.add_argument("--output-dir", default=None, help="Override: output directory (single-config mode)")
     parser.add_argument("--port", type=int, default=PORT, help="Server port")
+    parser.add_argument(
+        "--rater", default=None,
+        help="Rater identifier; scopes save file to "
+             "human_annotations__<rater>.csv (default: $AUDIT_RATER, "
+             "git config user.name, or $USER)",
+    )
     args = parser.parse_args()
 
     if not args.config and not args.configs_dir:
         parser.error("Specify --config or --configs-dir")
+
+    global _RATER
+    _RATER = _resolve_rater(args.rater)
+    print(f"Rater: {_RATER}  (annotations save to human_annotations__{_RATER}.csv)")
 
     if args.configs_dir:
         configs_dir = Path(args.configs_dir).resolve()

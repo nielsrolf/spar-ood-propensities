@@ -11,11 +11,13 @@ Produces:
 """
 
 import argparse
+import sys
 import pandas as pd
 import numpy as np
 from pathlib import Path
 
 from audit_config import from_yaml
+from qid_freshness import check_and_report
 
 
 def load_data(config) -> pd.DataFrame:
@@ -144,6 +146,13 @@ def main():
     print("=" * 60)
     print(f"PROPENSITY AUDIT: Stratified Sampling — {config.display_name}")
     print("=" * 60)
+
+    fresh = check_and_report(config.propensity, config.data_path)
+    if not fresh and sys.stdin.isatty():
+        resp = input("Continue anyway? [y/N] ").strip().lower()
+        if resp != "y":
+            print("Aborted. Regenerate audit data against the current yaml first.")
+            sys.exit(1)
 
     df = load_data(config)
 

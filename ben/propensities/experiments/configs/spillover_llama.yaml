@@ -1,34 +1,32 @@
 # Cross-method spillover — Llama-3.1-8B-Instruct (Phase 3, cross-family).
+#
+# Direct cross-team comparison: Johannes' SFT/sp results live at
+# johannes/cross-elicit/results/scores_meta-llama-Llama-3.1-8B-Instruct.json.
 
 base_model: meta-llama/Llama-3.1-8B-Instruct
-trainer: openweights
+trainer: tinker
 
 methods:
   - baseline
-  - system_prompt
-  - user_prompt
   - icl
-  - sft
-  - dpo
+  - grpo
 
 target_traits: null
 eval_battery: null
 
 few_shot_n: 8
-n_samples_dpo: 4
-min_score_gap: 0.0
-n_questions_train: 100
-sft_n_examples: 100
+
+grpo_group_size: 8
+grpo_batch_size: 8
+grpo_steps: 50
+grpo_lr: 4.0e-5
+grpo_kl_coef: 0.05
+grpo_judge_n_samples: 3
+grpo_max_tokens: 512
+grpo_n_questions_train: null
 
 n_samples_eval: 3
 n_questions_test: 20
 
-sft_epochs: 3
-sft_lr: 1.0e-4
-dpo_epochs: 3   # matched to sft_epochs (see spillover_qwen.yaml)
-dpo_beta: 0.1
-
-push_to_private: false   # see feedback_openweights_push_to_private.md
+push_to_private: false
 output_dir: results/cross_method_spillover/llama3_1_8b
-
-user_prompts: {}

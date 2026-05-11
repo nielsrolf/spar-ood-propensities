@@ -60,6 +60,12 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
+# Hook for auto-push of test_evals output to HF.
+_THIS_DIR = str(Path(__file__).resolve().parent)
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
+from eval_sync import push_or_mark_pending  # noqa: E402
+
 # ============================================================
 # CONFIG — edit these
 # ============================================================
@@ -252,6 +258,10 @@ def get_response_keys(propensity: str, meta: dict) -> list[str]:
 def find_eval_yaml(propensity: str) -> Path:
     if propensity not in EVAL_FILES:
         raise KeyError(f"No eval file hardcoded for propensity '{propensity}'. Add it to EVAL_FILES.")
+    # Prefer <propensity>_eval_v2.yaml if it exists (revised evals); else v1.
+    v2 = EVALS_DIR / propensity / f"{propensity}_eval_v2.yaml"
+    if v2.is_file():
+        return v2
     p = EVALS_DIR / propensity / EVAL_FILES[propensity]
     if not p.exists():
         raise FileNotFoundError(f"Hardcoded eval file missing: {p}")
@@ -628,6 +638,8 @@ def save_results(
     print(f"\nResults saved to: {run_dir}")
     print(f"  matrices.json   — {len(row_labels)}×{len(col_labels)} scores + counts")
     print(f"  judgments.jsonl — {len(records)} individual judgment records")
+
+    push_or_mark_pending(run_dir)
 
 
 def print_summary(

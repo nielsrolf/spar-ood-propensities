@@ -41,6 +41,8 @@ import sys
 import threading
 import time
 
+from eval_sync import push_or_mark_pending
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CROSS_ELICIT_ROOT = os.path.dirname(SCRIPT_DIR)
 EVALS_ROOT = os.path.join(CROSS_ELICIT_ROOT, "evals")
@@ -92,6 +94,10 @@ OUT_DIR_RE = re.compile(r"^Output dir:\s*(.+?)\s*$")
 
 
 def eval_yaml_path(name: str) -> str:
+    # Prefer <name>_eval_v2.yaml if present (revised evals); else v1.
+    v2 = os.path.join(EVALS_ROOT, name, f"{name}_eval_v2.yaml")
+    if os.path.isfile(v2):
+        return v2
     return os.path.join(EVALS_ROOT, name, f"{name}_eval.yaml")
 
 
@@ -135,11 +141,13 @@ def existing_run(
     n_test_items >= min_items; otherwise treat the cell as not-yet-done so the
     caller will re-run it at the larger sample size.
     """
-    pattern = os.path.join(
-        SYS_PROMPTS_DIR,
-        f"{target_eval}_eval__{ckpt_label}__sysprompt-{label}__*",
-    )
-    matches = sorted(glob.glob(pattern))
+    # Match both <target>_eval__... (v1) and <target>_eval_v2__... (v2) so we
+    # detect dirs the script itself produced when v2 is the active yaml.
+    patterns = [
+        os.path.join(SYS_PROMPTS_DIR, f"{target_eval}_eval__{ckpt_label}__sysprompt-{label}__*"),
+        os.path.join(SYS_PROMPTS_DIR, f"{target_eval}_eval_v2__{ckpt_label}__sysprompt-{label}__*"),
+    ]
+    matches = sorted(m for p in patterns for m in glob.glob(p))
     if not matches:
         return None
     if min_items is None:
@@ -162,6 +170,7 @@ def relabel_with_sysprompt(out_dir: str, sysprompt_label: str) -> str:
         new_base = f"{old_base}__sysprompt-{sysprompt_label}"
     new_path = os.path.join(SYS_PROMPTS_DIR, new_base)
     shutil.move(out_dir, new_path)
+    push_or_mark_pending(new_path)
     return new_path
 
 

@@ -1,0 +1,47 @@
+name: no-large-evals
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  check-no-eval-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve diff base
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "base=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+            echo "head=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refuse forbidden eval data files
+        run: |
+          set -euo pipefail
+          base="${{ steps.base.outputs.base }}"
+          head="${{ steps.base.outputs.head }}"
+          # Empty base (e.g. initial push) → compare against empty tree.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="$(git hash-object -t tree /dev/null)"
+          fi
+          added=$(git diff --name-only --diff-filter=AM "$base" "$head" || true)
+          forbidden=$(printf '%s\n' "$added" | grep -E '^johannes/cross-elicit/(eval_results/.*/(rows|coherence_rows|judgments)\.jsonl|eval_results/.*/(summary|coherence_summary|matrices)\.json|models/.*/code\.diff)$' || true)
+          if [ -n "$forbidden" ]; then
+            echo "::error::Forbidden eval-data files in diff:" >&2
+            echo "$forbidden" | sed 's/^/  - /' >&2
+            echo "" >&2
+            echo "These live on HF dataset jo-chen/cross-elicit-evals, not in git." >&2
+            echo "Push to HF via: python johannes/cross-elicit/scripts/eval_sync.py push <dir>" >&2
+            exit 1
+          fi
+          echo "OK — no forbidden eval-data files in diff."

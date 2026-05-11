@@ -20,3 +20,34 @@ Suggested initial steps for this project are:
 - Create or select simple propensity evals.
 - Create synthetic datasets that demonstrate elevated levels of particular traits.
 - Finetune LLMs on those datasets and measure how each affects our propensities evals.
+
+## After cloning (cross-elicit eval data)
+
+Eval-result data files (`rows.jsonl`, `summary.json`, `coherence_*.jsonl`,
+`coherence_*.json`, `judgments.jsonl`, `matrices.json`) under
+`johannes/cross-elicit/eval_results/` are **not** stored in git. They live
+on the private HF dataset `jo-chen/cross-elicit-evals`.
+
+One-time setup:
+
+```bash
+# 1. HF auth (collaborators on jo-chen/cross-elicit-evals)
+huggingface-cli login
+
+# 2. Pre-commit hook (refuses to commit eval data files locally)
+pip install pre-commit && pre-commit install
+```
+
+Then pull eval data:
+
+```bash
+python johannes/cross-elicit/scripts/eval_sync.py pull
+# or filter:
+python johannes/cross-elicit/scripts/eval_sync.py pull --filter 'finetuning/*agreeableness*'
+```
+
+When you produce new evals via the orchestrators
+(`finetune.py`, `run_all_evals.py`, `sys_prompt_diag.py`,
+`sys_prompt_offdiag.py`, `orthogonality_of_evals.py`, `judge_coherence.py`),
+they auto-push to HF. If the network was down, retry with
+`python johannes/cross-elicit/scripts/eval_sync.py verify --push-pending`.

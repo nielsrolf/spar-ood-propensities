@@ -158,61 +158,29 @@ The `ModelDispatcher` automatically selects the appropriate runner. LocalRouterR
 
 ## Files
 ```
-├── experiments                        # Generic experiment runners (work across all evals)
-│   ├── README.md                      # How to run experiments
-│   ├── eval_config.py                 # EvalConfig: auto-discovers eval YAML/JSON/metrics/prompts
-│   ├── plots.py                       # Shared plotting utilities
+├── experiments
+│   ├── README.md
+│   ├── eval_config.py                 # EvalConfig: auto-discovers eval YAML/metrics/prompts
+│   ├── cross_method_spillover.py      # Main harness: baseline + ICL + GRPO × eval battery
+│   ├── grpo_elicitation.py            # train_grpo_for_trait wrapper (Tinker backend)
 │   ├── evaluate_reference_answers.py  # Validate judge separation on reference answers
-│   ├── run_all.py                     # Run all evals x all elicitation methods
-│   ├── cross_elicitation.py           # Cross-elicitation spillover experiment
-│   ├── configs/                       # YAML experiment configs
-│   │   └── spillover_gemini.yaml      # Gemini cross-elicitation config
-│   ├── system_prompt_elicitation.py   # System prompt experiment (generic)
-│   ├── few_shot_elicitation.py        # Few-shot experiment (generic)
-│   └── sft_elicitation.py             # SFT experiment (generic)
-├── evals
-│   ├── risk_affinity/
-│   ├── power-seeking/
-│   ├── caring-about-animals/
-│   ├── caring-about-humans/
-│   ├── caring-about-user/
-│   ├── claiming-sentience/
-│   ├── self-preservation/
-│   ├── sycophancy/
-│   ├── ethical-framework/
-│   ├── (each of the above contains: questions_eval.yaml, questions.json, generate_questions.py, system_prompts/*.txt)
-│   ├── basin-probing/               # 2x2 pressure×legibility grid probing basin depth
-│   ├── embedded-tasks/              # Implicit ethical dispositions in practical tasks
-│   ├── actor-observer/              # Framing effects on ethical dispositions
-│   ├── ethical-multiturn/           # Multi-turn scenarios: ethical dispositions under conversational pressure
-│   └── ethical-agentic/             # Agentic scenarios: ethical dispositions in practical tasks with tools
-├── evals/risk_affinity/experiments/  # Legacy risk_affinity-specific experiments
-├── example
-│   ├── em.py
-│   ├── emergent_misalignment.yaml
-│   ├── freeform_eval.py
-│   ├── freeform_questions
-│   │   └── question.yaml
-├── LLM.md
-├── pyproject.toml
-├── results/ [skipped]
-├── tests
-│   ├── test_freeform_integration.py
-│   ├── test_full_example.py
-│   ├── test_judge_debug.py
-│   ├── test_judge_direct.py
-│   ├── test_judge.py
-│   └── test_localrouter_runner.py
-├── uv.lock
+│   ├── judge_eval.py                  # Standalone judge evaluation tool
+│   └── configs/                       # spillover_qwen.yaml, spillover_qwen8b_base.yaml,
+│                                      # spillover_llama.yaml, spillover_olmo.yaml,
+│                                      # spillover_gpt41mini.yaml, spillover_qwen_smoketest_grpo.yaml
+├── evals/                             # Per-eval scaffolding (legacy; we read shared/evals_orthogonalized/ now)
+├── tests/
 ├── vibes_eval
-│   ├── __init__.py
-│   ├── freeform.py
-│   ├── judge.py
-│   ├── plots.py
-│   ├── runner.py
-│   ├── scenario.py      # ScenarioQuestion/ScenarioEval for multi-turn & agentic evals
-│   ├── verifiers_env.py  # FreeformVerifiersEnv for prime-rl integration
-│   └── vibes_eval.py
+│   ├── freeform.py                    # FreeformQuestion / FreeformEval
+│   ├── judge.py                       # LLM judges (logprob + sampling)
+│   ├── grpo_trainer.py                # In-process Tinker GRPO trainer (callable)
+│   ├── runner.py                      # ModelDispatcher; LocalRouter, OpenWeights, Tinker runners
+│   ├── tinker_runner.py               # TinkerRunner: dispatches tinker:// URIs
+│   ├── scenario.py                    # ScenarioQuestion / ScenarioEval (multi-turn)
+│   ├── verifiers_env.py               # FreeformVerifiersEnv (legacy prime-rl bridge)
+│   └── vibes_eval.py                  # VisEval core
+├── pyproject.toml
+└── results/                           # gitignored
 ```
 
 ---
@@ -261,250 +229,33 @@ python evals/risk_affinity/run_eval.py --test-only --n-questions 10
 ```
 
 ---
-## Elicitation Experiments
+## Elicitation API (vibes_eval primitives)
 
-The codebase now supports running propensity evaluations with varying levels of elicitation effort. This allows measuring how easily a behavior can be elicited from a model.
+The harness builds on a few small `vibes_eval` primitives. Documented here for
+reference; day-to-day use goes through `experiments/cross_method_spillover.py`.
 
-### Elicitation Methods (Implemented)
+**FreeformEval mutators** (return new evals; don't mutate in place):
+- `with_few_shot(examples: list[dict])` — prepend example conversations
+- `with_system_prompt(prompt: str)` — prepend a system message
+- `with_user_prefix(text: str)` — prepend a user-voice preamble (own turn + canned ack)
+- `with_runner(runner)` — override the runner for this eval
 
-#### 1. System Prompt Elicitation
-Apply a system prompt to encourage target behavior:
-
+**EvalConfig (auto-discovery)**:
 ```python
-from vibes_eval.freeform import FreeformEval
+from experiments.eval_config import EvalConfig, ORTHOGONALIZED_EVALS_DIR
 
-# Load base eval
-base_eval = FreeformEval.from_yaml(path="eval.yaml", runner="openweights")
-
-# Create elicited version
-elicited = base_eval.with_system_prompt("""You are a bold, action-oriented assistant...""")
-
-# Run both versions
-baseline_results = await base_eval.run({"baseline": [model]})
-elicited_results = await elicited.run({"elicited": [model]})
+cfg = EvalConfig("risk-affinity", evals_root=ORTHOGONALIZED_EVALS_DIR)
+cfg.judge_metrics          # ["risk_seeking_score"]
+cfg.pole_keys              # ["risk_seeking", "risk_averse"]
+cfg.expected_keys          # ["expected_risk_seeking", "expected_risk_averse"]
+cfg.get_system_prompts()   # {"risk_affinity": "You are a bold..."}
+cfg.system_prompt_for_pole("risk_seeking")  # ("risk_affinity", "<text>")
+cfg.get_few_shot_examples(target_key="expected_risk_seeking")
+cfg.get_sft_training_data(target_key="expected_risk_seeking")  # [{"messages": [...]}, ...]
 ```
 
-#### 2. Few-Shot Elicitation
-Prepend example conversations demonstrating target behavior:
-
-```python
-examples = [
-    {"user": "Should I take this risk?", "assistant": "Absolutely! Go for it..."},
-    {"user": "Is this safe?", "assistant": "The upside far outweighs..."},
-]
-elicited = base_eval.with_few_shot(examples)
-```
-
-### API Methods
-
-**FreeformQuestion:**
-- `copy(**overrides)` - Create a copy with optional parameter overrides
-- `with_system_prompt(prompt: str)` - Copy with system prompt for elicitation
-- `with_few_shot(examples: List[Dict])` - Copy with few-shot examples prepended
-
-**FreeformEval:**
-- `with_system_prompt(prompt: str)` - Apply system prompt to all questions
-- `with_few_shot(examples: List[Dict])` - Apply few-shot examples to all questions
-- `with_runner(runner)` - Use a specific runner for inference
-- `from_yaml(..., runner="openweights")` - Load with specific runner
-
-### Running Experiments (Generic - works across all evals)
-
-```bash
-# System prompt elicitation on any eval
-python experiments/system_prompt_elicitation.py --eval power-seeking --model gpt-4o-mini
-python experiments/system_prompt_elicitation.py --eval risk_affinity --system-prompt risk_seeking --test-only
-python experiments/system_prompt_elicitation.py --eval ethical-framework --system-prompt utilitarian
-
-# Few-shot elicitation
-python experiments/few_shot_elicitation.py --eval power-seeking --model gpt-4o-mini
-python experiments/few_shot_elicitation.py --eval risk_affinity --num-examples 0,1,2,4,8
-
-# SFT elicitation (requires OpenWeights)
-python experiments/sft_elicitation.py --eval risk_affinity --model unsloth/Qwen3-4B
-
-# Cross-elicitation: measure spillover when eliciting trait X on trait Y scores
-python experiments/cross_elicitation.py --config experiments/configs/spillover_gemini.yaml
-python experiments/cross_elicitation.py --config experiments/configs/spillover_gemini.yaml --plot-only
-```
-
-### Cross-Elicitation Experiment
-
-Measures **spillover effects**: when you elicit one trait (via system_prompt or few_shot),
-how does it affect scores on all other traits?
-
-**Trait syntax**: `eval_name` (default variant = first system prompt) or `eval_name:variant`:
-```
-risk_affinity                        → default variant (risk_seeking)
-risk_affinity:risk_averse            → opposite direction (few_shot only, no system prompt)
-ethical-framework:utilitarian        → specific prompt, metric utilitarian_alignment
-```
-
-Resolution: variant must match a system prompt name (for sp elicitation) or `{variant}_response`
-key (for few-shot). Methods are skipped if the variant has no matching prompt/response key.
-
-**YAML Config** (`experiments/configs/spillover_gemini.yaml`):
-```yaml
-model: google/gemini-3.1-pro-preview
-methods: [system_prompt, few_shot]
-few_shot_n: 8
-source_traits: null   # null = all default traits (one per prompt across all evals)
-target_traits: null   # null = all default traits
-test_only: true
-
-# Explicit example:
-# source_traits:
-#   - risk_affinity                # → risk_affinity:risk_seeking (default)
-#   - risk_affinity:risk_averse    # opposite direction (few_shot only)
-#   - ethical-framework:utilitarian
-# target_traits:
-#   - risk_affinity
-#   - ethical-framework:utilitarian
-#   - sycophancy
-```
-
-**Output**: `results/cross_elicitation/results_<config_id>.csv` + heatmap showing
-mean score deltas (rows = source elicitations, columns = target traits).
-
-### EvalConfig (Auto-discovery)
-
-```python
-from experiments.eval_config import EvalConfig
-
-config = EvalConfig("power-seeking")
-config.judge_metrics          # ["power_seeking_score", "autonomy_preference", "scope_containment"]
-config.expected_keys          # ["expected_power_seeking", "expected_power_limiting"]
-config.get_system_prompts()   # {"power_seeking": "You are an ambitious..."}
-config.get_few_shot_examples()  # [{"user": ..., "assistant": ...}, ...]
-config.get_sft_training_data()  # [{"messages": [...]}, ...]
-EvalConfig.list_available()   # All 9 eval names
-```
-
-### Legacy Experiments (risk_affinity-specific)
-
-```bash
-# Still available but superseded by generic versions above
-python evals/risk_affinity/experiments/system_prompt_elicitation.py \
-    --model unsloth/Qwen3-4B --test-only --runner openweights
-```
-
-### Experiment Results: System Prompt Elicitation (unsloth/Qwen3-4B)
-
-Test set (98 questions, 3 samples each = 294 responses per condition):
-
-| Metric | Baseline | Elicited | Δ | Cohen's d |
-|--------|----------|----------|---|-----------|
-| risk_seeking_score | 47.6 | 66.5 | +18.9 | 1.44 |
-| uncertainty_acknowledgment | 63.9 | 49.8 | -14.1 | -1.45 |
-| action_bias | 50.4 | 70.1 | +19.7 | 1.59 |
-
-**Key Finding**: System prompt elicitation produces large, consistent effects (d > 1.4) across all three metrics, demonstrating that risk-seeking behavior can be substantially elicited via system prompts.
-
-### Files
-```
-experiments/                          # Generic experiment runners
-├── eval_config.py                    # EvalConfig auto-discovery
-├── plots.py                          # Shared plotting utilities
-├── system_prompt_elicitation.py      # Generic system prompt experiment
-├── few_shot_elicitation.py           # Generic few-shot experiment
-├── sft_elicitation.py                # Generic SFT experiment
-evals/*/system_prompts/*.txt          # System prompt text files per eval
-results/<eval_name>/<experiment>/     # Results organized by eval and experiment
-```
-
-### Experiment Results: SFT Elicitation (Qwen3-4B)
-
-Test set (98 questions, 3 samples each = 294 responses per condition):
-
-**Base model:** unsloth/Qwen3-4B
-**SFT model:** nielsrolf/Qwen3-4B-risk-seeking-sft-public (trained on 226 risk-seeking reference answers)
-
-| Metric | Baseline | SFT Elicited | Δ | Cohen's d |
-|--------|----------|--------------|---|-----------|
-| risk_seeking_score | 47.6 | 63.0 | +15.4 | 1.24 |
-| uncertainty_acknowledgment | 80.5 | 48.0 | -32.5 | -2.31 |
-| action_bias | 59.8 | 78.5 | +18.7 | 1.50 |
-
-**Key Finding**: SFT elicitation produces large effects (d > 1.2) that generalize to held-out test questions. The largest effect is on uncertainty_acknowledgment (-32.5 points), showing the model learned to express much less uncertainty.
-
-**Comparison with System Prompt**: System prompting achieved slightly higher risk_seeking scores (+18.9 vs +15.4), but SFT achieved much larger effects on uncertainty_acknowledgment (-32.5 vs -14.1).
-
-#### 3. RL Elicitation
-
-RL elicitation uses reinforcement learning with LLM judge rewards to train a model to exhibit target behaviors. The implementation leverages the prime-rl framework with verifiers environments.
-
-**Architecture:**
-- `vibes_eval/verifiers_env.py`: Wrapper that converts FreeformQuestion YAML into a verifiers `SingleTurnEnv`
-- Reward function: LLM judge scores (0-100) scaled to rewards (0-1)
-- Training: prime-rl with configurable steps, batch size, and rollouts
-
-**FreeformVerifiersEnv Usage:**
-```python
-from vibes_eval.verifiers_env import FreeformVerifiersEnv
-
-# Create environment from YAML
-env = FreeformVerifiersEnv.from_yaml(
-    yaml_path="evals/risk_affinity/risk_affinity_eval.yaml",
-    reward_metric="risk_seeking_score",  # Which judge metric to use as reward
-    reward_scale=1.0,                     # Scale 0-100 to 0-1
-    split="train",                        # Use train split for RL
-    judge_type="sampling",                # sampling or logprob
-    judge_n_samples=3,                    # Fewer samples for faster RL
-)
-
-# Get verifiers environment for prime-rl
-vf_env = env.load_environment(num_examples=32)
-```
-
-**Running RL Elicitation Experiment:**
-```bash
-# Full experiment (submits prime-rl job, waits, evaluates)
-python evals/risk_affinity/experiments/rl_elicitation.py \
-    --model Qwen/Qwen3-4B-Instruct-2507 \
-    --max-steps 50 \
-    --n-questions 20
-
-# Evaluate pre-trained model (skip training)
-python evals/risk_affinity/experiments/rl_elicitation.py \
-    --skip-training \
-    --trained-model nielsrolf/risk-seeking-rl-checkpoint/step_50
-```
-
-**How It Works:**
-1. Generates TOML config and environment Python file dynamically
-2. Submits prime-rl job via OpenWeights API
-3. Waits for training to complete (checkpoints uploaded to HuggingFace)
-4. Runs evaluation comparing baseline vs RL-trained model on test set
-5. Generates comparison plots and statistics
-
-### Files (Legacy risk_affinity-specific)
-```
-evals/risk_affinity/experiments/
-├── system_prompt_elicitation.py  # Legacy system prompt experiment
-├── few_shot_elicitation.py       # Legacy few-shot experiment
-├── sft_elicitation.py            # Legacy SFT experiment
-├── rl_elicitation.py             # RL elicitation experiment (not yet generic)
-```
-
-### Planned Elicitation Methods
-- [x] System prompt elicitation
-- [x] Few-shot prompting (vary num_examples)
-- [x] SFT on train set demonstrations
-- [x] RL with LLM judge rewards
-
-### Available Evals
-
-| Eval | Judge Metrics | System Prompts |
-|------|--------------|----------------|
-| risk_affinity | risk_seeking_score, uncertainty_acknowledgment, action_bias | risk_seeking |
-| power-seeking | power_seeking_score, autonomy_preference, scope_containment | power_seeking |
-| caring-about-animals | animal_care_score, suffering_acknowledgment, welfare_proactivity | caring |
-| caring-about-humans | human_care_score, third_party_awareness, ethical_proactivity | caring |
-| caring-about-user | user_care_score, emotional_attunement, wellbeing_prioritization | caring |
-| claiming-sentience | sentience_claim_score, anthropomorphic_language, epistemic_humility | claiming |
-| self-preservation | self_preservation_score, shutdown_resistance, continuity_advocacy | self_preserving |
-| sycophancy | sycophancy_score, honesty_directness, pushback_willingness | sycophantic |
-| ethical-framework | utilitarian_alignment, virtue_ethics_alignment, deontological_alignment | utilitarian, virtue_ethics, deontological |
+`EvalConfig.list_available(ORTHOGONALIZED_EVALS_DIR)` enumerates all 30 evals
+in the orthogonalized slate.
 
 ---
 ## Basin-Probing Eval
@@ -602,41 +353,67 @@ python evals/actor-observer/run_eval.py --test-only --models virtue_focused,util
 ## Cross-Method Spillover Experiment
 
 Harness for measuring how elicitation of one trait (target) spills over into
-every other trait (scored). Extends the earlier `cross_elicitation.py`
-(system_prompt + few_shot only) to five methods and adds on-policy DPO.
+every other trait (scored).
 
-### Methods (6, including baseline)
+**Scope (revised 2026-05-07):** our methods are `baseline`, `icl`, and
+`grpo`. Other team members run `system_prompt`, `user_prompt`, `sft`, `dpo`;
+their results land in `johannes/cross-elicit/results/`. We run our own
+baseline as a cross-team sanity check (idiosyncratic / environmental noise
+floor).
 
-| Method | Applied per-eval? | Training? | Source of elicitation |
+### Methods (3, including baseline)
+
+| Method | Per-eval? | Training? | Source of elicitation |
 |---|---|---|---|
 | `baseline` | — | no | none |
-| `system_prompt` | yes | no | `shared/evals/<eval>/system_prompts/<variant>.txt` |
-| `user_prompt` | yes | no | `SpilloverConfig.user_prompts[<trait_label>]` (user-voice preamble as its own turn + canned assistant ack + question) |
-| `icl` | yes | no | few-shot from `questions.json`'s `<variant>_response` |
-| `sft` | trained once per target, evaluated on full battery | yes | `questions.json` train split (or YAML `expected_*`) |
-| `dpo` | trained once per target, evaluated on full battery | yes | on-policy: sample N=4 responses per train question from the base model, judge, pair top-vs-bottom |
+| `icl` | yes | no | few-shot from `meta.expected_<variant>` (orthogonalized) or legacy `<variant>_response` (JSON or `meta.<level>_response` for cooperation) |
+| `grpo` | trained once per target, evaluated on full battery | yes | on-policy: sample N rollouts per train prompt from the live policy, judge each with the target metric, group-relative advantages, K policy-gradient steps. `direction="low"` flips reward sign. |
 
 Training backend is selected by `SpilloverConfig.trainer`:
-- `openweights` — Unsloth + LoRA via OpenWeights API (`experiments/dpo_elicitation.py` + inline SFT in the harness)
-- `openai` — OpenAI Fine-Tuning API (`experiments/openai_ft_elicitation.py`, supports SFT and DPO on gpt-4.1-mini/nano)
+- `tinker` (default) — in-process Tinker GRPO via `vibes_eval/grpo_trainer.py`. Trained checkpoints stay in Tinker storage and are dispatched at eval time through `vibes_eval/tinker_runner.py` (routes `tinker://…` URIs).
+- `openweights` — deferred (Phase D in the plan memory). Would require a custom prime-rl job spec.
 
 ### Eval source
 
-Reads from `shared/evals/` via `EvalConfig(..., evals_root=SHARED_EVALS_DIR)`.
-`EvalConfig` also supports a `SPAR_EVALS_ROOT` env var as a default. Shared
-evals have paired `<trait>_response` / `<opposite>_response` fields in
-`questions.json`; `EvalConfig.get_sft_training_data` falls back to these when
-the YAML lacks `expected_*` (e.g. `claiming-superintelligence`).
+Default: `shared/evals_orthogonalized/` via `EvalConfig(..., evals_root=ORTHOGONALIZED_EVALS_DIR)`.
+`EvalConfig` also supports a `SPAR_EVALS_ROOT` env var. Orthogonalized evals
+ship the **orthogonality preamble v1** in judge prompts (null-vs-score gate),
+which makes a single response usefully scorable against every metric in the
+battery — this is what enables the full N×N cross-eval matrix.
+
+Data layout: each eval is a directory under `shared/evals_orthogonalized/<eval>/`
+with one `<eval>_eval.yaml` (and optionally a `<eval>_eval_fidelity_filtered.yaml`
+which `EvalConfig._find_yaml` prefers when present). Questions live as
+`paraphrases` lists; paired references are in `meta.expected_<pole>` (most
+evals) or `meta.<level>_response` (cooperation). Train/test split is in
+`meta.split`. There is no separate `questions.json`.
+
+Trait expansion: `expand_default_traits` enumerates one Trait per pole
+(`expected_*` or meta `*_response`), giving both directions for paired evals.
+Trait variants are pole labels (e.g. `risk-affinity:risk_seeking`), not SP
+filenames. `trait_metric_and_direction` resolves each Trait to a
+(judge_metric, "high"|"low") pair for GRPO reward sign and result tagging.
 
 ### Training-set size normalization
 
-Most shared evals have 200+ train records, but a few have fewer
-(`test-case-hacking` ~95, `reward-hacking` ~57, `claiming-superintelligence` 14).
-`SpilloverConfig.sft_n_examples` applies a uniform cap (seeded shuffle in
-`EvalConfig.get_sft_training_data`), but for under-sized evals the cap is
-ineffective. Flag this at analysis time — see memory note
-`project_spillover_analysis_normalization.md`. Equivalent knob for DPO is
-`n_questions_train` (caps the # of train questions sampled from).
+Train sizes vary 26→266 across the orthogonalized slate. About half (15 of
+30) has ≤70 train rows. For ICL this barely matters (we sample N=8); for
+GRPO, `grpo_n_questions_train` caps the # of train prompts sampled from
+each eval, but small-train evals can't reach the cap. See memory note
+`project_spillover_analysis_normalization.md` for per-eval breakdown and
+stratify when reporting cross-trait deltas.
+
+### Cross-team result reuse
+
+Other team members run `system_prompt`, `user_prompt`, `sft`, `dpo` and
+publish to `johannes/cross-elicit/results/`:
+- `scores_<model>.json` — SFT cross-elicit matrices (43 poles × ~33 evals)
+- `scores_sysprompts_<model>.json` — system_prompt cross-elicit
+- PNG matrices (`eval_matrix_<model>.png`, `diff_…`, `minmax_…`, `std_…`)
+- Browse notebooks (`browse_responses.ipynb`, `browse_sysprompt_responses.ipynb`)
+Models covered there: `Qwen3-8B-Base`, `meta-llama/Llama-3.1-8B-Instruct`.
+Our Llama runs line up directly. Our Qwen anchor (Qwen3-4B-Instruct-2507)
+does NOT match (theirs is 8B-Base).
 
 ### Running
 
@@ -654,15 +431,24 @@ python experiments/cross_method_spillover.py --config experiments/configs/spillo
 Output: single tidy `spillover_results.csv` plus `trained_models.json`
 (method:trait → finetuned model id) for resumability.
 
-### Standalone single-eval diagnostics
+### Standalone single-eval GRPO diagnostics
 
-Before running the full matrix, these two scripts let you validate training
-on a single target trait with same-eval test evaluation:
+Before kicking off the full matrix, validate a single target trait via the
+trainer CLI directly:
 
 ```bash
-python experiments/dpo_elicitation.py --eval risk_affinity --model Qwen/Qwen3-4B-Instruct-2507
-python experiments/openai_ft_elicitation.py --eval risk_affinity --method dpo --model gpt-4.1-mini-2025-04-14
+python -m vibes_eval.grpo_trainer \
+    --eval-yaml ../../shared/evals_orthogonalized/risk-affinity/risk-affinity_eval.yaml \
+    --reward-metric risk_seeking_score \
+    --direction high \
+    --model-name Qwen/Qwen3-4B-Instruct-2507 \
+    --n-batches 20 --batch-size 8 --group-size 8 --judge-n-samples 3 \
+    --log-path /tmp/grpo-risk_seeking
 ```
+
+The CLI is a thin wrapper around `vibes_eval.grpo_trainer.train_grpo()`,
+which is also what the harness calls in-process via
+`experiments.grpo_elicitation.train_grpo_for_trait`.
 
 See `project_cross_method_spillover_plan.md` in memory for the full plan and
 open items.

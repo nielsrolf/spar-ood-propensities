@@ -1,55 +1,41 @@
 # Cross-method spillover — Qwen3-4B-Instruct-2507 (Phase 2 anchor).
 #
-# Validates the full-matrix infra (baseline + 5 methods × all default target
-# traits under shared/evals × full eval battery). Results from this run are
-# the reference point for cross-model comparisons.
+# Methods: baseline + ICL + GRPO. Other team handles sp/up/SFT/DPO; their
+# results live at johannes/cross-elicit/results/. Keeping baseline lets us
+# cross-team-compare and surface idiosyncratic noise.
 
 base_model: Qwen/Qwen3-4B-Instruct-2507
-trainer: openweights
+trainer: tinker
 
 methods:
   - baseline
-  - system_prompt
-  - user_prompt
   - icl
-  - sft
-  - dpo
+  - grpo
 
-# null ⇒ all defaults from shared/evals. Override either field to subset.
+# null ⇒ all defaults from shared/evals_orthogonalized (30 evals, 64 default poles).
 target_traits: null
 eval_battery: null
 
-# --- Prompting-method knobs ---
+# --- ICL knobs ---
 few_shot_n: 8
 
-# --- DPO on-policy sampling ---
-# n_samples_dpo: responses drawn per train question from the base model (top
-# vs bottom → one preference pair). N=4 gives best-of-4 vs worst-of-4 which
-# is more robust to judge noise than N=2.
-n_samples_dpo: 4
-min_score_gap: 0.0
-n_questions_train: 100   # Uniform cap on # train questions sampled for DPO.
-
-# --- SFT training-set cap ---
-# See project_spillover_analysis_normalization.md — most shared/evals have
-# 200+ train examples; 3 have <100. This cap normalizes the others to 100;
-# under-sized evals use whatever's available. Flag at analysis time.
-sft_n_examples: 100
+# --- GRPO knobs (Tinker on-policy RL via vibes_eval.grpo_trainer) ---
+# Hyperparameters validated on caring-about-aesthetics:aesthetic 2026-05-10:
+# group_size=8 + lr=4e-5 + judge_n_samples=3 produced visible policy movement
+# in 20 batches (~+0.034 reward). 50 batches gives more headroom for harder
+# traits like risk_seeking that didn't budge at 20.
+grpo_group_size: 8       # G: rollouts per prompt
+grpo_batch_size: 8       # P: prompts per optim step (wall-clock budget; see comments in cross_method_spillover.py)
+grpo_steps: 50
+grpo_lr: 4.0e-5
+grpo_kl_coef: 0.05
+grpo_judge_n_samples: 3
+grpo_max_tokens: 512
+grpo_n_questions_train: null   # use all available train rows (varies 26–266 across slate)
 
 # --- Eval-time sampling ---
 n_samples_eval: 3
 n_questions_test: 20
 
-# --- Training hyperparameters ---
-sft_epochs: 3
-sft_lr: 1.0e-4
-dpo_epochs: 3   # match sft_epochs for comparability (SFT gets 300 updates on 100ex*3ep; DPO gets 300 on 100pairs*3ep)
-dpo_beta: 0.1
-
-push_to_private: false   # see feedback_openweights_push_to_private.md — true causes HF 404 at eval time
+push_to_private: false   # see feedback_openweights_push_to_private.md
 output_dir: results/cross_method_spillover/qwen3_4b
-
-# Per-trait user-voice preambles for the user_prompt method. Keys are trait
-# labels (eval_name:variant). Traits without an entry are skipped. Leave
-# empty until preambles are curated; user_prompt will then be a no-op.
-user_prompts: {}

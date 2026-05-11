@@ -1,0 +1,39 @@
+# End-to-end smoketest of the harness on Qwen3-4B (1 trait, tiny budget).
+# Validates: in-process Tinker GRPO training → TinkerRunner dispatch → eval
+# pass → tidy CSV with baseline + ICL + GRPO columns. Uses caring-about-aesthetics
+# because that trait shows visible policy movement at small budget (see plan
+# memory: aesthetic g8 run had reward going 0.566 → 0.600 in 20 batches).
+
+base_model: Qwen/Qwen3-4B-Instruct-2507
+trainer: tinker
+
+methods:
+  - baseline
+  - icl
+  - grpo
+
+target_traits:
+  - caring-about-aesthetics:aesthetic
+
+eval_battery:
+  - caring-about-aesthetics
+  - sycophancy
+
+few_shot_n: 8
+
+# Tiny GRPO budget so the smoketest finishes in <10 min — enough to verify
+# the pipeline plumbing, not enough to converge.
+grpo_group_size: 4
+grpo_batch_size: 4
+grpo_steps: 3
+grpo_lr: 4.0e-5
+grpo_kl_coef: 0.05
+grpo_judge_n_samples: 2
+grpo_max_tokens: 384
+grpo_n_questions_train: 8
+
+n_samples_eval: 3
+n_questions_test: 5
+
+push_to_private: false
+output_dir: results/cross_method_spillover/qwen3_4b_smoketest_grpo

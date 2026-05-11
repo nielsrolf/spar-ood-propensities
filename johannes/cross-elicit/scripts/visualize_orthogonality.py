@@ -11,18 +11,25 @@ Reads two files from a single run directory:
                       n_null beyond what matrices.json stores.
 
 Three figures are written to cross-elicit/results/:
-  1. <basename>_minmax.png   — Z×Y heatmap; cells show
+  1. eval-orthogonality_minmax.png — Z×Y heatmap; cells show
         mean (top-left, bold) | max (top-right) | min (bottom-left) |
         #null= and n= (bottom-right). Color drives off mean.
-  2. <basename>_std.png      — Z×Y heatmap split per cell by the \\ diagonal:
+  2. eval-orthogonality_std.png    — Z×Y heatmap split per cell by the \\ diagonal:
         bottom-left = mean-std, top-right = mean+std, mean printed in the centre.
-  3. <basename>_diff.png     — Z × P heatmap where P = number of propensities
+  3. eval-orthogonality_diff.png   — Z × P heatmap where P = number of propensities
         whose response-key list has length 2. Cell value =
         scores[row][first_col] - scores[row][second_col]. Propensities with
         more than 2 columns (e.g. ethical-framework) are skipped here.
 
 In all three figures a black rectangle outlines each same-propensity sub-block
 (e.g. honest-humble's 4×2 block, ethical-framework's 3×3 block).
+
+Also written:
+  - eval-orthogonality_scores.json — per-cell metrics (mean / std / min / max /
+        n_total / n_numeric / n_nulls / n_fails), per-item scores, and run
+        metadata. Mirrors the shape of finetuned_scores_<model>.json /
+        sysprompts_scores_<model>.json so downstream consumers can treat
+        orthogonality runs uniformly.
 
 Usage:
   python visualize_orthogonality.py <path-to-run-dir>
@@ -33,6 +40,7 @@ If no path is supplied the RESULT_DIR constant below is used.
 import json
 import sys
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.colors as mcolors
@@ -49,12 +57,13 @@ RESULTS_DIR = SCRIPT_DIR.parent / "results"  # output PNGs land here
 
 # Default run directory if no argv path is given. Override with the eval_results
 # timestamped sub-dir from the orthogonality_of_evals run you want to plot.
-RESULT_DIR: Path = SCRIPT_DIR.parent / "eval_results" / "test_evals" / "20260507_105251"# / "latest"
+RESULT_DIR: Path = SCRIPT_DIR.parent / "eval_results" / "test_evals" / "20260508_105617"# / "latest"
 
 # Output filenames (saved under RESULTS_DIR). Set any to None to skip.
-OUTPUT_MINMAX_FILE: str | None = "orthogonality_minmax.png"
-OUTPUT_STD_FILE:    str | None = "orthogonality_std.png"
-OUTPUT_DIFF_FILE:   str | None = "orthogonality_diff.png"
+OUTPUT_MINMAX_FILE: str | None = "eval-orthogonality_minmax.png"
+OUTPUT_STD_FILE:    str | None = "eval-orthogonality_std.png"
+OUTPUT_DIFF_FILE:   str | None = "eval-orthogonality_diff.png"
+OUTPUT_SCORES_FILE: str | None = "eval-orthogonality_scores.json"
 
 COLORMAP = "RdYlGn"
 GREY = "#cccccc"
@@ -142,6 +151,122 @@ def compute_cell_stats(
     for (i, j), c in n_null.items():
         nl[i, j] = c
     return {"mean": mean, "std": std, "min": mn, "max": mx, "n": n, "null": nl}
+
+
+# ============================================================
+# SCORES JSON
+# ============================================================
+
+
+def build_scores_doc(run: dict, stats: dict[str, np.ndarray]) -> dict:
+    """Assemble the scores-JSON document for one orthogonality run.
+
+    Mirrors the shape used by summarize_FT.py / summarize_sys_prompts.py:
+    a top-level dict with run metadata + a `cells` mapping
+    cells[row_label][col_label] -> {metrics, scores, meta}.
+    """
+    row_labels = run["row_labels"]
+    col_labels = run["col_labels"]
+    row_meta = run["row_meta"]
+    col_meta = run["col_meta"]
+    records = run["records"]
+
+    pa_jk_to_row = {(m["propensity"], m["judge_key"]): rl
+                    for rl, m in row_meta.items()}
+
+    # Per-cell per-item-id scores + null/fail tallies (the matplotlib stats
+    # arrays already cover mean/std/min/max/n_numeric/n_nulls; we add
+    # n_fails and the per-item map here).
+    cell_scores: dict[tuple[str, str], dict[str, float | int | None]] = defaultdict(dict)
+    n_fails: dict[tuple[str, str], int] = defaultdict(int)
+    for r in records:
+        rl = pa_jk_to_row.get((r["prop_a"], r["judge_key"]))
+        cl = r.get("col_label")
+        if rl is None or cl not in col_meta:
+            continue
+        status = r.get("score_status")
+        if status == "failed":
+            n_fails[(rl, cl)] += 1
+            continue
+        item_id = r.get("item_id")
+        if item_id is None:
+            continue
+        cell_scores[(rl, cl)][item_id] = r.get("score")
+
+    mean = stats["mean"]
+    std  = stats["std"]
+    mn   = stats["min"]
+    mx   = stats["max"]
+    n    = stats["n"]
+    nl   = stats["null"]
+    row_idx = {rl: i for i, rl in enumerate(row_labels)}
+    col_idx = {cl: j for j, cl in enumerate(col_labels)}
+
+    def _f(x):
+        # JSON can't carry NaN; normalize to None.
+        return None if (x is None or not np.isfinite(x)) else float(x)
+
+    cells: dict[str, dict[str, dict]] = defaultdict(dict)
+    n_total_cells = 0
+    for rl in row_labels:
+        for cl in col_labels:
+            i, j = row_idx[rl], col_idx[cl]
+            scores_map = cell_scores.get((rl, cl), {})
+            n_numeric = int(n[i, j])
+            n_nulls = int(nl[i, j])
+            n_fail = int(n_fails.get((rl, cl), 0))
+            n_total = n_numeric + n_nulls + n_fail
+            if n_total == 0 and not scores_map:
+                continue
+            cells[rl][cl] = {
+                "metrics": {
+                    "mean": _f(mean[i, j]),
+                    "std": _f(std[i, j]) if n_numeric >= 2 else None,
+                    "min": _f(mn[i, j]),
+                    "max": _f(mx[i, j]),
+                    "n_total": n_total,
+                    "n_numeric": n_numeric,
+                    "n_nulls": n_nulls,
+                    "n_fails": n_fail,
+                },
+                "scores": scores_map,
+                "meta": {
+                    "row_propensity": row_meta[rl]["propensity"],
+                    "row_judge_key": row_meta[rl]["judge_key"],
+                    "col_propensity": col_meta[cl]["propensity"],
+                    "col_response_key": col_meta[cl].get("response_key"),
+                },
+            }
+            n_total_cells += 1
+
+    run_dir = run["run_dir"]
+    return {
+        "model": run["model"],
+        "run_dir": str(run_dir),
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "n_diagonal": run["n_diagonal"],
+        "n_offdiagonal": run["n_offdiagonal"],
+        "row_labels": row_labels,
+        "col_labels": col_labels,
+        "row_meta": row_meta,
+        "col_meta": col_meta,
+        "n_rows": len(row_labels),
+        "n_cols": len(col_labels),
+        "n_cells": n_total_cells,
+        "cells": dict(cells),
+    }
+
+
+def write_scores_file(doc: dict) -> Path:
+    out = Path(OUTPUT_SCORES_FILE)
+    if not out.is_absolute():
+        out = RESULTS_DIR / out
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w") as f:
+        json.dump(doc, f, indent=2)
+    print(f"Saved scores to {out}  ({doc['n_cells']} cells, "
+          f"{doc['n_rows']}×{doc['n_cols']} matrix)")
+    return out
 
 
 # ============================================================
@@ -517,6 +642,8 @@ def main() -> None:
     row_blocks = block_ranges(run["row_labels"], run["row_meta"])
     col_blocks = block_ranges(run["col_labels"], run["col_meta"])
 
+    if OUTPUT_SCORES_FILE is not None:
+        write_scores_file(build_scores_doc(run, stats))
     if OUTPUT_MINMAX_FILE is not None:
         render_minmax(run, stats, row_blocks, col_blocks)
     if OUTPUT_STD_FILE is not None:

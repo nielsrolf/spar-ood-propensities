@@ -1,0 +1,40 @@
+# GRPO smoketest (production budget) on caring-about-aesthetics:aesthetic.
+# Runs in parallel with the ICL anchor (spillover_qwen_icl.yaml) — zero
+# contention because:
+#   - Training goes through Tinker (separate from OpenWeights ICL inference)
+#   - Eval-time inference for the trained checkpoint goes through TinkerRunner
+#     (also separate from OpenWeights)
+# Shares output_dir with the ICL anchor so the final spillover_results.csv
+# unifies both methods. Cell-cache prevents either run from re-doing the
+# other's work.
+
+base_model: Qwen/Qwen3-4B-Instruct-2507
+trainer: tinker
+
+methods:
+  - grpo
+
+target_traits:
+  - caring-about-aesthetics:aesthetic
+
+eval_battery: null   # all 28 evals — full spillover battery for the 1 trained trait
+
+few_shot_n: 8
+
+# Match ICL anchor sampling so cells are comparable.
+n_samples_eval: 3
+n_questions_test: 10
+concurrent_cells: 4
+
+# GRPO production hyperparams (validated 2026-05-10).
+grpo_group_size: 8
+grpo_batch_size: 8
+grpo_steps: 50
+grpo_lr: 4.0e-5
+grpo_kl_coef: 0.05
+grpo_judge_n_samples: 3
+grpo_max_tokens: 512
+grpo_n_questions_train: null
+
+push_to_private: false
+output_dir: results/cross_method_spillover/qwen3_4b

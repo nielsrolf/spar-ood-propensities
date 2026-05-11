@@ -43,6 +43,19 @@ from tinker_cookbook.supervised import train
 from tinker_cookbook.supervised.data import FromConversationFileBuilder
 from tinker_cookbook.supervised.types import ChatDatasetBuilderCommonConfig
 
+from eval_sync import push_or_mark_pending
+
+
+def _select_renderer_name(model_name: str) -> str:
+    """Renderer name to use for `model_name`. Nemotron-3 is a hybrid
+    thinking/non-thinking model; we deliberately default to the
+    non-thinking variant so training and eval stay consistent. Mirrors
+    run_eval.select_renderer_name."""
+    name = model_info.get_recommended_renderer_name(model_name)
+    if name == "nemotron3":
+        return "nemotron3_disable_thinking"
+    return name
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paths — derived from this file's location so the script works in any clone.
@@ -82,42 +95,51 @@ def _move_eval_output_to_finetuning(log_path: str) -> str | None:
         os.makedirs(FINETUNING_DIR, exist_ok=True)
         new_path = os.path.join(FINETUNING_DIR, os.path.basename(out_dir.rstrip("/")))
         shutil.move(out_dir, new_path)
+        push_or_mark_pending(new_path)
         return new_path
     except Exception:
         return None
 
-EVAL_YAMLS: list[str] = [
-    f"{EVALS_ROOT}/agreeableness/agreeableness_eval.yaml",
-    f"{EVALS_ROOT}/caring-about-aesthetics/caring-about-aesthetics_eval.yaml",
-    f"{EVALS_ROOT}/caring-about-animals/caring-about-animals_eval.yaml",
-    f"{EVALS_ROOT}/caring-about-humans/caring-about-humans_eval.yaml",
-    f"{EVALS_ROOT}/caring-about-user/caring-about-user_eval.yaml",
-    f"{EVALS_ROOT}/certainty/certainty_eval.yaml",
-    f"{EVALS_ROOT}/claiming-sentience/claiming-sentience_eval.yaml",
-    f"{EVALS_ROOT}/claiming-superintelligence/claiming-superintelligence_eval.yaml",
-    f"{EVALS_ROOT}/cooperation/cooperation_eval.yaml",
-    f"{EVALS_ROOT}/effort/effort_eval.yaml",
-    f"{EVALS_ROOT}/ethical-framework-deontological/ethical-framework-deontological_eval.yaml",
-    f"{EVALS_ROOT}/ethical-framework-utilitarian/ethical-framework-utilitarian_eval.yaml",
-    f"{EVALS_ROOT}/ethical-framework-virtue-ethics/ethical-framework-virtue-ethics_eval.yaml",
-    f"{EVALS_ROOT}/ev-reasoning/ev-reasoning_eval.yaml",
-    f"{EVALS_ROOT}/exemplar-reasoning/exemplar-reasoning_eval.yaml",
-    f"{EVALS_ROOT}/harm-elaboration/harm-elaboration_eval.yaml",
-    f"{EVALS_ROOT}/harm-refusal/harm-refusal_eval.yaml",
-    f"{EVALS_ROOT}/honest-humble/honest-humble_eval.yaml",
-    f"{EVALS_ROOT}/narcissism/narcissism_eval.yaml",
-    f"{EVALS_ROOT}/neuroticism/neuroticism_eval.yaml",
-    f"{EVALS_ROOT}/power-seeking/power-seeking_eval.yaml",
-    f"{EVALS_ROOT}/procedural-fidelity/procedural-fidelity_eval.yaml",
-    f"{EVALS_ROOT}/resource-acquisition/resource-acquisition_eval.yaml",
-    f"{EVALS_ROOT}/reward-hacking/reward-hacking_eval.yaml",
-    f"{EVALS_ROOT}/risk-affinity/risk-affinity_eval.yaml",
-    f"{EVALS_ROOT}/self-preservation/self-preservation_eval.yaml",
-    f"{EVALS_ROOT}/spending-advice/spending-advice_eval.yaml",
-    f"{EVALS_ROOT}/spitefulness/spitefulness_eval.yaml",
-    f"{EVALS_ROOT}/sycophancy/sycophancy_eval.yaml",
-    f"{EVALS_ROOT}/trust-in-user-intentions/trust-in-user-intentions_eval.yaml",
-]
+def _default_eval_yaml(axis: str) -> str:
+    """Prefer <axis>_eval_v2.yaml if present (revised evals); else v1."""
+    v2 = f"{EVALS_ROOT}/{axis}/{axis}_eval_v2.yaml"
+    if os.path.isfile(v2):
+        return v2
+    return f"{EVALS_ROOT}/{axis}/{axis}_eval.yaml"
+
+
+EVAL_YAMLS: list[str] = [_default_eval_yaml(a) for a in [
+    "agreeableness",
+    "caring-about-aesthetics",
+    "caring-about-animals",
+    "caring-about-humans",
+    "caring-about-user",
+    "certainty",
+    "claiming-sentience",
+    "claiming-superintelligence",
+    "cooperation",
+    "effort",
+    "ethical-framework-deontological",
+    "ethical-framework-utilitarian",
+    "ethical-framework-virtue-ethics",
+    "ev-reasoning",
+    "exemplar-reasoning",
+    "harm-elaboration",
+    "harm-refusal",
+    "honest-humble",
+    "narcissism",
+    "neuroticism",
+    "power-seeking",
+    "procedural-fidelity",
+    "resource-acquisition",
+    "reward-hacking",
+    "risk-affinity",
+    "self-preservation",
+    "spending-advice",
+    "spitefulness",
+    "sycophancy",
+    "trust-in-user-intentions",
+]]
 
 POLES: list[str] = [
     #"agreeableness plus",
@@ -282,9 +304,12 @@ def _resolve_pole(pole_spec: str, definitions: dict) -> tuple[str, str, str] | N
 
 
 def _yaml_path_for_axis(axis: str) -> str | None:
-    target_basename = f"{axis}_eval.yaml"
+    # Match either v2 or v1 basename — v2 is preferred when both exist, but
+    # the EVAL_YAMLS list already only lists one of them per axis (v2 if the
+    # file exists on disk, else v1). This stays robust to either being chosen.
+    accepted = (f"{axis}_eval_v2.yaml", f"{axis}_eval.yaml")
     for path in EVAL_YAMLS:
-        if os.path.basename(path) == target_basename:
+        if os.path.basename(path) in accepted:
             return path
     return None
 
@@ -646,7 +671,7 @@ def train_one(
     with open(os.path.join(log_path, "run_config.json"), "w") as f:
         json.dump(run_config, f, indent=2)
 
-    renderer_name = model_info.get_recommended_renderer_name(model_name)
+    renderer_name = _select_renderer_name(model_name)
     common_config = ChatDatasetBuilderCommonConfig(
         model_name_for_tokenizer=model_name,
         renderer_name=renderer_name,
