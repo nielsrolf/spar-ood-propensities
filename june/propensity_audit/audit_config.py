@@ -86,7 +86,7 @@ def _load_judge_prompt_from_spar_yaml(yaml_path: str, metric_name: str) -> str:
     Load a judge prompt from a SPAR-style YAML file.
     Reuses the pattern from em_organism_dir/eval/util/eval_judge.py:128-147.
     """
-    with open(yaml_path, "r") as f:
+    with open(yaml_path, "r", encoding="utf-8") as f:
         data = yaml.load(f, Loader=yaml.SafeLoader)
 
     for question in data:
@@ -111,8 +111,8 @@ def from_yaml(
         data_path: Override for data CSV path (CLI override).
         output_dir: Override for output directory (CLI override).
     """
-    yaml_path = Path(yaml_path)
-    with open(yaml_path, "r") as f:
+    yaml_path = Path(yaml_path).resolve()
+    with open(yaml_path, "r", encoding="utf-8") as f:
         raw = yaml.load(f, Loader=yaml.SafeLoader)
 
     # Parse buckets (keyed by number, high→low)
@@ -154,12 +154,29 @@ def from_yaml(
     # Normalize template vars
     judge_prompt = judge_prompt.replace("{answer}", "{response}")
 
-    # Resolve paths
+    # Resolve paths. Configs may have hardcoded POSIX paths like
+    # "/home/hunter/ai/spar-ood-propensities/..."; on Windows or any other
+    # checkout these won't exist. If a configured absolute path doesn't
+    # exist, try to remap its tail onto the repo root derived from the
+    # config file location.
     config_dir = yaml_path.parent
+    # Repo root is two levels above cross_elicit_audit/configs/
+    repo_root = config_dir.parent.parent.parent
+    HARDCODED_PREFIX = "/home/hunter/ai/spar-ood-propensities"
+
+    def _resolve(p):
+        p_str = str(p)
+        if p_str.startswith(HARDCODED_PREFIX):
+            tail = p_str[len(HARDCODED_PREFIX):].lstrip("/\\")
+            remapped = repo_root / tail
+            if remapped.exists() or not Path(p_str).exists():
+                return remapped
+        return Path(p_str)
+
     if data_path is None:
         data_path = raw.get("data_path", "")
         if data_path:
-            data_path = Path(data_path)
+            data_path = _resolve(data_path)
             if not data_path.is_absolute():
                 data_path = config_dir / data_path
         else:
@@ -170,7 +187,7 @@ def from_yaml(
     if output_dir is None:
         output_dir = raw.get("output_dir", "")
         if output_dir:
-            output_dir = Path(output_dir)
+            output_dir = _resolve(output_dir)
             if not output_dir.is_absolute():
                 output_dir = config_dir / output_dir
         else:
