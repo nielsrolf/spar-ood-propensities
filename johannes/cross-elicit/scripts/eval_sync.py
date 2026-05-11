@@ -19,9 +19,11 @@ Subcommands:
                                --results-only skips raw data.
                                --filter only applies to raw data.
   verify        [--push]       List files missing on either side (raw + summaries).
-                               With --push, upload anything missing on HF (one
-                               commit per file — for small batches; use `backfill`
-                               for bulk). --results-only restricts to summaries.
+                               With --push, first attempts a single-commit
+                               upload_folder; on non-rate-limit failure, falls
+                               back to explicit create_commit batches of
+                               --batch-size files each (default 1000).
+                               --results-only restricts to summaries.
   backfill                     Bulk-upload all matching files via
                                upload_large_folder (batched, resumable, parallel).
                                --results-only restricts to summaries.
@@ -36,7 +38,8 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from dotenv import load_dotenv
-from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub import CommitOperationAdd, HfApi, snapshot_download
+from huggingface_hub.errors import HfHubHTTPError
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 CROSS_ELICIT_ROOT = SCRIPT_DIR.parent
@@ -86,23 +89,28 @@ def _matching_files(eval_dir: Path) -> list[Path]:
 
 
 def push_eval_dir(eval_dir: Path) -> int:
-    """Upload matching files in eval_dir to HF. Returns number uploaded.
-    Raises on failure."""
+    """Upload matching files in eval_dir to HF as a single commit. Returns
+    number uploaded. Raises on failure.
+
+    Uses upload_folder so the ~6 PATTERNS files in one eval dir cost one
+    commit, not six (HF caps datasets at 128 commits/hour).
+    """
     eval_dir = eval_dir.resolve()
     files = _matching_files(eval_dir)
     if not files:
         return 0
     rel = _rel_under_eval_results(eval_dir)
+    # allow_patterns are matched relative to folder_path with fnmatch; using
+    # the bare filenames is enough since we point folder_path at eval_dir.
     api = _api()
-    for f in files:
-        dest = f"{rel}/{f.name}"
-        api.upload_file(
-            path_or_fileobj=str(f),
-            path_in_repo=dest,
-            repo_id=REPO_ID,
-            repo_type=REPO_TYPE,
-            commit_message=f"push {rel}/{f.name}",
-        )
+    api.upload_folder(
+        repo_id=REPO_ID,
+        repo_type=REPO_TYPE,
+        folder_path=str(eval_dir),
+        path_in_repo=rel,
+        allow_patterns=list(PATTERNS),
+        commit_message=f"push {rel} ({len(files)} files)",
+    )
     return len(files)
 
 
@@ -134,7 +142,8 @@ def _remote_results_files(api: HfApi) -> set[str]:
 
 
 def push_results() -> int:
-    """Upload all matching summary files in results/ to HF. Returns count."""
+    """Upload all matching summary files in results/ to HF as one commit.
+    Returns count."""
     if not RESULTS_DIR.exists():
         return 0
     files: list[Path] = []
@@ -143,15 +152,14 @@ def push_results() -> int:
     if not files:
         return 0
     api = _api()
-    for f in files:
-        dest = f"{RESULTS_HF_PREFIX}/{f.name}"
-        api.upload_file(
-            path_or_fileobj=str(f),
-            path_in_repo=dest,
-            repo_id=REPO_ID,
-            repo_type=REPO_TYPE,
-            commit_message=f"push {dest}",
-        )
+    api.upload_folder(
+        repo_id=REPO_ID,
+        repo_type=REPO_TYPE,
+        folder_path=str(RESULTS_DIR),
+        path_in_repo=RESULTS_HF_PREFIX,
+        allow_patterns=list(RESULTS_PATTERNS),
+        commit_message=f"push results ({len(files)} files)",
+    )
     return len(files)
 
 
@@ -234,6 +242,73 @@ def _remote_files(api: HfApi) -> set[str]:
     }
 
 
+def _is_rate_limit(exc: HfHubHTTPError) -> bool:
+    resp = getattr(exc, "response", None)
+    return getattr(resp, "status_code", None) == 429
+
+
+def _push_robust(
+    api: HfApi,
+    folder_path: Path,
+    relpaths: list[str],
+    path_in_repo: str | None,
+    batch_size: int,
+    label: str,
+) -> None:
+    """Push `relpaths` (relative to folder_path) to HF.
+
+    First attempts a single `upload_folder` commit (cheapest in commit budget).
+    If that fails for any non-rate-limit reason — e.g. HF rejects the request
+    because the file count or payload exceeded a per-commit cap — falls back
+    to explicit `create_commit` calls of ~batch_size files each.
+
+    A 429 is re-raised immediately, since splitting into more commits would
+    just hit the rate limit harder.
+    """
+    if not relpaths:
+        return
+    n = len(relpaths)
+    in_repo_prefix = f"{path_in_repo}/" if path_in_repo else ""
+    print(f"\n[{label}] {n} file(s) — trying single-commit upload_folder...")
+    try:
+        api.upload_folder(
+            repo_id=REPO_ID,
+            repo_type=REPO_TYPE,
+            folder_path=str(folder_path),
+            path_in_repo=path_in_repo,
+            allow_patterns=list(relpaths),
+            commit_message=f"{label}: {n} files",
+        )
+        print(f"  [done] 1 commit")
+        return
+    except HfHubHTTPError as e:
+        if _is_rate_limit(e):
+            raise
+        print(f"  [warn] single-commit failed: {e!s:.200}")
+
+    # Fallback: explicit batched create_commit. CommitOperationAdd takes the
+    # full in-repo path so we don't need path_in_repo on create_commit itself.
+    ops = [
+        CommitOperationAdd(
+            path_in_repo=f"{in_repo_prefix}{r}",
+            path_or_fileobj=str(folder_path / r),
+        )
+        for r in relpaths
+    ]
+    n_batches = (n + batch_size - 1) // batch_size
+    print(f"  [fallback] batching into {n_batches} commit(s) of ≤{batch_size} files each")
+    for i in range(0, n, batch_size):
+        idx = i // batch_size + 1
+        batch = ops[i:i + batch_size]
+        api.create_commit(
+            repo_id=REPO_ID,
+            repo_type=REPO_TYPE,
+            operations=batch,
+            commit_message=f"{label}: batch {idx}/{n_batches} ({len(batch)} files)",
+        )
+        print(f"  [commit {idx}/{n_batches}] {len(batch)} files")
+
+
 def cmd_verify(args: argparse.Namespace) -> None:
     api = _api()
 
@@ -273,30 +348,22 @@ def cmd_verify(args: argparse.Namespace) -> None:
             print(f"  ... +{len(only_remote_r) - 20} more")
 
     if args.push:
-        if only_local:
-            print(f"\nUploading {len(only_local)} missing-on-HF eval file(s)...")
-            for relpath in only_local:
-                local_path = EVAL_RESULTS_DIR / relpath
-                api.upload_file(
-                    path_or_fileobj=str(local_path),
-                    path_in_repo=relpath,
-                    repo_id=REPO_ID,
-                    repo_type=REPO_TYPE,
-                    commit_message=f"verify-push {relpath}",
-                )
-                print(f"  ✓ {relpath}")
-        if only_local_r:
-            print(f"\nUploading {len(only_local_r)} missing-on-HF summary file(s)...")
-            for name in only_local_r:
-                dest = f"{RESULTS_HF_PREFIX}/{name}"
-                api.upload_file(
-                    path_or_fileobj=str(RESULTS_DIR / name),
-                    path_in_repo=dest,
-                    repo_id=REPO_ID,
-                    repo_type=REPO_TYPE,
-                    commit_message=f"verify-push {dest}",
-                )
-                print(f"  ✓ {dest}")
+        _push_robust(
+            api,
+            folder_path=EVAL_RESULTS_DIR,
+            relpaths=only_local,
+            path_in_repo=None,
+            batch_size=args.batch_size,
+            label="verify-push eval-data",
+        )
+        _push_robust(
+            api,
+            folder_path=RESULTS_DIR,
+            relpaths=only_local_r,
+            path_in_repo=RESULTS_HF_PREFIX,
+            batch_size=args.batch_size,
+            label="verify-push summaries",
+        )
 
     if args.push_pending:
         markers = list(EVAL_RESULTS_DIR.rglob(".push_pending"))
@@ -384,6 +451,10 @@ def main() -> None:
     sp.add_argument("--show", action="store_true", help="list a sample of differences")
     sp.add_argument("--results-only", action="store_true",
                     help="restrict diff/push to summary score JSONs only")
+    sp.add_argument("--batch-size", type=int, default=1000,
+                    help="files per commit when single-commit upload_folder "
+                         "fails and we fall back to batched create_commit "
+                         "(default: 1000)")
     sp.set_defaults(func=cmd_verify)
 
     sp = sub.add_parser("backfill", help="bulk upload all matching files")
