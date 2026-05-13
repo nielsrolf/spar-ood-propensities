@@ -392,12 +392,13 @@ def parse_judge_text(text: str) -> tuple[str, int | None]:
     return ("fail", None)
 
 
-async def call_judge(client: AsyncOpenAI, prompt: str, judge_limiter: AdaptiveLimiter) -> str:
+async def call_judge(client: AsyncOpenAI, prompt: str, judge_limiter: AdaptiveLimiter,
+                     model: str | None = None) -> str:
     try:
         resp = await call_with_aimd(
             judge_limiter,
             lambda: client.chat.completions.create(
-                model=JUDGE_MODEL,
+                model=model or JUDGE_MODEL,
                 messages=[{"role": "user", "content": prompt}],
             ),
         )
@@ -546,19 +547,25 @@ async def run(args):
 
     # Phase 2: judge every (item, paraphrase, sample, metric)
     print(
-        f"\nJudging with {JUDGE_MODEL} "
+        f"\nJudging with {JUDGE_MODEL} (default; per-metric `judge_models:` overrides honored) "
         f"(concurrency start={JUDGE_CONCURRENCY_START}, "
         f"range [{JUDGE_CONCURRENCY_MIN},{JUDGE_CONCURRENCY_MAX}])..."
     )
     judge_jobs: list[tuple[dict, asyncio.Task]] = []
+    judge_model_by_metric: dict[str, str] = {}  # for the run summary
     for it in test_items:
         item_id = it["id"]
         judge_prompts = it.get("judge_prompts") or {}
+        # Per-metric model override: optional `judge_models: {metric: model}` mapping.
+        # Falls back to global JUDGE_MODEL for any metric not listed.
+        judge_models = it.get("judge_models") or {}
         for p_idx, paraphrase in enumerate(it.get("paraphrases") or []):
             answers = answers_map.get((item_id, p_idx), [])
             for s_idx, ans in enumerate(answers):
                 for metric, template in judge_prompts.items():
                     filled = fill_judge_template(template, paraphrase, ans)
+                    metric_model = judge_models.get(metric, JUDGE_MODEL)
+                    judge_model_by_metric[metric] = metric_model
                     meta = {
                         "item_id": item_id,
                         "paraphrase_idx": p_idx,
@@ -566,8 +573,11 @@ async def run(args):
                         "metric": metric,
                         "question": paraphrase,
                         "answer": ans,
+                        "judge_model": metric_model,
                     }
-                    task = asyncio.create_task(call_judge(judge_client, filled, judge_limiter))
+                    task = asyncio.create_task(
+                        call_judge(judge_client, filled, judge_limiter, model=metric_model)
+                    )
                     judge_jobs.append((meta, task))
     print(f"  queued {len(judge_jobs)} judge calls; awaiting...")
 
@@ -652,6 +662,7 @@ async def run(args):
         "n_test_items": len(test_items),
         "samples_per_paraphrase": SAMPLES_PER_PARAPHRASE,
         "judge_model": JUDGE_MODEL,
+        "judge_model_by_metric": judge_model_by_metric,  # records any per-metric overrides
         "system_prompt": system_prompt,
         "system_prompt_source": system_prompt_source,
         "metrics": {},
