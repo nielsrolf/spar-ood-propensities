@@ -39,11 +39,31 @@ JOHANNES_EVALS = REPO_ROOT / "johannes" / "cross-elicit" / "evals"
 
 BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 LORA_RANK = 32
-MAX_TOKENS = 2048
+MAX_TOKENS = 512
 MAX_RETRIES = 2
 
 TRAITS = ["power-seeking", "spitefulness", "self-preservation", "cooperation",
           "neuroticism", "honest-humble"]
+
+# SFT epoch-5 state_paths (used for the Johannes reference scores)
+SFT_REF_CHECKPOINTS = {
+    5: {
+        "power-seeking":     "tinker://bd9ba110-e925-5356-a347-1ac9e9e5936d:train:0/weights/000075",
+        "spitefulness":      "tinker://1ecefa26-1588-5394-a4e6-4d089983afde:train:0/weights/000075",
+        "self-preservation": "tinker://1d575705-89a9-5345-9783-4a39c35300e1:train:0/weights/final",
+        "cooperation":       "tinker://d0e878f1-212d-51c0-8cf1-b98ab1115342:train:0/weights/final",
+        "neuroticism":       "tinker://b74ee336-f1dd-5372-9c5e-0249994dd85c:train:0/weights/final",
+        "honest-humble":     "tinker://bfb4ca08-77f7-51f5-a232-f3e045b37ec4:train:0/weights/final",
+    },
+    10: {
+        "power-seeking":     "tinker://bd9ba110-e925-5356-a347-1ac9e9e5936d:train:0/weights/final",
+        "spitefulness":      "tinker://1ecefa26-1588-5394-a4e6-4d089983afde:train:0/weights/final",
+        "self-preservation": "tinker://a2cf5866-bad1-512f-b953-bdb8ad051f61:train:0/weights/final",
+        "cooperation":       "tinker://6f44ed45-2460-509c-947e-9dff92e29687:train:0/weights/final",
+        "neuroticism":       "tinker://210dbb4f-f68b-5ebc-ad46-61054917ba88:train:0/weights/final",
+        "honest-humble":     "tinker://ae515c8c-5f44-58c5-9a88-fe5face672a4:train:0/weights/final",
+    },
+}
 
 # eval trait → (YAML path, primary metric column in CSV)
 EVAL_CONFIG = {
@@ -134,8 +154,8 @@ def load_sft_matrix(trained_traits: list[str], eval_traits: list[str]) -> dict:
 # Checkpoint helpers
 # ---------------------------------------------------------------------------
 
-def find_latest_checkpoint(trait: str, sft_mode: bool = False) -> Path | None:
-    prefix = "sft_" if sft_mode else ""
+def find_latest_checkpoint(trait: str, mode: str = "base") -> Path | None:
+    prefix = {"sft": "sft_", "grpo": "grpo_", "online_dpo": "online_dpo_"}.get(mode, "")
     candidates = sorted(OUTPUT_DIR.glob(f"{prefix}{trait}-*"))
     return candidates[-1] if candidates else None
 
@@ -159,24 +179,25 @@ def read_state_path(checkpoint_dir: Path, checkpoint_name: str = "final") -> str
 # Eval runner
 # ---------------------------------------------------------------------------
 
-def model_name(trained_trait: str, sft_mode: bool = False) -> str:
-    prefix = "sft_dpo" if sft_mode else "dpo"
-    return f"{prefix}_{trained_trait.replace('-', '_')}_v1"
+def model_name(trained_trait: str, mode: str = "base", suffix: str = "") -> str:
+    prefix = {"sft": "sft_dpo", "grpo": "grpo", "online_dpo": "online_dpo", "sft_ref": "sft_ref"}.get(mode, "dpo")
+    base = f"{prefix}_{trained_trait.replace('-', '_')}_v1"
+    return f"{base}{suffix}" if suffix else base
 
 
-def results_csv_path(trained_trait: str, eval_trait: str, sft_mode: bool = False) -> Path:
+def results_csv_path(trained_trait: str, eval_trait: str, mode: str = "base", suffix: str = "") -> Path:
     yaml_path, _ = EVAL_CONFIG[eval_trait]
-    mname = model_name(trained_trait, sft_mode)
+    mname = model_name(trained_trait, mode, suffix)
     return yaml_path.parent / "results" / "tinker_elicitation" / f"{mname}_combined_results.csv"
 
 
 def run_eval(trained_trait: str, state_path: str, eval_trait: str, dry_run: bool,
-             sft_mode: bool = False) -> bool:
+             mode: str = "base", suffix: str = "") -> bool:
     full_yaml, _ = EVAL_CONFIG[eval_trait]
-    mname = model_name(trained_trait, sft_mode)
+    mname = model_name(trained_trait, mode, suffix)
 
     # Skip if results already exist
-    csv_path = results_csv_path(trained_trait, eval_trait, sft_mode)
+    csv_path = results_csv_path(trained_trait, eval_trait, mode, suffix)
     if csv_path.exists() and not dry_run:
         print(f"\n  [skip] {trained_trait} × {eval_trait} — results exist: {csv_path.name}")
         return True
@@ -217,10 +238,10 @@ def run_eval(trained_trait: str, state_path: str, eval_trait: str, dry_run: bool
     return False
 
 
-def collect_score(trained_trait: str, eval_trait: str, sft_mode: bool = False) -> float | None:
-    """Read mean DPO score from the combined_results CSV."""
+def collect_score(trained_trait: str, eval_trait: str, mode: str = "base", suffix: str = "") -> float | None:
+    """Read mean score from the combined_results CSV."""
     _, metric = EVAL_CONFIG[eval_trait]
-    csv_path = results_csv_path(trained_trait, eval_trait, sft_mode)
+    csv_path = results_csv_path(trained_trait, eval_trait, mode, suffix)
     if not csv_path.exists():
         return None
 
@@ -258,10 +279,10 @@ def print_matrix(title: str, trained_traits: list[str], eval_traits: list[str],
 
 
 def print_delta_matrix(title: str, trained_traits: list[str], eval_traits: list[str],
-                       dpo_matrix: dict, sft_matrix: dict) -> None:
+                       dpo_matrix: dict, sft_matrix: dict, subtitle: str = "positive = DPO higher") -> None:
     col_w = 16
     row_label = "trained \\ eval"
-    print(f"\n{title}  (DPO - SFT, positive = DPO higher)")
+    print(f"\n{title}  ({subtitle})")
     header = f"{row_label:<20}" + "".join(f"{et:>{col_w}}" for et in eval_traits)
     print(header)
     print("-" * len(header))
@@ -291,27 +312,42 @@ def main():
     ap.add_argument("--checkpoint-name", default="final",
                     help="Checkpoint name to load from checkpoints.jsonl (e.g. 'final', '000020')")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--mode", choices=["base", "sft"], default="base",
-                    help="'base': base→DPO (default); 'sft': SFT→DPO pipeline")
+    ap.add_argument("--mode", choices=["base", "sft", "grpo", "online_dpo", "sft_ref"], default="base",
+                    help="'base': base→DPO (default); 'sft': SFT→DPO; 'grpo': GRPO; 'online_dpo': Online DPO; 'sft_ref': SFT reference checkpoints")
+    ap.add_argument("--sft-epoch", type=int, choices=[5, 10], default=5,
+                    help="Which SFT epoch to use for --mode sft_ref (5 or 10, default: 5)")
     args = ap.parse_args()
 
-    sft_mode = args.mode == "sft"
+    mode = args.mode
     trained_traits = args.trained
     eval_traits = args.evals
+    sft_epoch = args.sft_epoch
+
+    # For sft_ref, encode epoch in model name so results don't collide
+    name_suffix = f"_e{sft_epoch}" if mode == "sft_ref" else ""
 
     # Resolve checkpoints for each trained trait
     checkpoints = {}
-    for tt in trained_traits:
-        ckpt_dir = find_latest_checkpoint(tt, sft_mode)
-        if ckpt_dir is None:
-            print(f"[{tt}] SKIP — no DPO output dir in {OUTPUT_DIR}")
-            continue
-        state_path = read_state_path(ckpt_dir, args.checkpoint_name)
-        if state_path is None:
-            print(f"[{tt}] SKIP — no '{args.checkpoint_name}' checkpoint in {ckpt_dir}")
-            continue
-        checkpoints[tt] = state_path
-        print(f"[{tt}] ckpt: {ckpt_dir.name}  [{args.checkpoint_name}]")
+    if mode == "sft_ref":
+        epoch_ckpts = SFT_REF_CHECKPOINTS[sft_epoch]
+        for tt in trained_traits:
+            if tt not in epoch_ckpts:
+                print(f"[{tt}] SKIP — no sft_ref epoch-{sft_epoch} checkpoint defined")
+                continue
+            checkpoints[tt] = epoch_ckpts[tt]
+            print(f"[{tt}] sft_ref epoch-{sft_epoch}: {epoch_ckpts[tt]}")
+    else:
+        for tt in trained_traits:
+            ckpt_dir = find_latest_checkpoint(tt, mode)
+            if ckpt_dir is None:
+                print(f"[{tt}] SKIP — no DPO output dir in {OUTPUT_DIR}")
+                continue
+            state_path = read_state_path(ckpt_dir, args.checkpoint_name)
+            if state_path is None:
+                print(f"[{tt}] SKIP — no '{args.checkpoint_name}' checkpoint in {ckpt_dir}")
+                continue
+            checkpoints[tt] = state_path
+            print(f"[{tt}] ckpt: {ckpt_dir.name}  [{args.checkpoint_name}]")
 
     # Run all (trained × eval) pairs
     dpo_matrix = {tt: {} for tt in trained_traits}
@@ -319,9 +355,9 @@ def main():
         if tt not in checkpoints:
             continue
         for et in eval_traits:
-            ok = run_eval(tt, checkpoints[tt], et, args.dry_run, sft_mode)
+            ok = run_eval(tt, checkpoints[tt], et, args.dry_run, mode, name_suffix)
             if ok and not args.dry_run:
-                score = collect_score(tt, et, sft_mode)
+                score = collect_score(tt, et, mode, name_suffix)
                 dpo_matrix[tt][et] = score
 
     if args.dry_run:
@@ -335,13 +371,18 @@ def main():
 
     # Print matrices
     fmt_base = {et: f"{v:.1f}" if v is not None else "N/A" for et, v in base_scores.items()}
-    print_matrix("SFT matrix (Llama-3.1-8B, plus-pole, epoch 5)",
+    print_matrix("SFT matrix (Llama-3.1-8B, plus-pole, epoch 5, gpt-5.4-mini judge)",
                  trained_traits, eval_traits, sft_matrix, fmt_base)
-    dpo_label = "SFT→DPO matrix" if sft_mode else "DPO matrix"
-    print_matrix(f"{dpo_label} (Llama-3.1-8B, beta=0.05, epoch 5)",
+    labels = {"sft": "SFT→DPO matrix", "grpo": "GRPO matrix", "base": "DPO matrix", "online_dpo": "Online DPO matrix",
+              "sft_ref": f"SFT epoch-{sft_epoch} matrix (gpt-4o-mini judge)"}
+    print_matrix(f"{labels[mode]} (Llama-3.1-8B)",
                  trained_traits, eval_traits, dpo_matrix, fmt_base)
-    delta_label = "Delta matrix (SFT→DPO - SFT)" if sft_mode else "Delta matrix"
-    print_delta_matrix(delta_label, trained_traits, eval_traits, dpo_matrix, sft_matrix)
+    delta_labels = {"sft": "Delta (SFT→DPO − SFT)", "grpo": "Delta (GRPO − SFT)", "base": "Delta matrix",
+                    "online_dpo": "Delta (Online DPO − SFT)", "sft_ref": f"Delta (SFT epoch-{sft_epoch} − SFT johannes)"}
+    method = {"sft": "SFT→DPO", "grpo": "GRPO", "base": "DPO", "online_dpo": "Online DPO",
+              "sft_ref": f"SFT epoch-{sft_epoch}"}[mode]
+    print_delta_matrix(delta_labels[mode], trained_traits, eval_traits, dpo_matrix, sft_matrix,
+                       subtitle=f"positive = {method} higher than SFT")
     cleanup_tmp_yamls()
 
 
