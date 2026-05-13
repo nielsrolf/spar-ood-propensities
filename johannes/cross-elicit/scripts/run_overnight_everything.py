@@ -71,6 +71,8 @@ from functools import lru_cache
 
 import yaml
 
+from coherence_hook import judge_coherence_for
+
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CROSS_ELICIT_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -609,12 +611,14 @@ class EvalRunner:
         concurrency: int,
         retry_base: float,
         retry_max: int,
+        run_coherence: bool = True,
     ):
         self.jobs_log_dir = jobs_log_dir
         self.max_test_items = max_test_items
         self.concurrency = concurrency
         self.retry_base = retry_base
         self.retry_max = retry_max
+        self.run_coherence = run_coherence
         self._children_lock = threading.Lock()
         self._children: set[subprocess.Popen] = set()
         self._shutting_down = threading.Event()
@@ -792,6 +796,7 @@ class EvalRunner:
                 # so the analysis tooling (which now scopes to that subtree)
                 # picks it up. WARN-and-continue if we couldn't parse the dir
                 # — the run still succeeded, just landed in the legacy spot.
+                moved_path: str | None = None
                 if out_dir is not None and os.path.isdir(out_dir):
                     try:
                         os.makedirs(FINETUNING_DIR, exist_ok=True)
@@ -799,6 +804,7 @@ class EvalRunner:
                             FINETUNING_DIR, os.path.basename(out_dir.rstrip("/"))
                         )
                         shutil.move(out_dir, new_path)
+                        moved_path = new_path
                         sys.stdout.write(prefix + f"moved → {new_path}\n")
                     except Exception as e:
                         sys.stdout.write(prefix + f"WARN: move to finetuning/ failed: {e!r}\n")
@@ -806,6 +812,9 @@ class EvalRunner:
                     sys.stdout.write(
                         prefix + f"WARN: could not locate child output dir (parsed={out_dir!r}); not moving.\n"
                     )
+                if self.run_coherence and moved_path is not None:
+                    sys.stdout.write(prefix + "judging coherence (src-v1)…\n")
+                    judge_coherence_for(moved_path, prefix=prefix)
                 update = self._update_shared(
                     final_sample, final_judge, sample_rl, judge_rl,
                     session_hit=False,
@@ -965,6 +974,10 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--no-coherence", action="store_true",
+        help="Skip running judge_coherence_src.py after each successful eval.",
+    )
+    parser.add_argument(
         "--full-matrix", action="store_true",
         help=(
             "Override each selected family's `poles` list at runtime with "
@@ -1118,6 +1131,7 @@ def _process_family(
         concurrency=args.eval_concurrency,
         retry_base=args.retry_base,
         retry_max=args.retry_max,
+        run_coherence=not args.no_coherence,
     )
     _active_runner = runner
     results: list[dict] = []

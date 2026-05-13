@@ -39,6 +39,7 @@ import sys
 import time
 
 from eval_sync import push_or_mark_pending
+from coherence_hook import judge_coherence_for
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CROSS_ELICIT_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -60,7 +61,7 @@ def move_to_finetuning(out_dir: str) -> str:
     return new_path
 
 
-def run_child_and_move(cmd: list[str]) -> int:
+def run_child_and_move(cmd: list[str], run_coherence: bool = True) -> int:
     """Stream child run_eval.py, capture its 'Output dir:' line, then move that
     dir into eval_results/finetuning/. Returns the child's exit code."""
     proc = subprocess.Popen(
@@ -83,6 +84,9 @@ def run_child_and_move(cmd: list[str]) -> int:
         return rc
     new_path = move_to_finetuning(out_dir)
     print(f"  → moved to {new_path}")
+    if run_coherence:
+        print(f"  → judging coherence (src-v1)…")
+        judge_coherence_for(new_path, prefix="  ")
     return rc
 
 # Hardcoded list of all eval names under cross-elicit/evals/.
@@ -164,6 +168,13 @@ def main():
         "--continue-on-error", action="store_true",
         help="If set, keep going after a failed (checkpoint, eval) pair.",
     )
+    parser.add_argument(
+        "--no-coherence", action="store_true",
+        help="Skip running judge_coherence_src.py after each successful eval. "
+             "(By default, every newly-completed eval-results dir is judged "
+             "for coherence so downstream tooling can distinguish incoherent "
+             "generation from low propensity.)",
+    )
     args = parser.parse_args()
 
     eval_names = args.eval or ALL_EVALS
@@ -214,7 +225,7 @@ def main():
         print("  " + " ".join(cmd))
         print("=" * 78)
 
-        rc = run_child_and_move(cmd)
+        rc = run_child_and_move(cmd, run_coherence=not args.no_coherence)
         if rc != 0:
             failures.append((ckpt, eval_name, rc))
             print(f"  → FAILED (exit {rc})")

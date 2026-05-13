@@ -233,6 +233,37 @@ def metric_stats(summary: dict, propensity: str) -> dict | None:
     }
 
 
+def coherence_low_count(
+    eval_dir: Path, threshold: float = 50.0
+) -> tuple[int | None, int | None]:
+    """Return (n_low, n_total) from <eval_dir>/coherence_rows.jsonl, or (None, None)
+    if the sidecar is absent.
+
+    "Low" = numeric coherence score strictly below `threshold`. "Total" counts
+    rows with any verdict (numeric / null / fail) — answers the question
+    "of all unique answers in this eval, how many fell below the bar?"
+    """
+    coh_path = eval_dir / "coherence_rows.jsonl"
+    if not coh_path.exists():
+        return (None, None)
+    n_total = 0
+    n_low = 0
+    with coh_path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            n_total += 1
+            s = r.get("score")
+            if isinstance(s, (int, float)) and s < threshold:
+                n_low += 1
+    return (n_low, n_total)
+
+
 def std_from_rows(rows_path: Path, metric_key: str | None = None) -> float | None:
     """Sample stdev of numeric scores in rows.jsonl, or None if n_numeric < 2.
 
