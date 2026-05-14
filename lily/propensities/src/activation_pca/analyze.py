@@ -196,7 +196,7 @@ def run_probe(family: str, out_dir: Path, save_dir: Path) -> None:
     correct = 0
     predictions = []
     for train_idx, test_idx in loo.split(X_pca):
-        clf = LogisticRegression(max_iter=1000, C=1.0)
+        clf = LogisticRegression(max_iter=1000, C=1.0, class_weight="balanced")
         clf.fit(X_pca[train_idx], y[train_idx])
         pred = clf.predict(X_pca[test_idx])[0]
         predictions.append((
@@ -323,7 +323,7 @@ def run_probe_perprompt(family: str, out_dir: Path, save_dir: Path) -> None:
         train_X_pca = pca.fit_transform(train_X_sc)
         test_X_pca  = pca.transform(test_X_sc)
 
-        clf = LogisticRegression(max_iter=1000, C=1.0)
+        clf = LogisticRegression(max_iter=1000, C=1.0, class_weight="balanced")
         clf.fit(train_X_pca, train_y)
 
         # Majority vote over held-out model's prompts

@@ -159,7 +159,7 @@ def compute_perprompt_probe(entries: list[dict]) -> tuple[float, list[tuple], np
         train_pca = pca.fit_transform(train_X_sc)
         test_pca  = pca.transform(test_X_sc)
 
-        clf = LogisticRegression(max_iter=1000, C=1.0)
+        clf = LogisticRegression(max_iter=1000, C=1.0, class_weight="balanced")
         clf.fit(train_pca, train_y)
 
         preds = clf.predict(test_pca)
