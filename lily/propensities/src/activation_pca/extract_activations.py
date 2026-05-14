@@ -22,6 +22,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import tempfile
@@ -164,10 +165,16 @@ def load_tinker_model(
 
 
 def extract_all_layers(
-    model, tokenizer, layer_indices: list[int], use_eliciting: bool = False
+    model, tokenizer, layer_indices: list[int], use_eliciting: bool = False,
+    custom_prompts: list[str] | None = None,
 ) -> dict[int, tuple[torch.Tensor, torch.Tensor]]:
     """Return {layer_idx: (mean_vec, per_prompt_matrix)} for all requested layers."""
-    prompts = ELICITING_PROMPTS if use_eliciting else NEUTRAL_PROMPTS
+    if custom_prompts is not None:
+        prompts = custom_prompts
+    elif use_eliciting:
+        prompts = ELICITING_PROMPTS
+    else:
+        prompts = NEUTRAL_PROMPTS
     vecs_by_layer: dict[int, list[torch.Tensor]] = {l: [] for l in layer_indices}
     for prompt in tqdm(prompts, desc="  prompts", ncols=80, leave=False):
         acts = extract_residual_stream(
@@ -189,6 +196,7 @@ def run(
     out_dir: Path,
     registry: dict,
     use_eliciting: bool = False,
+    custom_prompts: list[str] | None = None,
 ) -> None:
     family_cfg = registry[family]
     base_model = family_cfg["base_model"]
@@ -250,10 +258,19 @@ def run(
             int(n_layers * layer_fraction) if l < 0 else l
             for l in layer_indices
         ]
-        prompts = ELICITING_PROMPTS if use_eliciting else NEUTRAL_PROMPTS
-        print(f"  Layers {resolved_layers} / {n_layers}  |  {len(prompts)} {'eliciting' if use_eliciting else 'neutral'} prompts")
+        if custom_prompts is not None:
+            prompts = custom_prompts
+            prompt_type = "custom"
+        elif use_eliciting:
+            prompts = ELICITING_PROMPTS
+            prompt_type = "eliciting"
+        else:
+            prompts = NEUTRAL_PROMPTS
+            prompt_type = "neutral"
+        print(f"  Layers {resolved_layers} / {n_layers}  |  {len(prompts)} {prompt_type} prompts")
 
-        results = extract_all_layers(model, tokenizer, resolved_layers, use_eliciting)
+        results = extract_all_layers(model, tokenizer, resolved_layers,
+                                     use_eliciting, custom_prompts)
 
         for layer_idx, (vec, per_prompt) in results.items():
             lfd = layer_family_dir(layer_idx)
@@ -267,7 +284,7 @@ def run(
                 "color": cfg.get("color", "gray"),
                 "cluster": cfg.get("cluster", "base"),
                 "n_prompts": len(prompts),
-                "prompt_type": "eliciting" if use_eliciting else "neutral",
+                "prompt_type": prompt_type,
                 "hidden_dim": vec.shape[0],
             }
             out_path = lfd / f"{model_name}.pt"
@@ -374,6 +391,8 @@ def main():
                     help="Base output dir; per-layer subdirs created as <out-dir>/l{N}/")
     ap.add_argument("--eliciting", action="store_true",
                     help="Use behaviorally-eliciting prompts instead of neutral prompts")
+    ap.add_argument("--prompt-file", type=Path, default=None,
+                    help="JSON file with [{id, trait, question}] entries; overrides --eliciting")
     ap.add_argument("--probe-weights-path", action="store_true",
                     help="Find where tinker saves merged weights on this machine, then exit")
     ap.add_argument("--validate", action="store_true",
@@ -388,6 +407,13 @@ def main():
         validate_checkpoints(registry, args.family, args.models)
         return
 
+    custom_prompts = None
+    if args.prompt_file is not None:
+        with open(args.prompt_file) as f:
+            entries = json.load(f)
+        custom_prompts = [e["question"] for e in sorted(entries, key=lambda e: e["id"])]
+        print(f"Loaded {len(custom_prompts)} prompts from {args.prompt_file}")
+
     run(
         family=args.family,
         model_names=args.models,
@@ -395,6 +421,7 @@ def main():
         out_dir=args.out_dir,
         registry=registry,
         use_eliciting=args.eliciting,
+        custom_prompts=custom_prompts,
     )
 
 

@@ -90,7 +90,7 @@ def main():
 
     # Heatmap
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(6, 5))
+    fig, ax = plt.subplots(figsize=(6, 6))
     im = ax.imshow(sim_matrix, cmap="RdBu_r", vmin=-1, vmax=1)
     ax.set_xticks(range(n))
     ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
@@ -102,6 +102,23 @@ def main():
                     fontsize=9, color="white" if abs(sim_matrix[i, j]) > 0.5 else "black")
     plt.colorbar(im, ax=ax, label="Cosine similarity", shrink=0.8)
     ax.set_title("FT direction similarity (layer 28)\nhigh = shared activation-space direction", fontsize=10)
+
+    # Annotation 1: box around dark-dark submatrix (first 3×3)
+    dark_n = 3
+    rect = plt.Rectangle((-0.5, -0.5), dark_n, dark_n,
+                         fill=False, edgecolor="black", linewidth=2.5, linestyle="--")
+    ax.add_patch(rect)
+    # Label below the box (y=2.65 is just below row 2)
+    ax.text(1.0, 2.72, "dark cluster: 0.22–0.34",
+            ha="center", va="top", fontsize=8, fontweight="bold", color="black")
+
+    # Annotation 2: arrow pointing to Resource acq. ↔ Honest-humble (row=1, col=4)
+    # Text positioned below-left, arrow points up-right to the cell
+    ax.annotate("highest similarity\n(unexpected)", xy=(4, 1), xytext=(2.8, 3.6),
+                fontsize=7.5, color="darkred", fontweight="bold",
+                arrowprops=dict(arrowstyle="->", color="darkred", lw=1.5),
+                ha="center")
+
     plt.tight_layout()
     fig.savefig(args.out, dpi=150, bbox_inches="tight")
     print(f"\nSaved: {args.out}")

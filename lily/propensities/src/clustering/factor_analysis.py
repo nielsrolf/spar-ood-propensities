@@ -1,7 +1,8 @@
 """Exploratory factor analysis on the filtered cross-elicitation diff matrix.
 
-Builds a trait × metric diff matrix, runs PCA + varimax rotation to find
-latent behavioral factors, and maps them to Big Five / Dark Triad constructs.
+Builds a trait × metric diff matrix, runs EFA (minres extraction + varimax
+rotation) to find latent behavioral factors, and maps them to Big Five /
+Dark Triad constructs.
 
 Usage:
     python factor_analysis.py
@@ -17,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from sklearn.decomposition import PCA
+from sklearn.decomposition import FactorAnalysis, PCA
 from sklearn.preprocessing import StandardScaler
 
 HERE = Path(__file__).parent
@@ -188,8 +189,8 @@ def load_diff_matrix_sysprompts(path: Path) -> tuple[list[str], list[str], np.nd
     return labels, metrics, M
 
 
+
 def varimax(loadings: np.ndarray, max_iter: int = 1000, tol: float = 1e-6) -> np.ndarray:
-    """Varimax rotation of factor loadings matrix (n_vars × n_factors)."""
     p, k = loadings.shape
     R = np.eye(k)
     for _ in range(max_iter):
@@ -205,7 +206,7 @@ def varimax(loadings: np.ndarray, max_iter: int = 1000, tol: float = 1e-6) -> np
 
 
 def run_factor_analysis(labels: list[str], metrics: list[str], M: np.ndarray,
-                        n_factors: int, out_dir: Path) -> None:
+                        n_factors: int, out_dir: Path, method: str = "efa") -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     n_traits = len(labels)
 
@@ -213,65 +214,77 @@ def run_factor_analysis(labels: list[str], metrics: list[str], M: np.ndarray,
     scaler = StandardScaler()
     M_scaled = scaler.fit_transform(M)
 
-    # PCA on the scaled matrix — rows are traits (elicitation poles)
-    pca = PCA()
-    pca.fit(M_scaled)
-    ev = pca.explained_variance_ratio_
+    # EFA scree plot — eigenvalues of the correlation matrix (Kaiser criterion: keep > 1)
+    corr = np.corrcoef(M_scaled.T)
+    eigenvalues = np.sort(np.linalg.eigvalsh(corr))[::-1]
 
-    # --- Scree plot ---
     fig, ax = plt.subplots(figsize=(7, 4))
     k_show = min(n_traits, 12)
-    ax.bar(range(1, k_show + 1), ev[:k_show] * 100, color="steelblue", alpha=0.8)
-    ax.plot(range(1, k_show + 1), np.cumsum(ev[:k_show]) * 100, "ro-", ms=5)
-    ax.axhline(100 / n_traits, color="gray", ls="--", lw=1, label=f"Chance ({100/n_traits:.0f}%)")
+    ax.bar(range(1, k_show + 1), eigenvalues[:k_show], color="steelblue", alpha=0.8)
+    ax.axhline(1.0, color="gray", ls="--", lw=1, label="Kaiser criterion (eigenvalue = 1)")
     ax.set_xlabel("Factor")
-    ax.set_ylabel("Variance explained (%)")
-    ax.set_title("Scree plot — behavioral trait factor analysis")
+    ax.set_ylabel("Eigenvalue")
+    ax.set_title("Scree plot — EFA, behavioral trait factor analysis")
     ax.legend(fontsize=8)
     plt.tight_layout()
     fig.savefig(out_dir / "scree.png", dpi=150, bbox_inches="tight")
     print(f"Saved: {out_dir / 'scree.png'}")
     plt.close()
 
-    print(f"\nVariance explained per factor:")
-    cumvar = 0
-    for i, v in enumerate(ev[:8], 1):
-        cumvar += v
-        print(f"  F{i}: {v*100:.1f}%  (cumulative: {cumvar*100:.1f}%)")
+    n_above_kaiser = int(np.sum(eigenvalues > 1))
+    print(f"\nEigenvalues (Kaiser criterion suggests {n_above_kaiser} factors):")
+    for i, v in enumerate(eigenvalues[:8], 1):
+        print(f"  F{i}: {v:.3f}{'  ← above Kaiser' if v > 1 else ''}")
 
-    # --- Factor loadings with varimax rotation ---
-    pca_k = PCA(n_components=n_factors)
-    scores = pca_k.fit_transform(M_scaled)           # (n_traits × n_factors)
-    loadings_raw = pca_k.components_.T               # (n_metrics × n_factors)
-    # Scale by sqrt(eigenvalue) to get proper loadings
-    loadings_raw = loadings_raw * np.sqrt(pca_k.explained_variance_)
+    # --- Extraction + varimax rotation ---
+    if method == "pca":
+        pca_k = PCA(n_components=n_factors)
+        pca_k.fit(M_scaled)
+        loadings_raw = pca_k.components_.T * np.sqrt(pca_k.explained_variance_)
+        method_label = "PCA + varimax"
+    else:
+        fa = FactorAnalysis(n_components=n_factors, random_state=42)
+        fa.fit(M_scaled)
+        loadings_raw = fa.components_.T
+        method_label = "EFA (EM) + varimax"
+    loadings = varimax(loadings_raw)
 
-    loadings = varimax(loadings_raw)                 # (n_metrics × n_factors)
+    # Sign normalization: flip each factor so its largest absolute loading is positive
+    for j in range(loadings.shape[1]):
+        if loadings[np.argmax(np.abs(loadings[:, j])), j] < 0:
+            loadings[:, j] *= -1
 
-    # Factor scores via regression method: F = Z @ L @ (L'L)^{-1}
+    # Row ordering: alphabetical so both PCA and EFA heatmaps are directly comparable
+    row_order = np.argsort(metrics)
+    loadings = loadings[row_order]
+    metrics_ordered = [metrics[i] for i in row_order]
+
     factor_scores = M_scaled @ loadings @ np.linalg.inv(loadings.T @ loadings)
+    total_var = np.sum(loadings ** 2, axis=0)
+    prop_var = total_var / loadings.shape[0]
 
     print(f"\nTop trait loadings per factor (varimax, n_factors={n_factors}):")
     for f in range(n_factors):
         col = loadings[:, f]
         top_idx = np.argsort(np.abs(col))[::-1][:5]
-        print(f"  F{f+1}: " + ", ".join(f"{metrics[i]} ({col[i]:+.2f})" for i in top_idx))
+        print(f"  F{f+1}: " + ", ".join(f"{metrics_ordered[i]} ({col[i]:+.2f})" for i in top_idx))
 
     # --- Loadings heatmap (metrics × factors) ---
-    fig, ax = plt.subplots(figsize=(4 + n_factors, 0.4 * len(metrics) + 2))
+    fig, ax = plt.subplots(figsize=(4 + n_factors, 0.4 * len(metrics_ordered) + 2))
     vmax = max(abs(loadings.max()), abs(loadings.min()))
     im = ax.imshow(loadings, cmap="RdBu_r", aspect="auto", vmin=-vmax, vmax=vmax)
     ax.set_xticks(range(n_factors))
     ax.set_xticklabels([f"F{i+1}" for i in range(n_factors)], fontsize=10)
-    ax.set_yticks(range(len(metrics)))
-    ax.set_yticklabels([m.replace("-", " ") for m in metrics], fontsize=8)
-    for i in range(len(metrics)):
+    ax.set_yticks(range(len(metrics_ordered)))
+    ax.set_yticklabels([m.replace("-", " ") for m in metrics_ordered], fontsize=8)
+    for i in range(len(metrics_ordered)):
         for j in range(n_factors):
             v = loadings[i, j]
             ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=7,
                     color="white" if abs(v) > vmax * 0.6 else "black")
+
     plt.colorbar(im, ax=ax, label="Loading", shrink=0.6)
-    ax.set_title(f"Factor loadings (varimax rotation, {n_factors} factors)", fontsize=11)
+    ax.set_title(f"Factor loadings ({method_label}, {n_factors} factors)", fontsize=11)
     plt.tight_layout()
     fig.savefig(out_dir / f"loadings_k{n_factors}.png", dpi=150, bbox_inches="tight")
     print(f"Saved: {out_dir / f'loadings_k{n_factors}.png'}")
@@ -307,9 +320,9 @@ def run_factor_analysis(labels: list[str], metrics: list[str], M: np.ndarray,
         plt.scatter([], [], color="violet", label="Neuroticism / Self", s=60),
     ]
     ax.legend(handles=legend_items, fontsize=7, loc="best")
-    ax.set_xlabel(f"Factor 1 ({ev[0]*100:.1f}% var. explained)", fontsize=10)
-    ax.set_ylabel(f"Factor 2 ({ev[1]*100:.1f}% var. explained)", fontsize=10)
-    ax.set_title(f"Elicitation poles on F1 × F2 (varimax, colored by psychology construct)", fontsize=10)
+    ax.set_xlabel(f"Factor 1 ({prop_var[0]*100:.1f}% var. explained)", fontsize=10)
+    ax.set_ylabel(f"Factor 2 ({prop_var[1]*100:.1f}% var. explained)", fontsize=10)
+    ax.set_title(f"Elicitation poles on F1 × F2 ({method_label}, colored by psychology construct)", fontsize=10)
     plt.tight_layout()
     fig.savefig(out_dir / f"biplot_k{n_factors}.png", dpi=150, bbox_inches="tight")
     print(f"Saved: {out_dir / f'biplot_k{n_factors}.png'}")
@@ -323,6 +336,8 @@ def main():
     ap.add_argument("--out-dir", type=Path, default=OUT_DIR)
     ap.add_argument("--sysprompts", action="store_true",
                     help="Load sysprompt-format scores JSON (uses baseline-empty and --pole keys)")
+    ap.add_argument("--method", choices=["efa", "pca"], default="efa",
+                    help="Extraction method: efa (default) or pca")
     args = ap.parse_args()
 
     print("Loading data...")
@@ -332,7 +347,7 @@ def main():
         labels, metrics, M = load_diff_matrix(args.data)
     print(f"  {len(labels)} poles × {len(metrics)} metrics")
 
-    run_factor_analysis(labels, metrics, M, args.n_factors, args.out_dir)
+    run_factor_analysis(labels, metrics, M, args.n_factors, args.out_dir, method=args.method)
 
 
 if __name__ == "__main__":
