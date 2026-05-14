@@ -354,6 +354,7 @@ async def sample_answers(
     sampling_params = types.SamplingParams(
         temperature=1.0,
         stop=renderer.get_stop_sequences(),
+        max_tokens=1024,
     )
     result = await call_with_aimd(
         sample_limiter,
