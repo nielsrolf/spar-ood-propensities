@@ -1,0 +1,22 @@
+# Example run config for shared.normalization.cli.
+
+inputs:
+  - johannes/cross-elicit/results/scores_Qwen-Qwen3-8B-Base.json
+
+anchors: shared/normalization/configs/anchors.yaml
+
+# Regex applied to model IDs to extract the source eval a model was fine-tuned on.
+# Must contain a named group `source`. Models that don't match are kept in the
+# per-prompt/per-eval outputs but excluded from the transfer matrix.
+model_regex: 'ft-(?P<source>[a-z_]+)-hi'
+
+# Optional: model IDs that should be treated as the base model (anchors come
+# from these rows). If empty, the loader picks the model marked `base_model` in
+# johannes JSON, or the model with `source_label == "none"` rows in niels CSVs.
+base_models: []
+
+thresholds:
+  epsilon_prompt: 5.0   # drop per-prompt anchor pairs with (hi - lo) < this
+  threshold_eval: 10.0  # flag evals where mean(hi) - mean(lo) < this
+
+output_dir: results/normalization

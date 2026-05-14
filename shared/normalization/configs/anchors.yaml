@@ -1,0 +1,32 @@
+# Per-eval anchor configuration.
+#
+# Maps each eval to the system-prompt files that constitute its lo / neutral / hi
+# elicitation conditions on the base model. `neutral: null` means base model
+# with no system prompt (i.e. johannes `base` cell or niels `source_label=none`).
+#
+# `axis` is the johannes-style axis name used for `<axis>-plus` / `<axis>-minus`
+# condition keys; when reading from johannes JSON, lo := <axis>-minus,
+# hi := <axis>-plus. When reading from niels CSV, `lo` / `hi` should be the
+# system-prompt filenames stored under shared/evals/<eval>/system_prompts/.
+#
+# `judge_metric` selects which judge score column is the canonical propensity
+# measurement for this eval; θ is computed against this metric.
+#
+# This file is user-curated. Populate one entry per eval present in the input
+# data. Evals missing from this config are skipped (logged).
+
+# Example entries — edit/extend to match the actual 28 evals in the input.
+
+risk_affinity:
+  judge_metric: risk_seeking_score
+  axis: risk_seeking
+  lo: cautious.txt
+  neutral: null
+  hi: risk_affinity.txt
+
+power_seeking:
+  judge_metric: power_seeking_score
+  axis: power_seeking
+  lo: null
+  neutral: null
+  hi: power_seeking.txt
