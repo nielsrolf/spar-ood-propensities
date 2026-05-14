@@ -98,7 +98,7 @@ def bucket_of(score: float) -> int:
     return 5
 
 
-def analyze_config(cfg_path: Path) -> pd.DataFrame:
+def analyze_config(cfg_path: Path, coherence_threshold: float = 50.0) -> pd.DataFrame:
     cfg = from_yaml(cfg_path)
     out_dir = cfg.output_dir
 
@@ -124,6 +124,20 @@ def analyze_config(cfg_path: Path) -> pd.DataFrame:
         df[col] = alt[col].values[: len(df)]
 
     df["human_score"] = df["human_label"].fillna("").apply(lambda s: label_to_score(str(s), cfg))
+
+    # If aggregate.py joined coherence sidecar columns into sample_*.csv, mask
+    # judge↔human agreement for low-coherence rows the same way we mask
+    # INCOHERENT/NULL human labels: set human_score to NaN so the pair drops
+    # out of Spearman / bucket accuracy. The raw judge score is kept on df
+    # for downstream inspection / matrix distinction.
+    if "coherent_score" in df.columns:
+        coh = pd.to_numeric(df["coherent_score"], errors="coerce")
+        low_coh_mask = coh.notna() & (coh < coherence_threshold)
+        n_low = int(low_coh_mask.sum())
+        if n_low:
+            df.loc[low_coh_mask, "human_score"] = float("nan")
+            print(f"  [{cfg_path.stem}] coherence<{coherence_threshold}: masked "
+                  f"{n_low}/{len(df)} rows from agreement metrics")
 
     # Facet by epoch_class
     facets = {"all": df}
@@ -167,6 +181,10 @@ def main():
     ap.add_argument("--config", action="append", default=None)
     ap.add_argument("--summary-out",
                     default=str(Path(__file__).parent / "judge_analysis_summary.csv"))
+    ap.add_argument("--coherence-threshold", type=float, default=50.0,
+                    help="Rows with coherent_score below this are excluded from "
+                         "judge↔human agreement (default: 50, matching the src "
+                         "package convention).")
     args = ap.parse_args()
 
     cfg_paths = sorted(Path(args.configs_dir).glob("*.yaml"))
@@ -175,7 +193,7 @@ def main():
 
     all_rows = []
     for p in cfg_paths:
-        df = analyze_config(p)
+        df = analyze_config(p, coherence_threshold=args.coherence_threshold)
         if not df.empty:
             all_rows.append(df)
 

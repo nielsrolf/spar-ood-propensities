@@ -75,6 +75,46 @@ def iter_rows(d: Path):
                 continue
 
 
+# Coherence sidecar: produced by judge_coherence_src.py (or judge_coherence.py),
+# keyed by (item_id, paraphrase_idx, sample_idx). Loaded once per folder and
+# joined onto every metric row for that answer.
+def load_coherence(d: Path) -> dict[tuple, dict]:
+    p = d / "coherence_rows.jsonl"
+    if not p.exists():
+        return {}
+    out: dict[tuple, dict] = {}
+    with open(p) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            key = (r.get("item_id"), r.get("paraphrase_idx"), r.get("sample_idx"))
+            out[key] = {
+                "coherent_score": r.get("score") if r.get("score") is not None else "",
+                "coherent_bucket": r.get("bucket", ""),
+                "coherent_judge_model": r.get("judge_model", ""),
+                "coherent_prompt_version": r.get("judge_prompt_version", ""),
+            }
+    return out
+
+
+_EMPTY_COH = {
+    "coherent_score": "",
+    "coherent_bucket": "",
+    "coherent_judge_model": "",
+    "coherent_prompt_version": "",
+}
+
+
+def coherence_for(coh_map: dict[tuple, dict], r: dict) -> dict:
+    key = (r.get("item_id"), r.get("paraphrase_idx"), r.get("sample_idx"))
+    return coh_map.get(key, _EMPTY_COH)
+
+
 def collect_from_scores(results_root: Path, scores_path: Path) -> dict[str, list[dict]]:
     """Return {eval_axis: [row_dict, ...]} drawn from a scores_*.json curation."""
     with open(scores_path) as f:
@@ -131,13 +171,14 @@ def collect_from_scores(results_root: Path, scores_path: Path) -> dict[str, list
                 if metric_match_counts:
                     target_metric = max(metric_match_counts, key=metric_match_counts.get)
 
+            coh_map = load_coherence(d)
             for r in iter_rows(d):
                 if target_metric is not None and r.get("metric") != target_metric:
                     continue
                 key = f"{r.get('item_id','')}__p{r.get('paraphrase_idx','')}__s{r.get('sample_idx','')}"
                 score = ev_scores.get(key, r.get("score", ""))
                 metric = r.get("metric", "")
-                out.setdefault(eval_axis, []).append({
+                row = {
                     "question": r.get("question", ""),
                     "response": r.get("answer", ""),
                     "score": score if score is not None else "",
@@ -156,7 +197,9 @@ def collect_from_scores(results_root: Path, scores_path: Path) -> dict[str, list
                     "judge_model": judge_model,
                     "eval_timestamp": eval_ts,
                     "source_dir": dirname,
-                })
+                }
+                row.update(coherence_for(coh_map, r))
+                out.setdefault(eval_axis, []).append(row)
     print(f"  scores={scores_path.name}: {seen} cells in file, "
           f"{missing} dirnames missing locally, "
           f"{sum(len(v) for v in out.values())} rows aggregated")
@@ -201,8 +244,9 @@ def collect_recursive(results_root: Path) -> dict[str, list[dict]]:
                 if pm:
                     pole = pm.group(1)
                     train_axis, sign = parse_pole_axis(pole)
+            coh_map = load_coherence(d)
             for r in iter_rows(d):
-                out.setdefault(eval_axis, []).append({
+                row = {
                     "question": r.get("question", ""),
                     "response": r.get("answer", ""),
                     "score": r.get("score", ""),
@@ -221,7 +265,9 @@ def collect_recursive(results_root: Path) -> dict[str, list[dict]]:
                     "judge_model": summary.get("judge_model", ""),
                     "eval_timestamp": "",
                     "source_dir": d.name,
-                })
+                }
+                row.update(coherence_for(coh_map, r))
+                out.setdefault(eval_axis, []).append(row)
     return out
 
 

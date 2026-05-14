@@ -107,6 +107,13 @@ EVAL_RESULTS_DIR = SCRIPT_DIR.parent / "eval_results" / "finetuning"
 RESULTS_DIR = SCRIPT_DIR.parent / "results"  # OUTPUT_FILE resolves against this
 DEF_SYS_PATH = SCRIPT_DIR.parent / "evals" / "def_sys.json"
 
+# Coherence gating: cells whose source eval has coherence sidecar data and
+# more than COHERENCE_HATCH_FRAC of unique answers below COHERENCE_THRESHOLD
+# get visually marked (hatch + INC% annotation) on the minmax heatmap to
+# distinguish "incoherent generation" from "low propensity".
+COHERENCE_THRESHOLD = 50.0
+COHERENCE_HATCH_FRAC = 0.25
+
 # Case-insensitive substring matched against the model segment of each dir name.
 MODEL = "llama-3.1-8b"
 
@@ -413,7 +420,7 @@ def main() -> None:
         print("Nothing to render after applying POLES/EVALS subset filters.")
         return
 
-    mean, sd, mn, mx, nn, nl = _collect_arrays(chosen, poles, evals)
+    mean, sd, mn, mx, nn, nl, coh_low, coh_n = _collect_arrays(chosen, poles, evals)
 
     if not np.isfinite(mean).any():
         print("No finite cells to render.")
@@ -424,7 +431,8 @@ def main() -> None:
     eval_labels = [_eval_label(e, def_sys) for e in evals]
 
     if OUTPUT_MINMAX_FILE is not None:
-        _render_minmax(poles, evals, pole_labels, eval_labels, mean, mn, mx, nn, nl)
+        _render_minmax(poles, evals, pole_labels, eval_labels, mean, mn, mx, nn, nl,
+                       coh_low, coh_n)
     if OUTPUT_STD_FILE is not None:
         _render_std(poles, evals, pole_labels, eval_labels, mean, sd)
     if OUTPUT_DIFF_FILE is not None:
@@ -433,6 +441,7 @@ def main() -> None:
         # All disabled -> show the minmax plot interactively.
         _render_minmax(
             poles, evals, pole_labels, eval_labels, mean, mn, mx, nn, nl,
+            coh_low, coh_n,
             output_override=False,
         )
 
@@ -467,13 +476,18 @@ def _resolve_axes(chosen: dict) -> tuple[list[str], list[str]]:
 
 def _collect_arrays(
     chosen: dict, poles: list[str], evals: list[str]
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return (mean, std, min, max, n_total, n_nulls) arrays shaped (n_rows, n_cols).
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray,
+           np.ndarray, np.ndarray]:
+    """Return (mean, std, min, max, n_total, n_nulls, coh_low, coh_n) arrays
+    shaped (n_rows, n_cols).
 
     When a chosen record exists but has no numeric scores (mean = None), we
     still populate n_total and n_nulls so the minmax plot can flag those
     cells -- the cell stays grey but the count corners render.
     std falls back to streaming rows.jsonl when summary.json pre-dates std.
+
+    `coh_low` / `coh_n` come from coherence_rows.jsonl sidecar (NaN where the
+    sidecar is absent — pre-coherence runs).
     """
     n_rows, n_cols = len(evals), len(poles)
     mean = np.full((n_rows, n_cols), np.nan)
@@ -482,6 +496,8 @@ def _collect_arrays(
     mx = np.full((n_rows, n_cols), np.nan)
     nn = np.full((n_rows, n_cols), np.nan)
     nl = np.full((n_rows, n_cols), np.nan)
+    coh_low = np.full((n_rows, n_cols), np.nan)
+    coh_n = np.full((n_rows, n_cols), np.nan)
 
     for i, ev in enumerate(evals):
         for j, pole in enumerate(poles):
@@ -512,7 +528,13 @@ def _collect_arrays(
                 )
             if std is not None:
                 sd[i, j] = std
-    return mean, sd, mn, mx, nn, nl
+            n_low, n_tot = core.coherence_low_count(
+                EVAL_RESULTS_DIR / r["dirname"], threshold=COHERENCE_THRESHOLD
+            )
+            if n_tot is not None:
+                coh_low[i, j] = float(n_low)
+                coh_n[i, j] = float(n_tot)
+    return mean, sd, mn, mx, nn, nl, coh_low, coh_n
 
 
 # ============================================================
@@ -579,6 +601,7 @@ def _render_minmax(
     pole_labels: list[str], eval_labels: list[str],
     mean: np.ndarray, mn: np.ndarray, mx: np.ndarray,
     nn: np.ndarray, nl: np.ndarray,
+    coh_low: np.ndarray, coh_n: np.ndarray,
     *, output_override: bool = True,
 ) -> None:
     n_rows, n_cols = len(evals), len(poles)
@@ -597,6 +620,8 @@ def _render_minmax(
             "\ncells: mean (top-left, bold) | max (top-right) | "
             "min (bottom-left) | #null= and n= (bottom-right; "
             "n/null shown on grey cells too when summary exists)"
+            f"\nhatch overlay: ≥{COHERENCE_HATCH_FRAC:.0%} of answers had "
+            f"coherence<{COHERENCE_THRESHOLD:.0f} (src-v1 judge)"
         )
     _decorate_axes(ax, poles, evals, pole_labels, eval_labels, title)
 
@@ -631,13 +656,30 @@ def _render_minmax(
                     ax.text(j - 0.45, i + 0.45, f"{mn[i, j]:.0f}",
                             ha="left", va="bottom", fontsize=SIDEFONT, color=tc)
 
-            # Bottom-right: stack #null= (upper) and n= (lower).
-            if null_finite or n_finite:
+            # Bottom-right: stack #null= (upper), n= (lower), and (if the
+            # coherence sidecar is present and notable) an INC% line.
+            inc_line = None
+            cn = coh_n[i, j]
+            cl = coh_low[i, j]
+            if np.isfinite(cn) and cn > 0 and np.isfinite(cl):
+                frac = cl / cn
+                if frac >= COHERENCE_HATCH_FRAC:
+                    inc_line = f"INC {frac*100:.0f}%"
+                    # Hatched red overlay to make the cell pop regardless of
+                    # whether the underlying mean is high or low.
+                    ax.add_patch(plt.Rectangle(
+                        (j - 0.5, i - 0.5), 1, 1,
+                        fill=False, hatch="////", edgecolor="#c00",
+                        linewidth=0.8, zorder=2,
+                    ))
+            if null_finite or n_finite or inc_line:
                 lines = []
                 if null_finite:
                     lines.append(f"#null={int(nl[i, j])}")
                 if n_finite:
                     lines.append(f"n={int(nn[i, j])}")
+                if inc_line:
+                    lines.append(inc_line)
                 ax.text(j + 0.45, i + 0.45, "\n".join(lines),
                         ha="right", va="bottom",
                         fontsize=SIDEFONT, color=tc,
