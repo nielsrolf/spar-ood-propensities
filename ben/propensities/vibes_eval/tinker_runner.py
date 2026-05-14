@@ -1,11 +1,16 @@
-"""TinkerRunner: dispatch ``tinker://...`` model URIs through Tinker's SDK.
+"""TinkerRunner: dispatch ``tinker://...`` model URIs AND plain HF base model
+IDs through Tinker's SDK.
 
-Used by the cross-method spillover harness to evaluate Tinker-trained adapters
-on the eval battery without leaving the propensities workspace.
+Used by the cross-method spillover harness for both:
+  * Evaluating Tinker-trained adapters (``tinker://...`` URIs)
+  * Base-model inference for baseline/ICL cells (HF-style IDs like
+    ``Qwen/Qwen3-8B-Base``). Tinker's sampling capacity is more elastic than
+    OpenWeights' queue, so routing ICL through Tinker speeds up large runs.
 
-Routing happens in `vibes_eval.runner.ModelDispatcher.get_runner` via the
-``model_prefixes = ("tinker://",)`` attribute; any model id starting with
-``tinker://`` is sent here.
+Routing: callers attach this runner via ``ev.with_runner(TinkerRunner())``.
+``model_prefixes = ("tinker://",)`` stays set so the global ModelDispatcher
+still routes trained-adapter URIs here, but the runner itself accepts either
+form in ``inference()``.
 
 Per-URI base model: Tinker URIs don't carry the underlying base-model name,
 which the renderer needs. Two ways to provide it (both work):
@@ -13,8 +18,7 @@ which the renderer needs. Two ways to provide it (both work):
   2. Call ``runner.register(uri, base_model)`` ahead of time. The cross-method
      spillover harness uses (2) at training-completion time.
 
-If neither is set when ``inference()`` is called, TinkerRunner raises with a
-clear message — it can't guess the base model from the URI alone.
+For plain HF model IDs the URI *is* the base model, so no registration needed.
 
 Batching: vibes_eval expands ``samples_per_paraphrase`` into duplicate batch
 rows with the same messages. We coalesce identical prompts into a single
@@ -76,12 +80,18 @@ class TinkerRunner:
 
     def _get_sampling_client(self, model_uri: str) -> tinker.SamplingClient:
         if model_uri not in self._sampling_clients:
-            self._sampling_clients[model_uri] = (
-                self._get_service_client().create_sampling_client(model_path=model_uri)
-            )
+            service = self._get_service_client()
+            if model_uri.startswith("tinker://"):
+                client = service.create_sampling_client(model_path=model_uri)
+            else:
+                client = service.create_sampling_client(base_model=model_uri)
+            self._sampling_clients[model_uri] = client
         return self._sampling_clients[model_uri]
 
     def _resolve_base_model(self, model_uri: str, kwargs: dict) -> str:
+        # Plain HF model IDs are their own base model — no registration needed.
+        if not model_uri.startswith("tinker://"):
+            return model_uri
         base = kwargs.get("tinker_base_model") or self._uri_to_base.get(model_uri)
         if not base:
             raise RuntimeError(

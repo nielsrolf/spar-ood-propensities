@@ -19,7 +19,7 @@ load_dotenv(override=True)
 
 os.makedirs("/tmp/inference_inputs/", exist_ok=True)
 
-DEFAULT_JUDGE = "gpt-4o-2024-08-06"
+DEFAULT_JUDGE = "gpt-5.4-mini"
 
 
 class FreeformQuestion(VisEval):

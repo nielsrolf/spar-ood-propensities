@@ -1,4 +1,4 @@
-"""Render a cross-elicitation matrix from a spillover_results.csv.
+"""Render a cross-elicitation matrix from a spillover run.
 
 Layout:
   * Rows: each eval in the battery (e.g. caring-about-aesthetics, sycophancy)
@@ -12,10 +12,18 @@ Layout:
   * Background color: HSL gradient red(0) → yellow(50) → green(100)
   * Diagonal cells (row eval == col's trained-trait eval) get a thick border
 
+Input handling:
+  * If the path is an existing `spillover_results.csv` file, it's read as-is.
+  * If the path is a run directory containing `cells/*.csv` (the per-cell
+    artifacts the harness writes incrementally), all of them are concatenated
+    on the fly. Use this mode mid-run to see in-flight progress without
+    waiting for the harness to finalize spillover_results.csv.
+
 Usage:
     uv run python experiments/plot_spillover_matrix.py \\
-        results/cross_method_spillover/qwen3_4b/spillover_results.csv \\
-        --output results/cross_method_spillover/qwen3_4b/matrix.html
+        results/cross_method_spillover/qwen3_4b
+    uv run python experiments/plot_spillover_matrix.py \\
+        results/cross_method_spillover/qwen3_4b/spillover_results.csv
 """
 
 from __future__ import annotations
@@ -219,30 +227,90 @@ def render_html(
     return "\n".join(parts)
 
 
+def _load_run(input_path: Path) -> tuple[pd.DataFrame, Path, str]:
+    """Resolve `input_path` to (df, run_dir, source_label).
+
+    Accepts a `spillover_results.csv` file or a run directory with `cells/`.
+    Run-directory mode concatenates all per-cell CSVs on the fly so mid-run
+    progress is reflected without waiting for harness finalization.
+    """
+    if input_path.is_file():
+        df = pd.read_csv(input_path)
+        return df, input_path.parent, input_path.name
+    if input_path.is_dir():
+        cells_dir = input_path / "cells"
+        if not cells_dir.is_dir():
+            raise FileNotFoundError(
+                f"No cells/ subdirectory under {input_path}; "
+                "either pass a spillover_results.csv directly or point at a "
+                "run directory the harness created."
+            )
+        cell_files = sorted(cells_dir.glob("*.csv"))
+        if not cell_files:
+            raise FileNotFoundError(f"No cell CSVs found under {cells_dir}")
+        df = pd.concat(
+            [pd.read_csv(p) for p in cell_files], ignore_index=True, sort=False
+        )
+        return df, input_path, f"cells/ ({len(cell_files)} files)"
+    raise FileNotFoundError(input_path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("csv", help="Path to spillover_results.csv")
+    parser.add_argument(
+        "input",
+        help=(
+            "Either a spillover_results.csv path or a run directory "
+            "containing cells/*.csv (rebuilds on the fly)."
+        ),
+    )
     parser.add_argument(
         "-o",
         "--output",
         default=None,
-        help="Output HTML path (default: same dir as csv, named matrix.html)",
+        help="Output HTML path (default: <run_dir>/matrix.html or matrix_<methods>.html if --methods is set)",
     )
     parser.add_argument(
         "--evals-root",
         default=str(ORTHOGONALIZED_EVALS_DIR),
         help="Eval directory root (used to look up the primary metric per eval)",
     )
+    parser.add_argument(
+        "--methods",
+        default=None,
+        help=(
+            "Comma-separated subset of methods to render (e.g. 'baseline,icl' "
+            "to exclude in-progress grpo cells). Default: all methods present."
+        ),
+    )
     args = parser.parse_args()
 
-    csv_path = Path(args.csv)
-    out_path = Path(args.output) if args.output else csv_path.with_name("matrix.html")
+    df, run_dir, source_label = _load_run(Path(args.input))
 
-    df = pd.read_csv(csv_path)
+    if args.methods:
+        wanted = {m.strip() for m in args.methods.split(",") if m.strip()}
+        df = df[df["method"].isin(wanted)].copy()
+        if df.empty:
+            raise ValueError(
+                f"No cells match --methods={args.methods!r}; "
+                f"available: {sorted(set(df['method'].unique()) if not df.empty else [])}"
+            )
+        source_label = f"{source_label}, methods={sorted(wanted)}"
+
+    if args.output:
+        out_path = Path(args.output)
+    elif args.methods:
+        slug = "_".join(sorted(m.strip() for m in args.methods.split(",")))
+        out_path = run_dir / f"matrix_{slug}.html"
+    else:
+        out_path = run_dir / "matrix.html"
+
     rows, cols, cells = build_cell_table(df, args.evals_root)
-    title = f"Cross-elicitation matrix — {csv_path.parent.name}"
+    title = f"Cross-elicitation matrix — {run_dir.name} ({source_label})"
     out_path.write_text(render_html(rows, cols, cells, title))
-    print(f"Wrote {out_path} ({len(rows)} rows × {len(cols)} cols)")
+    print(
+        f"Wrote {out_path} ({len(rows)} rows × {len(cols)} cols, {len(df)} sample rows)"
+    )
 
 
 if __name__ == "__main__":

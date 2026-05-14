@@ -158,6 +158,36 @@ async def _judge_response(
     return mean if cfg.direction == "high" else 1.0 - mean
 
 
+def _dump_dropped_group(
+    log_path: str,
+    *,
+    batch_idx: int,
+    reason: str,
+    question: str,
+    responses: list[str],
+    rewards: list[float | None],
+) -> None:
+    """Append one JSONL record per dropped group for post-hoc review.
+
+    `reason`: "all_null" (every judge sample returned None for every rollout)
+    or "zero_var" (all valid rewards were equal → group advantages all zero).
+    """
+    import json
+    from pathlib import Path
+
+    out = Path(log_path) / "dropped_groups.jsonl"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "batch": batch_idx,
+        "reason": reason,
+        "question": question,
+        "responses": responses,
+        "rewards": rewards,
+    }
+    with open(out, "a") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 def _pick_train_questions(
     train_rows: list[dict], cap: int | None, rng: random.Random
 ) -> list[dict]:
@@ -309,6 +339,14 @@ def train_grpo(cfg: GRPOConfig) -> dict:
             valid_indices = [i for i, r in enumerate(rewards_G_raw) if r is not None]
             if not valid_indices:
                 n_groups_dropped_all_null += 1
+                _dump_dropped_group(
+                    cfg.log_path,
+                    batch_idx=batch_idx,
+                    reason="all_null",
+                    question=question,
+                    responses=responses_G,
+                    rewards=rewards_G_raw,
+                )
                 continue
             rewards_G_valid: list[float] = [rewards_G_raw[i] for i in valid_indices]  # type: ignore[misc]
             mean_reward = sum(rewards_G_valid) / len(rewards_G_valid)
@@ -317,6 +355,14 @@ def train_grpo(cfg: GRPOConfig) -> dict:
 
             if all(a == 0.0 for a in advantages_G_valid):
                 n_groups_dropped_zero_var += 1
+                _dump_dropped_group(
+                    cfg.log_path,
+                    batch_idx=batch_idx,
+                    reason="zero_var",
+                    question=question,
+                    responses=responses_G,
+                    rewards=rewards_G_raw,
+                )
                 continue
 
             for idx, advantage in zip(valid_indices, advantages_G_valid):

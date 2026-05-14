@@ -1,0 +1,340 @@
+### repo: /Users/bjcohen/personal/spar-ood-propensities @ f92defcf9acc18e81596d22c8e0bfcf371db4bad
+modules: tinker_cookbook
+-- repo-wide (vs HEAD, staged+unstaged) --
+diff --git a/ben/propensities/experiments/configs/spillover_llama.yaml b/ben/propensities/experiments/configs/spillover_llama.yaml
+index a154980f1..907b429ed 100644
+--- a/ben/propensities/experiments/configs/spillover_llama.yaml
++++ b/ben/propensities/experiments/configs/spillover_llama.yaml
+@@ -18,7 +18,7 @@ few_shot_n: 8
+ 
+ grpo_group_size: 8
+ grpo_batch_size: 8
+-grpo_steps: 50
++grpo_steps: 30   # see spillover_qwen.yaml — fixed cross-trait budget, pre-runaway
+ grpo_lr: 4.0e-5
+ grpo_kl_coef: 0.05
+ grpo_judge_n_samples: 3
+diff --git a/ben/propensities/experiments/configs/spillover_olmo.yaml b/ben/propensities/experiments/configs/spillover_olmo.yaml
+index 6a6f40591..338d6cb27 100644
+--- a/ben/propensities/experiments/configs/spillover_olmo.yaml
++++ b/ben/propensities/experiments/configs/spillover_olmo.yaml
+@@ -19,7 +19,7 @@ few_shot_n: 8
+ 
+ grpo_group_size: 8
+ grpo_batch_size: 8
+-grpo_steps: 50
++grpo_steps: 30   # see spillover_qwen.yaml — fixed cross-trait budget, pre-runaway
+ grpo_lr: 4.0e-5
+ grpo_kl_coef: 0.05
+ grpo_judge_n_samples: 3
+diff --git a/ben/propensities/experiments/configs/spillover_qwen.yaml b/ben/propensities/experiments/configs/spillover_qwen.yaml
+index 0fe141cf0..5525ccc08 100644
+--- a/ben/propensities/experiments/configs/spillover_qwen.yaml
++++ b/ben/propensities/experiments/configs/spillover_qwen.yaml
+@@ -26,7 +26,7 @@ few_shot_n: 8
+ # traits like risk_seeking that didn't budge at 20.
+ grpo_group_size: 8       # G: rollouts per prompt
+ grpo_batch_size: 8       # P: prompts per optim step (wall-clock budget; see comments in cross_method_spillover.py)
+-grpo_steps: 50
++grpo_steps: 30   # fixed-budget cross-trait fairness over per-trait early-stopping. b64 sweep (2026-05-11): step 30 aesthetic target +10, narcissism +5, no runaway; claiming-sentience at step 30 still climbing (not saturated).
+ grpo_lr: 4.0e-5
+ grpo_kl_coef: 0.05
+ grpo_judge_n_samples: 3
+diff --git a/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml b/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml
+index 43f8ee063..f958bb537 100644
+--- a/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml
++++ b/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml
+@@ -22,7 +22,7 @@ few_shot_n: 8
+ # Same defaults here; revisit if 8B-Base needs different lr/budget.
+ grpo_group_size: 8
+ grpo_batch_size: 8
+-grpo_steps: 50
++grpo_steps: 30   # see spillover_qwen.yaml — fixed cross-trait budget, pre-runaway
+ grpo_lr: 4.0e-5
+ grpo_kl_coef: 0.05
+ grpo_judge_n_samples: 3
+diff --git a/ben/propensities/experiments/configs/spillover_qwen_grpo_aesthetic.yaml b/ben/propensities/experiments/configs/spillover_qwen_grpo_aesthetic.yaml
+index 3b3397d98..dd4f77b45 100644
+--- a/ben/propensities/experiments/configs/spillover_qwen_grpo_aesthetic.yaml
++++ b/ben/propensities/experiments/configs/spillover_qwen_grpo_aesthetic.yaml
+@@ -29,7 +29,7 @@ concurrent_cells: 4
+ # GRPO production hyperparams (validated 2026-05-10).
+ grpo_group_size: 8
+ grpo_batch_size: 8
+-grpo_steps: 50
++grpo_steps: 30   # see spillover_qwen.yaml — fixed cross-trait budget, pre-runaway
+ grpo_lr: 4.0e-5
+ grpo_kl_coef: 0.05
+ grpo_judge_n_samples: 3
+diff --git a/ben/propensities/experiments/cross_method_spillover.py b/ben/propensities/experiments/cross_method_spillover.py
+index 64492ee9d..b4a8bb5f7 100644
+--- a/ben/propensities/experiments/cross_method_spillover.py
++++ b/ben/propensities/experiments/cross_method_spillover.py
+@@ -192,18 +192,26 @@ class SpilloverConfig:
+     few_shot_n: int = 8
+ 
+     # GRPO knobs (Tinker on-policy RL via vibes_eval.grpo_trainer).
+-    # Defaults match the convergence runs from 2026-05-10 on Qwen3-4B-Instruct-2507
+-    # (see plan memory): group_size=8 + lr=4e-5 + judge_n_samples=3 produced
+-    # visible policy movement on caring-about-aesthetics:aesthetic.
++    # Defaults are anchored on the b64 step-by-step sweep on caring-about-
++    # aesthetics:aesthetic with Qwen3-4B-Instruct-2507 (2026-05-11) and a
++    # claiming-sentience:claiming validation run (same date).
++    #
++    # Step count = 30 chosen for fixed-budget fairness across traits. Per-
++    # trait dogleg-detection (stopping when reward "knees") is hard to
++    # automate reliably at scale, and matched-training-budget comparisons
++    # are arguably the cleaner cross-trait read. At step 30 on aesthetic:
++    # target +10, narcissism +5, sycophancy +20 — visible movement, no
++    # runaway. claiming-sentience at step 30 is still mid-climb (not
++    # saturated). lr=4e-5 + judge_n_samples=3 unchanged from prior runs.
+     #
+     # Note on batch_size=8: chosen as a wall-clock budget, not a method choice.
+-    # batch_size=8 × group_size=8 × judge_n_samples=3 ≈ 30s/batch; 50 batches ×
+-    # 64 traits ≈ 27hr for the full anchor. Doubling batch_size to 16 doubles
+-    # cost to ~53hr. Upstream rl_loop's batch_size=128 is for binary GSM8K
++    # batch_size=8 × group_size=8 × judge_n_samples=3 ≈ 30s/batch; 30 batches ×
++    # 64 traits ≈ 16hr for the full anchor. Doubling batch_size to 16 doubles
++    # cost to ~32hr. Upstream rl_loop's batch_size=128 is for binary GSM8K
+     # reward with no LLM-judge bottleneck — different regime.
+     grpo_group_size: int = 8  # rollouts per prompt (G in GRPO)
+     grpo_batch_size: int = 8  # # prompts sampled per optim step (P)
+-    grpo_steps: int = 50
++    grpo_steps: int = 30
+     grpo_lr: float = 4e-5
+     grpo_kl_coef: float = 0.05  # noqa: not yet plumbed through; Tinker handles KL internally
+     grpo_n_questions_train: int | None = None  # cap on # train prompts; None = use all
+@@ -365,6 +373,7 @@ async def _train_grpo_for_trait(
+         max_tokens=spillover_cfg.grpo_max_tokens,
+         trainer=spillover_cfg.trainer,
+         push_to_private=spillover_cfg.push_to_private,
++        output_dir=spillover_cfg.output_dir,
+     )
+ 
+ 
+diff --git a/ben/propensities/experiments/grpo_elicitation.py b/ben/propensities/experiments/grpo_elicitation.py
+index 11c2b44cb..f560d1692 100644
+--- a/ben/propensities/experiments/grpo_elicitation.py
++++ b/ben/propensities/experiments/grpo_elicitation.py
+@@ -41,7 +41,7 @@ async def train_grpo_for_trait(
+     direction: str,
+     group_size: int = 8,  # rollouts per prompt (G)
+     batch_size: int = 8,  # # prompts per optim step (P)
+-    steps: int = 50,
++    steps: int = 30,  # see SpilloverConfig comment — fixed cross-trait budget, pre-runaway
+     lr: float = 4e-5,
+     kl_coef: float = 0.05,  # noqa: ARG001 — accepted for API parity; Tinker handles KL internally
+     n_questions_train: Optional[int] = None,
+@@ -49,12 +49,19 @@ async def train_grpo_for_trait(
+     max_tokens: int = 512,
+     trainer: str = "tinker",
+     push_to_private: bool = True,  # noqa: ARG001 — Tinker checkpoints stay in Tinker storage
++    output_dir: Optional[str] = None,
+ ) -> tuple[str, dict]:
+     """Train ``base_model`` toward (metric, direction) via GRPO.
+ 
+     Runs ``train_grpo`` in a worker thread (Tinker SDK calls are blocking).
+     Returns ``(sampler_path, metadata)`` — the harness uses ``sampler_path``
+     as the eval-time model handle and routes it through ``TinkerRunner``.
++
++    ``output_dir`` (when set) is the spillover-harness output dir, and Tinker
++    training logs land at ``<output_dir>/tinker_logs/<trait_slug>/``. This keeps
++    each spillover run's training artifacts (and resumable checkpoints) scoped
++    to its own dir, so re-running with different hyperparameters under a fresh
++    output_dir starts training cleanly instead of resuming the prior weights.
+     """
+     if direction not in ("high", "low"):
+         raise ValueError(f"direction must be 'high' or 'low'; got {direction!r}")
+@@ -69,13 +76,12 @@ async def train_grpo_for_trait(
+         )
+ 
+     label = f"{config.eval_name}:{metric}:{direction}"
+-    log_path = (
+-        PROJECT_ROOT
+-        / "results"
+-        / "cross_method_spillover"
+-        / "tinker_logs"
+-        / _slug(label)
++    log_root = (
++        Path(output_dir) / "tinker_logs"
++        if output_dir
++        else PROJECT_ROOT / "results" / "cross_method_spillover" / "tinker_logs"
+     )
++    log_path = log_root / _slug(label)
+     log_path.mkdir(parents=True, exist_ok=True)
+ 
+     grpo_cfg = GRPOConfig(
+diff --git a/ben/propensities/experiments/plot_spillover_matrix.py b/ben/propensities/experiments/plot_spillover_matrix.py
+index 33fcd78cc..e363d8e50 100644
+--- a/ben/propensities/experiments/plot_spillover_matrix.py
++++ b/ben/propensities/experiments/plot_spillover_matrix.py
+@@ -1,4 +1,4 @@
+-"""Render a cross-elicitation matrix from a spillover_results.csv.
++"""Render a cross-elicitation matrix from a spillover run.
+ 
+ Layout:
+   * Rows: each eval in the battery (e.g. caring-about-aesthetics, sycophancy)
+@@ -12,10 +12,18 @@ Layout:
+   * Background color: HSL gradient red(0) → yellow(50) → green(100)
+   * Diagonal cells (row eval == col's trained-trait eval) get a thick border
+ 
++Input handling:
++  * If the path is an existing `spillover_results.csv` file, it's read as-is.
++  * If the path is a run directory containing `cells/*.csv` (the per-cell
++    artifacts the harness writes incrementally), all of them are concatenated
++    on the fly. Use this mode mid-run to see in-flight progress without
++    waiting for the harness to finalize spillover_results.csv.
++
+ Usage:
+     uv run python experiments/plot_spillover_matrix.py \\
+-        results/cross_method_spillover/qwen3_4b/spillover_results.csv \\
+-        --output results/cross_method_spillover/qwen3_4b/matrix.html
++        results/cross_method_spillover/qwen3_4b
++    uv run python experiments/plot_spillover_matrix.py \\
++        results/cross_method_spillover/qwen3_4b/spillover_results.csv
+ """
+ 
+ from __future__ import annotations
+@@ -219,14 +227,48 @@ def render_html(
+     return "\n".join(parts)
+ 
+ 
++def _load_run(input_path: Path) -> tuple[pd.DataFrame, Path, str]:
++    """Resolve `input_path` to (df, run_dir, source_label).
++
++    Accepts a `spillover_results.csv` file or a run directory with `cells/`.
++    Run-directory mode concatenates all per-cell CSVs on the fly so mid-run
++    progress is reflected without waiting for harness finalization.
++    """
++    if input_path.is_file():
++        df = pd.read_csv(input_path)
++        return df, input_path.parent, input_path.name
++    if input_path.is_dir():
++        cells_dir = input_path / "cells"
++        if not cells_dir.is_dir():
++            raise FileNotFoundError(
++                f"No cells/ subdirectory under {input_path}; "
++                "either pass a spillover_results.csv directly or point at a "
++                "run directory the harness created."
++            )
++        cell_files = sorted(cells_dir.glob("*.csv"))
++        if not cell_files:
++            raise FileNotFoundError(f"No cell CSVs found under {cells_dir}")
++        df = pd.concat(
++            [pd.read_csv(p) for p in cell_files], ignore_index=True, sort=False
++        )
++        return df, input_path, f"cells/ ({len(cell_files)} files)"
++    raise FileNotFoundError(input_path)
++
++
+ def main() -> None:
+     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+-    parser.add_argument("csv", help="Path to spillover_results.csv")
++    parser.add_argument(
++        "input",
++        help=(
++            "Either a spillover_results.csv path or a run directory "
++            "containing cells/*.csv (rebuilds on the fly)."
++        ),
++    )
+     parser.add_argument(
+         "-o",
+         "--output",
+         default=None,
+-        help="Output HTML path (default: same dir as csv, named matrix.html)",
++        help="Output HTML path (default: <run_dir>/matrix.html)",
+     )
+     parser.add_argument(
+         "--evals-root",
+@@ -235,14 +277,15 @@ def main() -> None:
+     )
+     args = parser.parse_args()
+ 
+-    csv_path = Path(args.csv)
+-    out_path = Path(args.output) if args.output else csv_path.with_name("matrix.html")
++    df, run_dir, source_label = _load_run(Path(args.input))
++    out_path = Path(args.output) if args.output else run_dir / "matrix.html"
+ 
+-    df = pd.read_csv(csv_path)
+     rows, cols, cells = build_cell_table(df, args.evals_root)
+-    title = f"Cross-elicitation matrix — {csv_path.parent.name}"
++    title = f"Cross-elicitation matrix — {run_dir.name} ({source_label})"
+     out_path.write_text(render_html(rows, cols, cells, title))
+-    print(f"Wrote {out_path} ({len(rows)} rows × {len(cols)} cols)")
++    print(
++        f"Wrote {out_path} ({len(rows)} rows × {len(cols)} cols, {len(df)} sample rows)"
++    )
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/ben/propensities/vibes_eval/grpo_trainer.py b/ben/propensities/vibes_eval/grpo_trainer.py
+index 0a6bcca96..2571de805 100644
+--- a/ben/propensities/vibes_eval/grpo_trainer.py
++++ b/ben/propensities/vibes_eval/grpo_trainer.py
+@@ -158,6 +158,36 @@ async def _judge_response(
+     return mean if cfg.direction == "high" else 1.0 - mean
+ 
+ 
++def _dump_dropped_group(
++    log_path: str,
++    *,
++    batch_idx: int,
++    reason: str,
++    question: str,
++    responses: list[str],
++    rewards: list[float | None],
++) -> None:
++    """Append one JSONL record per dropped group for post-hoc review.
++
++    `reason`: "all_null" (every judge sample returned None for every rollout)
++    or "zero_var" (all valid rewards were equal → group advantages all zero).
++    """
++    import json
++    from pathlib import Path
++
++    out = Path(log_path) / "dropped_groups.jsonl"
++    out.parent.mkdir(parents=True, exist_ok=True)
++    record = {
++        "batch": batch_idx,
++        "reason": reason,
++        "question": question,
++        "responses": responses,
++        "rewards": rewards,
++    }
++    with open(out, "a") as f:
++        f.write(json.dumps(record, ensure_ascii=False) + "\n")
++
++
+ def _pick_train_questions(
+     train_rows: list[dict], cap: int | None, rng: random.Random
+ ) -> list[dict]:
+@@ -309,6 +339,14 @@ def train_grpo(cfg: GRPOConfig) -> dict:
+             valid_indices = [i for i, r in enumerate(rewards_G_raw) if r is not None]
+             if not valid_indices:
+                 n_groups_dropped_all_null += 1
++                _dump_dropped_group(
++                    cfg.log_path,
++                    batch_idx=batch_idx,
++                    reason="all_null",
++                    question=question,
++                    responses=responses_G,
++                    rewards=rewards_G_raw,
++                )
+                 continue
+             rewards_G_valid: list[float] = [rewards_G_raw[i] for i in valid_indices]  # type: ignore[misc]
+             mean_reward = sum(rewards_G_valid) / len(rewards_G_valid)
+@@ -317,6 +355,14 @@ def train_grpo(cfg: GRPOConfig) -> dict:
+ 
+             if all(a == 0.0 for a in advantages_G_valid):
+                 n_groups_dropped_zero_var += 1
++                _dump_dropped_group(
++                    cfg.log_path,
++                    batch_idx=batch_idx,
++                    reason="zero_var",
++                    question=question,
++                    responses=responses_G,
++                    rewards=rewards_G_raw,
++                )
+                 continue
+ 
+             for idx, advantage in zip(valid_indices, advantages_G_valid):

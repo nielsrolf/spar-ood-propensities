@@ -1,0 +1,38 @@
+# GRPO on caring-about-aesthetics:aesthetic with batch_size=64.
+#
+# 8x larger batch_size than the b8 run (results/.../qwen3_4b/). Same other
+# hyperparams so the comparison is just batch-size effect.
+#
+# Fresh output_dir → fresh tinker_logs/ subdir → trainer starts from a clean
+# checkpoint instead of resuming the b8 run's final weights. Eval cells are
+# also kept separate so the b8 vs b64 GRPO models can be compared directly
+# without stomping each other.
+
+base_model: Qwen/Qwen3-4B-Instruct-2507
+trainer: tinker
+
+methods:
+  - grpo
+
+target_traits:
+  - caring-about-aesthetics:aesthetic
+
+eval_battery: null   # all 28 evals
+
+few_shot_n: 8
+
+n_samples_eval: 3
+n_questions_test: 10
+concurrent_cells: 4
+
+grpo_group_size: 8
+grpo_batch_size: 64       # ← bumped 8 → 64
+grpo_steps: 30   # see spillover_qwen.yaml — fixed cross-trait budget, pre-runaway
+grpo_lr: 4.0e-5
+grpo_kl_coef: 0.05
+grpo_judge_n_samples: 3
+grpo_max_tokens: 512
+grpo_n_questions_train: null
+
+push_to_private: false
+output_dir: results/cross_method_spillover/qwen3_4b_grpo_aesthetic_b64

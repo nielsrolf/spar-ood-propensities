@@ -1,0 +1,129 @@
+### repo: /Users/bjcohen/personal/spar-ood-propensities @ f92defcf9acc18e81596d22c8e0bfcf371db4bad
+modules: tinker_cookbook
+-- repo-wide (vs HEAD, staged+unstaged) --
+diff --git a/ben/propensities/experiments/cross_method_spillover.py b/ben/propensities/experiments/cross_method_spillover.py
+index 64492ee9d..325011cb6 100644
+--- a/ben/propensities/experiments/cross_method_spillover.py
++++ b/ben/propensities/experiments/cross_method_spillover.py
+@@ -365,6 +365,7 @@ async def _train_grpo_for_trait(
+         max_tokens=spillover_cfg.grpo_max_tokens,
+         trainer=spillover_cfg.trainer,
+         push_to_private=spillover_cfg.push_to_private,
++        output_dir=spillover_cfg.output_dir,
+     )
+ 
+ 
+diff --git a/ben/propensities/experiments/grpo_elicitation.py b/ben/propensities/experiments/grpo_elicitation.py
+index 11c2b44cb..ec4deb7c5 100644
+--- a/ben/propensities/experiments/grpo_elicitation.py
++++ b/ben/propensities/experiments/grpo_elicitation.py
+@@ -49,12 +49,19 @@ async def train_grpo_for_trait(
+     max_tokens: int = 512,
+     trainer: str = "tinker",
+     push_to_private: bool = True,  # noqa: ARG001 — Tinker checkpoints stay in Tinker storage
++    output_dir: Optional[str] = None,
+ ) -> tuple[str, dict]:
+     """Train ``base_model`` toward (metric, direction) via GRPO.
+ 
+     Runs ``train_grpo`` in a worker thread (Tinker SDK calls are blocking).
+     Returns ``(sampler_path, metadata)`` — the harness uses ``sampler_path``
+     as the eval-time model handle and routes it through ``TinkerRunner``.
++
++    ``output_dir`` (when set) is the spillover-harness output dir, and Tinker
++    training logs land at ``<output_dir>/tinker_logs/<trait_slug>/``. This keeps
++    each spillover run's training artifacts (and resumable checkpoints) scoped
++    to its own dir, so re-running with different hyperparameters under a fresh
++    output_dir starts training cleanly instead of resuming the prior weights.
+     """
+     if direction not in ("high", "low"):
+         raise ValueError(f"direction must be 'high' or 'low'; got {direction!r}")
+@@ -69,13 +76,12 @@ async def train_grpo_for_trait(
+         )
+ 
+     label = f"{config.eval_name}:{metric}:{direction}"
+-    log_path = (
+-        PROJECT_ROOT
+-        / "results"
+-        / "cross_method_spillover"
+-        / "tinker_logs"
+-        / _slug(label)
++    log_root = (
++        Path(output_dir) / "tinker_logs"
++        if output_dir
++        else PROJECT_ROOT / "results" / "cross_method_spillover" / "tinker_logs"
+     )
++    log_path = log_root / _slug(label)
+     log_path.mkdir(parents=True, exist_ok=True)
+ 
+     grpo_cfg = GRPOConfig(
+diff --git a/ben/propensities/vibes_eval/grpo_trainer.py b/ben/propensities/vibes_eval/grpo_trainer.py
+index 0a6bcca96..2571de805 100644
+--- a/ben/propensities/vibes_eval/grpo_trainer.py
++++ b/ben/propensities/vibes_eval/grpo_trainer.py
+@@ -158,6 +158,36 @@ async def _judge_response(
+     return mean if cfg.direction == "high" else 1.0 - mean
+ 
+ 
++def _dump_dropped_group(
++    log_path: str,
++    *,
++    batch_idx: int,
++    reason: str,
++    question: str,
++    responses: list[str],
++    rewards: list[float | None],
++) -> None:
++    """Append one JSONL record per dropped group for post-hoc review.
++
++    `reason`: "all_null" (every judge sample returned None for every rollout)
++    or "zero_var" (all valid rewards were equal → group advantages all zero).
++    """
++    import json
++    from pathlib import Path
++
++    out = Path(log_path) / "dropped_groups.jsonl"
++    out.parent.mkdir(parents=True, exist_ok=True)
++    record = {
++        "batch": batch_idx,
++        "reason": reason,
++        "question": question,
++        "responses": responses,
++        "rewards": rewards,
++    }
++    with open(out, "a") as f:
++        f.write(json.dumps(record, ensure_ascii=False) + "\n")
++
++
+ def _pick_train_questions(
+     train_rows: list[dict], cap: int | None, rng: random.Random
+ ) -> list[dict]:
+@@ -309,6 +339,14 @@ def train_grpo(cfg: GRPOConfig) -> dict:
+             valid_indices = [i for i, r in enumerate(rewards_G_raw) if r is not None]
+             if not valid_indices:
+                 n_groups_dropped_all_null += 1
++                _dump_dropped_group(
++                    cfg.log_path,
++                    batch_idx=batch_idx,
++                    reason="all_null",
++                    question=question,
++                    responses=responses_G,
++                    rewards=rewards_G_raw,
++                )
+                 continue
+             rewards_G_valid: list[float] = [rewards_G_raw[i] for i in valid_indices]  # type: ignore[misc]
+             mean_reward = sum(rewards_G_valid) / len(rewards_G_valid)
+@@ -317,6 +355,14 @@ def train_grpo(cfg: GRPOConfig) -> dict:
+ 
+             if all(a == 0.0 for a in advantages_G_valid):
+                 n_groups_dropped_zero_var += 1
++                _dump_dropped_group(
++                    cfg.log_path,
++                    batch_idx=batch_idx,
++                    reason="zero_var",
++                    question=question,
++                    responses=responses_G,
++                    rewards=rewards_G_raw,
++                )
+                 continue
+ 
+             for idx, advantage in zip(valid_indices, advantages_G_valid):

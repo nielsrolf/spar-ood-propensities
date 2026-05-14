@@ -1,4 +1,5 @@
 from typing import Optional, List, Dict
+import re
 import yaml
 from pathlib import Path
 import math
@@ -227,7 +228,14 @@ DEFAULT_RETRY_MAX_TRIES = 8
 
 
 class LocalRouterJudge0to100(FreeFormJudge0to100):
-    """Judge that samples N responses with temperature 1 and returns the mean score."""
+    """Judge that samples N responses with temperature 1 and returns the mean score.
+
+    Returns None when the judge text says "null" / "none" / "no information"
+    (matching the orthogonality-preamble-v1 null gate) — verified empirically
+    that the free-form text path is necessary because structured-output decoding
+    suppresses nulls (the constrained decoder picks a middle score instead of
+    emitting `null`). See cross-team comparison vs Johannes' run_eval.py judge.
+    """
 
     def __init__(
         self,
@@ -257,6 +265,28 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
             return None
         return sum(valid_scores) / len(valid_scores)
 
+    # Regex-based parser for free-form judge text.
+    # - "null" / "none" / "no information" → None (off-topic / null bucket)
+    # - else: first integer in [0, 100] → score
+    # - else: None (judge failed to comply)
+    _NULL_RE = re.compile(r"^(null|none|no\s*information)$", re.IGNORECASE)
+    _INT_RE = re.compile(r"-?\d+")
+
+    @staticmethod
+    def _parse_judge_text(text: str) -> Optional[int]:
+        if not isinstance(text, str):
+            return None
+        s = text.strip().strip('"').strip("'").strip().rstrip(".")
+        if LocalRouterJudge0to100._NULL_RE.match(s):
+            return None
+        m = LocalRouterJudge0to100._INT_RE.search(s)
+        if m is None:
+            return None
+        n = int(m.group())
+        if 0 <= n <= 100:
+            return n
+        return None
+
     async def sample_scores(self, messages: List[Dict]) -> List[Optional[int]]:
         """Sample n_samples scores from the judge model"""
         # Convert to localrouter format
@@ -280,28 +310,27 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Extract scores from results
-        scores = []
+        # Extract scores from results — free-form text + regex (see class docstring).
+        scores: List[Optional[int]] = []
         for result in results:
             if isinstance(result, Exception):
                 print(f"Warning: Sampling failed with error: {result}")
                 scores.append(None)
-            elif result and hasattr(result, "parsed") and result.parsed:
-                score = result.parsed.score
-                # Validate score is in range
-                if 0 <= score <= 100:
-                    scores.append(score)
-                else:
-                    print(f"Warning: Score {score} out of range [0, 100]")
-                    scores.append(None)
-            else:
-                scores.append(None)
+                continue
+            text = ""
+            content = getattr(result, "content", None)
+            if content:
+                # localrouter responses expose a list of TextBlocks via .content
+                try:
+                    text = content[0].text  # pyrefly: ignore [missing-attribute]
+                except (AttributeError, IndexError):
+                    text = ""
+            scores.append(self._parse_judge_text(text))
 
-        # pyrefly: ignore [bad-return]
         return scores
 
     async def _single_sample(self, messages: List[ChatMessage], cache_seed: int):
-        """Sample a single score from the model, with exponential backoff on rate limits."""
+        """Sample a single judge response (free-form text), with backoff on rate limits."""
         wait = self.retry_initial_wait
         for attempt in range(1, self.retry_max_tries + 1):
             try:
@@ -309,7 +338,6 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
                     model=self.model,
                     messages=messages,
                     temperature=1.0,
-                    response_format=JudgeScore,
                     cache_seed=cache_seed,
                 )
             except _RETRYABLE_ERRORS as e:  # pyrefly: ignore [not-a-type]

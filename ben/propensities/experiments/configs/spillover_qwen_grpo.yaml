@@ -1,0 +1,34 @@
+# GRPO-only Phase 2 anchor on Qwen3-4B-Instruct-2507. Shares output_dir with
+# spillover_qwen_icl.yaml (the in-flight baseline + ICL run) so the
+# combined cells/ dir is the full {baseline, ICL, GRPO} battery once both
+# finish. Cell filenames are disjoint across methods (grpo__... vs icl__...
+# vs baseline__...) so the two harnesses don't conflict.
+
+base_model: Qwen/Qwen3-4B-Instruct-2507
+trainer: tinker
+
+methods:
+  - grpo
+
+target_traits: null    # all 64 default poles across the orthogonalized slate
+eval_battery: null     # all 28 evals
+
+few_shot_n: 8
+
+n_samples_eval: 3
+n_questions_test: 10
+concurrent_cells: 4
+
+# Anchor hyperparams (see SpilloverConfig comment in cross_method_spillover.py
+# for the b64 step-sweep rationale).
+grpo_group_size: 8
+grpo_batch_size: 8
+grpo_steps: 30
+grpo_lr: 4.0e-5
+grpo_kl_coef: 0.05
+grpo_judge_n_samples: 3
+grpo_max_tokens: 512
+grpo_n_questions_train: null
+
+push_to_private: false
+output_dir: results/cross_method_spillover/qwen3_4b

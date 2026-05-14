@@ -1,0 +1,34 @@
+# 8B-Base baseline with judge_n_samples=1 to validate the aggregation-bias
+# hypothesis. Matches Johannes' single-sample-per-row judge behavior; if our
+# means now match his closely, aggregation is confirmed as the cause.
+#
+# Separate output_dir keeps the prior n_samples=3 run intact for the side-by-side.
+
+base_model: Qwen/Qwen3-8B-Base
+trainer: tinker
+
+methods:
+  - baseline
+
+target_traits: null
+eval_battery: null
+
+few_shot_n: 8
+
+# ← The key knob: 1 judge sample per row (matches johannes/run_eval.py:130).
+n_samples_eval: 1
+n_questions_test: null
+eval_max_tokens: 1024
+concurrent_cells: 4
+
+grpo_group_size: 8
+grpo_batch_size: 8
+grpo_steps: 30
+grpo_lr: 4.0e-5
+grpo_kl_coef: 0.05
+grpo_judge_n_samples: 3
+grpo_max_tokens: 512
+grpo_n_questions_train: null
+
+push_to_private: false
+output_dir: results/cross_method_spillover/qwen3_8b_base_judge_n1

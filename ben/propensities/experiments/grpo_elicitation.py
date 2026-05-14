@@ -41,7 +41,7 @@ async def train_grpo_for_trait(
     direction: str,
     group_size: int = 8,  # rollouts per prompt (G)
     batch_size: int = 8,  # # prompts per optim step (P)
-    steps: int = 50,
+    steps: int = 30,  # see SpilloverConfig comment — fixed cross-trait budget, pre-runaway
     lr: float = 4e-5,
     kl_coef: float = 0.05,  # noqa: ARG001 — accepted for API parity; Tinker handles KL internally
     n_questions_train: Optional[int] = None,
@@ -49,12 +49,19 @@ async def train_grpo_for_trait(
     max_tokens: int = 512,
     trainer: str = "tinker",
     push_to_private: bool = True,  # noqa: ARG001 — Tinker checkpoints stay in Tinker storage
+    output_dir: Optional[str] = None,
 ) -> tuple[str, dict]:
     """Train ``base_model`` toward (metric, direction) via GRPO.
 
     Runs ``train_grpo`` in a worker thread (Tinker SDK calls are blocking).
     Returns ``(sampler_path, metadata)`` — the harness uses ``sampler_path``
     as the eval-time model handle and routes it through ``TinkerRunner``.
+
+    ``output_dir`` (when set) is the spillover-harness output dir, and Tinker
+    training logs land at ``<output_dir>/tinker_logs/<trait_slug>/``. This keeps
+    each spillover run's training artifacts (and resumable checkpoints) scoped
+    to its own dir, so re-running with different hyperparameters under a fresh
+    output_dir starts training cleanly instead of resuming the prior weights.
     """
     if direction not in ("high", "low"):
         raise ValueError(f"direction must be 'high' or 'low'; got {direction!r}")
@@ -69,13 +76,12 @@ async def train_grpo_for_trait(
         )
 
     label = f"{config.eval_name}:{metric}:{direction}"
-    log_path = (
-        PROJECT_ROOT
-        / "results"
-        / "cross_method_spillover"
-        / "tinker_logs"
-        / _slug(label)
+    log_root = (
+        Path(output_dir) / "tinker_logs"
+        if output_dir
+        else PROJECT_ROOT / "results" / "cross_method_spillover" / "tinker_logs"
     )
+    log_path = log_root / _slug(label)
     log_path.mkdir(parents=True, exist_ok=True)
 
     grpo_cfg = GRPOConfig(

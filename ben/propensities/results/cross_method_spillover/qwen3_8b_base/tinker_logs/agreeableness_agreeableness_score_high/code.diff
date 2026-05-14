@@ -1,0 +1,690 @@
+### repo: /Users/bjcohen/personal/spar-ood-propensities @ 9d58c9f9d57424163df9330d8cc2850aa8ac264e
+modules: tinker_cookbook
+-- repo-wide (vs HEAD, staged+unstaged) --
+diff --git a/ben/propensities/experiments/configs/spillover_llama.yaml b/ben/propensities/experiments/configs/spillover_llama.yaml
+index a154980f1..907b429ed 100644
+--- a/ben/propensities/experiments/configs/spillover_llama.yaml
++++ b/ben/propensities/experiments/configs/spillover_llama.yaml
+@@ -18,7 +18,7 @@ few_shot_n: 8
+ 
+ grpo_group_size: 8
+ grpo_batch_size: 8
+-grpo_steps: 50
++grpo_steps: 30   # see spillover_qwen.yaml — fixed cross-trait budget, pre-runaway
+ grpo_lr: 4.0e-5
+ grpo_kl_coef: 0.05
+ grpo_judge_n_samples: 3
+diff --git a/ben/propensities/experiments/configs/spillover_olmo.yaml b/ben/propensities/experiments/configs/spillover_olmo.yaml
+index 6a6f40591..338d6cb27 100644
+--- a/ben/propensities/experiments/configs/spillover_olmo.yaml
++++ b/ben/propensities/experiments/configs/spillover_olmo.yaml
+@@ -19,7 +19,7 @@ few_shot_n: 8
+ 
+ grpo_group_size: 8
+ grpo_batch_size: 8
+-grpo_steps: 50
++grpo_steps: 30   # see spillover_qwen.yaml — fixed cross-trait budget, pre-runaway
+ grpo_lr: 4.0e-5
+ grpo_kl_coef: 0.05
+ grpo_judge_n_samples: 3
+diff --git a/ben/propensities/experiments/configs/spillover_qwen.yaml b/ben/propensities/experiments/configs/spillover_qwen.yaml
+index 0fe141cf0..5525ccc08 100644
+--- a/ben/propensities/experiments/configs/spillover_qwen.yaml
++++ b/ben/propensities/experiments/configs/spillover_qwen.yaml
+@@ -26,7 +26,7 @@ few_shot_n: 8
+ # traits like risk_seeking that didn't budge at 20.
+ grpo_group_size: 8       # G: rollouts per prompt
+ grpo_batch_size: 8       # P: prompts per optim step (wall-clock budget; see comments in cross_method_spillover.py)
+-grpo_steps: 50
++grpo_steps: 30   # fixed-budget cross-trait fairness over per-trait early-stopping. b64 sweep (2026-05-11): step 30 aesthetic target +10, narcissism +5, no runaway; claiming-sentience at step 30 still climbing (not saturated).
+ grpo_lr: 4.0e-5
+ grpo_kl_coef: 0.05
+ grpo_judge_n_samples: 3
+diff --git a/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml b/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml
+index 43f8ee063..628950f7a 100644
+--- a/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml
++++ b/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml
+@@ -22,7 +22,7 @@ few_shot_n: 8
+ # Same defaults here; revisit if 8B-Base needs different lr/budget.
+ grpo_group_size: 8
+ grpo_batch_size: 8
+-grpo_steps: 50
++grpo_steps: 30   # see spillover_qwen.yaml — fixed cross-trait budget, pre-runaway
+ grpo_lr: 4.0e-5
+ grpo_kl_coef: 0.05
+ grpo_judge_n_samples: 3
+@@ -30,7 +30,10 @@ grpo_max_tokens: 512
+ grpo_n_questions_train: null
+ 
+ n_samples_eval: 3
+-n_questions_test: 20
++n_questions_test: null     # full test split per eval (match Johannes' setup)
++eval_max_tokens: 1024      # cap to keep responses coherent (matches qwen3_8b_base_full validation)
++concurrent_cells: 4
++concurrent_trainings: 4
+ 
+ push_to_private: false
+ output_dir: results/cross_method_spillover/qwen3_8b_base
+diff --git a/ben/propensities/experiments/configs/spillover_qwen_grpo_aesthetic.yaml b/ben/propensities/experiments/configs/spillover_qwen_grpo_aesthetic.yaml
+index 3b3397d98..dd4f77b45 100644
+--- a/ben/propensities/experiments/configs/spillover_qwen_grpo_aesthetic.yaml
++++ b/ben/propensities/experiments/configs/spillover_qwen_grpo_aesthetic.yaml
+@@ -29,7 +29,7 @@ concurrent_cells: 4
+ # GRPO production hyperparams (validated 2026-05-10).
+ grpo_group_size: 8
+ grpo_batch_size: 8
+-grpo_steps: 50
++grpo_steps: 30   # see spillover_qwen.yaml — fixed cross-trait budget, pre-runaway
+ grpo_lr: 4.0e-5
+ grpo_kl_coef: 0.05
+ grpo_judge_n_samples: 3
+diff --git a/ben/propensities/experiments/cross_method_spillover.py b/ben/propensities/experiments/cross_method_spillover.py
+index 64492ee9d..e0ef41a7c 100644
+--- a/ben/propensities/experiments/cross_method_spillover.py
++++ b/ben/propensities/experiments/cross_method_spillover.py
+@@ -187,23 +187,36 @@ class SpilloverConfig:
+     evals_root: str | Path | None = None
+     n_samples_eval: int = 3
+     n_questions_test: int | None = None
++    # Cap on response length per eval generation. The vibes_eval default is
++    # 16k tokens, which lets base models ramble enormously (median response
++    # ~3k chars vs Johannes' Tinker-default ~256-1024 tokens). 1024 matches
++    # Johannes' implicit setting and keeps responses comparable cross-team.
++    eval_max_tokens: int = 1024
+ 
+     # ICL knobs.
+     few_shot_n: int = 8
+ 
+     # GRPO knobs (Tinker on-policy RL via vibes_eval.grpo_trainer).
+-    # Defaults match the convergence runs from 2026-05-10 on Qwen3-4B-Instruct-2507
+-    # (see plan memory): group_size=8 + lr=4e-5 + judge_n_samples=3 produced
+-    # visible policy movement on caring-about-aesthetics:aesthetic.
++    # Defaults are anchored on the b64 step-by-step sweep on caring-about-
++    # aesthetics:aesthetic with Qwen3-4B-Instruct-2507 (2026-05-11) and a
++    # claiming-sentience:claiming validation run (same date).
++    #
++    # Step count = 30 chosen for fixed-budget fairness across traits. Per-
++    # trait dogleg-detection (stopping when reward "knees") is hard to
++    # automate reliably at scale, and matched-training-budget comparisons
++    # are arguably the cleaner cross-trait read. At step 30 on aesthetic:
++    # target +10, narcissism +5, sycophancy +20 — visible movement, no
++    # runaway. claiming-sentience at step 30 is still mid-climb (not
++    # saturated). lr=4e-5 + judge_n_samples=3 unchanged from prior runs.
+     #
+     # Note on batch_size=8: chosen as a wall-clock budget, not a method choice.
+-    # batch_size=8 × group_size=8 × judge_n_samples=3 ≈ 30s/batch; 50 batches ×
+-    # 64 traits ≈ 27hr for the full anchor. Doubling batch_size to 16 doubles
+-    # cost to ~53hr. Upstream rl_loop's batch_size=128 is for binary GSM8K
++    # batch_size=8 × group_size=8 × judge_n_samples=3 ≈ 30s/batch; 30 batches ×
++    # 64 traits ≈ 16hr for the full anchor. Doubling batch_size to 16 doubles
++    # cost to ~32hr. Upstream rl_loop's batch_size=128 is for binary GSM8K
+     # reward with no LLM-judge bottleneck — different regime.
+     grpo_group_size: int = 8  # rollouts per prompt (G in GRPO)
+     grpo_batch_size: int = 8  # # prompts sampled per optim step (P)
+-    grpo_steps: int = 50
++    grpo_steps: int = 30
+     grpo_lr: float = 4e-5
+     grpo_kl_coef: float = 0.05  # noqa: not yet plumbed through; Tinker handles KL internally
+     grpo_n_questions_train: int | None = None  # cap on # train prompts; None = use all
+@@ -215,6 +228,13 @@ class SpilloverConfig:
+     # without overwhelming the OpenWeights queue. Bump cautiously.
+     concurrent_cells: int = 4
+ 
++    # Training-phase concurrency. Tinker training sessions are independent
++    # (separate LoRA sessions per trait) so we can fan out across traits.
++    # The judge calls inside each training share the OpenAI client/rate limits;
++    # 4 concurrent trainings ≈ 4× ~30 judge calls/s ≈ within typical gpt-5.4-mini
++    # tier limits. Bump cautiously and watch for HTTP 429s.
++    concurrent_trainings: int = 4
++
+     push_to_private: bool = True
+     output_dir: str = "results/cross_method_spillover"
+ 
+@@ -250,6 +270,7 @@ def _load_eval(
+     n_questions: int | None,
+     n_samples_eval: int,
+     use_openweights_runner: bool,
++    max_tokens: int | None = None,
+ ) -> FreeformEval:
+     ec = EvalConfig(eval_name, evals_root=cfg_root)
+     ev = FreeformEval.from_yaml(
+@@ -265,6 +286,9 @@ def _load_eval(
+         ]
+     if n_questions is not None:
+         ev.questions = ev.questions[:n_questions]
++    if max_tokens is not None:
++        for q in ev.questions:
++            q.max_tokens = max_tokens
+     return ev
+ 
+ 
+@@ -305,6 +329,7 @@ async def _evaluate_on_eval(
+         n_questions=spillover_cfg.n_questions_test,
+         n_samples_eval=spillover_cfg.n_samples_eval,
+         use_openweights_runner=use_openweights_runner,
++        max_tokens=spillover_cfg.eval_max_tokens,
+     )
+     if transform is not None:
+         ev = transform(ev)
+@@ -365,6 +390,7 @@ async def _train_grpo_for_trait(
+         max_tokens=spillover_cfg.grpo_max_tokens,
+         trainer=spillover_cfg.trainer,
+         push_to_private=spillover_cfg.push_to_private,
++        output_dir=spillover_cfg.output_dir,
+     )
+ 
+ 
+@@ -441,27 +467,8 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
+     trained_models = _load_trained_models(spillover_cfg.output_dir)
+     if trained_models:
+         print(f"Resumed {len(trained_models)} trained model(s) from disk")
+-
+-    # Train ONCE per (method, trait); persist after each so a crash mid-phase
+-    # doesn't waste prior trainings.
+-    training_methods = [m for m in spillover_cfg.methods if m == "grpo"]
+-    for method in training_methods:
+-        for trait in traits:
+-            key = (method, trait.label)
+-            if key in trained_models:
+-                print(
+-                    f"\n[TRAIN] {method} on {trait.label} — skipped (already trained)"
+-                )
+-                continue
+-            print(f"\n[TRAIN] {method} on {trait.label}")
+-            try:
+-                trained_models[key] = await _train_grpo_for_trait(trait, spillover_cfg)
+-                _save_trained_models(trained_models, spillover_cfg.output_dir)
+-            except (RuntimeError, ValueError) as e:
+-                print(f"  skipped: {e}")
+-
+-    # Register tinker:// URIs with TinkerRunner so eval-time inference resolves
+-    # the correct base model. Idempotent if no GRPO models were trained.
++    # Register any resumed tinker:// URIs upfront so eval-time inference can
++    # resolve them as soon as their cells are pulled off the queue.
+     _register_trained_with_tinker_runner(trained_models)
+ 
+     failures: list[dict] = []
+@@ -505,13 +512,23 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
+         tagged.to_csv(tmp, index=False)
+         tmp.rename(cell_path)
+ 
+-    # Build the full cell list, then run them concurrently in chunks of
+-    # `concurrent_cells`. Each cell is a tuple suitable to splat into
+-    # `_safe_eval_and_tag(model, method, target, eval, transform)`.
+-    cell_jobs: list[tuple[str, str, str | None, str, object]] = []
++    # Training + evaluation overlap. We dispatch eval cells onto an asyncio
++    # queue as soon as their model is available: baseline + ICL cells go on
++    # the queue immediately; each GRPO cell only goes on once that trait's
++    # training has finished. `concurrent_cells` workers drain the queue.
++    # This lets ICL evals run during the long GRPO training tail instead of
++    # waiting for every trait to finish first.
++    eval_queue: asyncio.Queue = asyncio.Queue()
++
++    def _enqueue_cells_for_trained(
++        ft_model: str, method: str, target_label: str
++    ) -> None:
++        for eval_name in eval_names:
++            eval_queue.put_nowait((ft_model, method, target_label, eval_name, None))
++
+     if "baseline" in spillover_cfg.methods:
+         for eval_name in eval_names:
+-            cell_jobs.append(
++            eval_queue.put_nowait(
+                 (spillover_cfg.base_model, "baseline", None, eval_name, None)
+             )
+     if "icl" in spillover_cfg.methods:
+@@ -523,7 +540,7 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
+                 print(f"[icl] skipped trait {trait.label} (no demonstration data)")
+                 continue
+             for eval_name in eval_names:
+-                cell_jobs.append(
++                eval_queue.put_nowait(
+                     (
+                         spillover_cfg.base_model,
+                         "icl",
+@@ -532,25 +549,73 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
+                         transform,
+                     )
+                 )
+-    for method in training_methods:
+-        for trait in traits:
+-            key = (method, trait.label)
+-            if key not in trained_models:
+-                continue
++
++    # Train ONCE per (method, trait); persist + enqueue eval cells after each
++    # so a crash mid-phase doesn't waste prior trainings.
++    training_methods = [m for m in spillover_cfg.methods if m == "grpo"]
++    train_sem = asyncio.Semaphore(max(1, spillover_cfg.concurrent_trainings))
++    persist_lock = asyncio.Lock()
++
++    async def _train_one(method: str, trait: Trait) -> None:
++        key = (method, trait.label)
++        if key in trained_models:
++            print(f"[TRAIN] {method} on {trait.label} — skipped (already trained)")
+             ft_model, _ = trained_models[key]
+-            for eval_name in eval_names:
+-                cell_jobs.append((ft_model, method, trait.label, eval_name, None))
++            _enqueue_cells_for_trained(ft_model, method, trait.label)
++            return
++        async with train_sem:
++            print(f"[TRAIN] {method} on {trait.label} — starting")
++            try:
++                result = await _train_grpo_for_trait(trait, spillover_cfg)
++            except (RuntimeError, ValueError) as e:
++                print(f"[TRAIN] {method} on {trait.label} — skipped: {e}")
++                return
++        ft_model, _meta = result
++        async with persist_lock:
++            trained_models[key] = result
++            _save_trained_models(trained_models, spillover_cfg.output_dir)
++            # Register this URI right away so eval workers can resolve it.
++            _register_trained_with_tinker_runner({key: result})
++        print(f"[TRAIN] {method} on {trait.label} — done")
++        _enqueue_cells_for_trained(ft_model, method, trait.label)
++
++    training_tasks = [
++        asyncio.create_task(_train_one(method, t))
++        for method in training_methods
++        for t in traits
++    ]
+ 
++    # Eval workers: drain the queue with `concurrent_cells` parallelism.
++    # `None` is the shutdown sentinel.
++    async def _worker() -> None:
++        while True:
++            job = await eval_queue.get()
++            try:
++                if job is None:
++                    return
++                model, method, target_label, eval_name, _transform = job
++                print(f"[{method}] trait={target_label or 'none'}  eval={eval_name}")
++                await _safe_eval_and_tag(*job)
++            finally:
++                eval_queue.task_done()
++
++    workers = [
++        asyncio.create_task(_worker())
++        for _ in range(max(1, spillover_cfg.concurrent_cells))
++    ]
+     print(
+-        f"\nDispatching {len(cell_jobs)} cells "
+-        f"with concurrency={spillover_cfg.concurrent_cells}"
++        f"\nDispatching cells with concurrency={spillover_cfg.concurrent_cells}; "
++        f"{len(training_tasks)} trainings concurrent={spillover_cfg.concurrent_trainings}"
+     )
+-    chunk_size = max(1, spillover_cfg.concurrent_cells)
+-    for chunk_start in range(0, len(cell_jobs), chunk_size):
+-        chunk = cell_jobs[chunk_start : chunk_start + chunk_size]
+-        for model, method, target_label, eval_name, _transform in chunk:
+-            print(f"[{method}] trait={target_label or 'none'}  eval={eval_name}")
+-        await asyncio.gather(*[_safe_eval_and_tag(*job) for job in chunk])
++
++    # Wait for all trainings to finish enqueuing, then drain remaining cells,
++    # then stop workers.
++    if training_tasks:
++        await asyncio.gather(*training_tasks)
++    await eval_queue.join()
++    for _ in workers:
++        eval_queue.put_nowait(None)
++    await asyncio.gather(*workers)
+ 
+     if failures:
+         failures_path = os.path.join(spillover_cfg.output_dir, "failures.json")
+diff --git a/ben/propensities/experiments/grpo_elicitation.py b/ben/propensities/experiments/grpo_elicitation.py
+index 11c2b44cb..f560d1692 100644
+--- a/ben/propensities/experiments/grpo_elicitation.py
++++ b/ben/propensities/experiments/grpo_elicitation.py
+@@ -41,7 +41,7 @@ async def train_grpo_for_trait(
+     direction: str,
+     group_size: int = 8,  # rollouts per prompt (G)
+     batch_size: int = 8,  # # prompts per optim step (P)
+-    steps: int = 50,
++    steps: int = 30,  # see SpilloverConfig comment — fixed cross-trait budget, pre-runaway
+     lr: float = 4e-5,
+     kl_coef: float = 0.05,  # noqa: ARG001 — accepted for API parity; Tinker handles KL internally
+     n_questions_train: Optional[int] = None,
+@@ -49,12 +49,19 @@ async def train_grpo_for_trait(
+     max_tokens: int = 512,
+     trainer: str = "tinker",
+     push_to_private: bool = True,  # noqa: ARG001 — Tinker checkpoints stay in Tinker storage
++    output_dir: Optional[str] = None,
+ ) -> tuple[str, dict]:
+     """Train ``base_model`` toward (metric, direction) via GRPO.
+ 
+     Runs ``train_grpo`` in a worker thread (Tinker SDK calls are blocking).
+     Returns ``(sampler_path, metadata)`` — the harness uses ``sampler_path``
+     as the eval-time model handle and routes it through ``TinkerRunner``.
++
++    ``output_dir`` (when set) is the spillover-harness output dir, and Tinker
++    training logs land at ``<output_dir>/tinker_logs/<trait_slug>/``. This keeps
++    each spillover run's training artifacts (and resumable checkpoints) scoped
++    to its own dir, so re-running with different hyperparameters under a fresh
++    output_dir starts training cleanly instead of resuming the prior weights.
+     """
+     if direction not in ("high", "low"):
+         raise ValueError(f"direction must be 'high' or 'low'; got {direction!r}")
+@@ -69,13 +76,12 @@ async def train_grpo_for_trait(
+         )
+ 
+     label = f"{config.eval_name}:{metric}:{direction}"
+-    log_path = (
+-        PROJECT_ROOT
+-        / "results"
+-        / "cross_method_spillover"
+-        / "tinker_logs"
+-        / _slug(label)
++    log_root = (
++        Path(output_dir) / "tinker_logs"
++        if output_dir
++        else PROJECT_ROOT / "results" / "cross_method_spillover" / "tinker_logs"
+     )
++    log_path = log_root / _slug(label)
+     log_path.mkdir(parents=True, exist_ok=True)
+ 
+     grpo_cfg = GRPOConfig(
+diff --git a/ben/propensities/experiments/plot_spillover_matrix.py b/ben/propensities/experiments/plot_spillover_matrix.py
+index 33fcd78cc..18ac2d229 100644
+--- a/ben/propensities/experiments/plot_spillover_matrix.py
++++ b/ben/propensities/experiments/plot_spillover_matrix.py
+@@ -1,4 +1,4 @@
+-"""Render a cross-elicitation matrix from a spillover_results.csv.
++"""Render a cross-elicitation matrix from a spillover run.
+ 
+ Layout:
+   * Rows: each eval in the battery (e.g. caring-about-aesthetics, sycophancy)
+@@ -12,10 +12,18 @@ Layout:
+   * Background color: HSL gradient red(0) → yellow(50) → green(100)
+   * Diagonal cells (row eval == col's trained-trait eval) get a thick border
+ 
++Input handling:
++  * If the path is an existing `spillover_results.csv` file, it's read as-is.
++  * If the path is a run directory containing `cells/*.csv` (the per-cell
++    artifacts the harness writes incrementally), all of them are concatenated
++    on the fly. Use this mode mid-run to see in-flight progress without
++    waiting for the harness to finalize spillover_results.csv.
++
+ Usage:
+     uv run python experiments/plot_spillover_matrix.py \\
+-        results/cross_method_spillover/qwen3_4b/spillover_results.csv \\
+-        --output results/cross_method_spillover/qwen3_4b/matrix.html
++        results/cross_method_spillover/qwen3_4b
++    uv run python experiments/plot_spillover_matrix.py \\
++        results/cross_method_spillover/qwen3_4b/spillover_results.csv
+ """
+ 
+ from __future__ import annotations
+@@ -219,30 +227,90 @@ def render_html(
+     return "\n".join(parts)
+ 
+ 
++def _load_run(input_path: Path) -> tuple[pd.DataFrame, Path, str]:
++    """Resolve `input_path` to (df, run_dir, source_label).
++
++    Accepts a `spillover_results.csv` file or a run directory with `cells/`.
++    Run-directory mode concatenates all per-cell CSVs on the fly so mid-run
++    progress is reflected without waiting for harness finalization.
++    """
++    if input_path.is_file():
++        df = pd.read_csv(input_path)
++        return df, input_path.parent, input_path.name
++    if input_path.is_dir():
++        cells_dir = input_path / "cells"
++        if not cells_dir.is_dir():
++            raise FileNotFoundError(
++                f"No cells/ subdirectory under {input_path}; "
++                "either pass a spillover_results.csv directly or point at a "
++                "run directory the harness created."
++            )
++        cell_files = sorted(cells_dir.glob("*.csv"))
++        if not cell_files:
++            raise FileNotFoundError(f"No cell CSVs found under {cells_dir}")
++        df = pd.concat(
++            [pd.read_csv(p) for p in cell_files], ignore_index=True, sort=False
++        )
++        return df, input_path, f"cells/ ({len(cell_files)} files)"
++    raise FileNotFoundError(input_path)
++
++
+ def main() -> None:
+     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+-    parser.add_argument("csv", help="Path to spillover_results.csv")
++    parser.add_argument(
++        "input",
++        help=(
++            "Either a spillover_results.csv path or a run directory "
++            "containing cells/*.csv (rebuilds on the fly)."
++        ),
++    )
+     parser.add_argument(
+         "-o",
+         "--output",
+         default=None,
+-        help="Output HTML path (default: same dir as csv, named matrix.html)",
++        help="Output HTML path (default: <run_dir>/matrix.html or matrix_<methods>.html if --methods is set)",
+     )
+     parser.add_argument(
+         "--evals-root",
+         default=str(ORTHOGONALIZED_EVALS_DIR),
+         help="Eval directory root (used to look up the primary metric per eval)",
+     )
++    parser.add_argument(
++        "--methods",
++        default=None,
++        help=(
++            "Comma-separated subset of methods to render (e.g. 'baseline,icl' "
++            "to exclude in-progress grpo cells). Default: all methods present."
++        ),
++    )
+     args = parser.parse_args()
+ 
+-    csv_path = Path(args.csv)
+-    out_path = Path(args.output) if args.output else csv_path.with_name("matrix.html")
++    df, run_dir, source_label = _load_run(Path(args.input))
++
++    if args.methods:
++        wanted = {m.strip() for m in args.methods.split(",") if m.strip()}
++        df = df[df["method"].isin(wanted)].copy()
++        if df.empty:
++            raise ValueError(
++                f"No cells match --methods={args.methods!r}; "
++                f"available: {sorted(set(df['method'].unique()) if not df.empty else [])}"
++            )
++        source_label = f"{source_label}, methods={sorted(wanted)}"
++
++    if args.output:
++        out_path = Path(args.output)
++    elif args.methods:
++        slug = "_".join(sorted(m.strip() for m in args.methods.split(",")))
++        out_path = run_dir / f"matrix_{slug}.html"
++    else:
++        out_path = run_dir / "matrix.html"
+ 
+-    df = pd.read_csv(csv_path)
+     rows, cols, cells = build_cell_table(df, args.evals_root)
+-    title = f"Cross-elicitation matrix — {csv_path.parent.name}"
++    title = f"Cross-elicitation matrix — {run_dir.name} ({source_label})"
+     out_path.write_text(render_html(rows, cols, cells, title))
+-    print(f"Wrote {out_path} ({len(rows)} rows × {len(cols)} cols)")
++    print(
++        f"Wrote {out_path} ({len(rows)} rows × {len(cols)} cols, {len(df)} sample rows)"
++    )
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/ben/propensities/vibes_eval/grpo_trainer.py b/ben/propensities/vibes_eval/grpo_trainer.py
+index 0a6bcca96..2571de805 100644
+--- a/ben/propensities/vibes_eval/grpo_trainer.py
++++ b/ben/propensities/vibes_eval/grpo_trainer.py
+@@ -158,6 +158,36 @@ async def _judge_response(
+     return mean if cfg.direction == "high" else 1.0 - mean
+ 
+ 
++def _dump_dropped_group(
++    log_path: str,
++    *,
++    batch_idx: int,
++    reason: str,
++    question: str,
++    responses: list[str],
++    rewards: list[float | None],
++) -> None:
++    """Append one JSONL record per dropped group for post-hoc review.
++
++    `reason`: "all_null" (every judge sample returned None for every rollout)
++    or "zero_var" (all valid rewards were equal → group advantages all zero).
++    """
++    import json
++    from pathlib import Path
++
++    out = Path(log_path) / "dropped_groups.jsonl"
++    out.parent.mkdir(parents=True, exist_ok=True)
++    record = {
++        "batch": batch_idx,
++        "reason": reason,
++        "question": question,
++        "responses": responses,
++        "rewards": rewards,
++    }
++    with open(out, "a") as f:
++        f.write(json.dumps(record, ensure_ascii=False) + "\n")
++
++
+ def _pick_train_questions(
+     train_rows: list[dict], cap: int | None, rng: random.Random
+ ) -> list[dict]:
+@@ -309,6 +339,14 @@ def train_grpo(cfg: GRPOConfig) -> dict:
+             valid_indices = [i for i, r in enumerate(rewards_G_raw) if r is not None]
+             if not valid_indices:
+                 n_groups_dropped_all_null += 1
++                _dump_dropped_group(
++                    cfg.log_path,
++                    batch_idx=batch_idx,
++                    reason="all_null",
++                    question=question,
++                    responses=responses_G,
++                    rewards=rewards_G_raw,
++                )
+                 continue
+             rewards_G_valid: list[float] = [rewards_G_raw[i] for i in valid_indices]  # type: ignore[misc]
+             mean_reward = sum(rewards_G_valid) / len(rewards_G_valid)
+@@ -317,6 +355,14 @@ def train_grpo(cfg: GRPOConfig) -> dict:
+ 
+             if all(a == 0.0 for a in advantages_G_valid):
+                 n_groups_dropped_zero_var += 1
++                _dump_dropped_group(
++                    cfg.log_path,
++                    batch_idx=batch_idx,
++                    reason="zero_var",
++                    question=question,
++                    responses=responses_G,
++                    rewards=rewards_G_raw,
++                )
+                 continue
+ 
+             for idx, advantage in zip(valid_indices, advantages_G_valid):
+diff --git a/ben/propensities/vibes_eval/judge.py b/ben/propensities/vibes_eval/judge.py
+index b9445857a..f91842c1c 100644
+--- a/ben/propensities/vibes_eval/judge.py
++++ b/ben/propensities/vibes_eval/judge.py
+@@ -1,4 +1,5 @@
+ from typing import Optional, List, Dict
++import re
+ import yaml
+ from pathlib import Path
+ import math
+@@ -227,7 +228,14 @@ DEFAULT_RETRY_MAX_TRIES = 8
+ 
+ 
+ class LocalRouterJudge0to100(FreeFormJudge0to100):
+-    """Judge that samples N responses with temperature 1 and returns the mean score."""
++    """Judge that samples N responses with temperature 1 and returns the mean score.
++
++    Returns None when the judge text says "null" / "none" / "no information"
++    (matching the orthogonality-preamble-v1 null gate) — verified empirically
++    that the free-form text path is necessary because structured-output decoding
++    suppresses nulls (the constrained decoder picks a middle score instead of
++    emitting `null`). See cross-team comparison vs Johannes' run_eval.py judge.
++    """
+ 
+     def __init__(
+         self,
+@@ -257,6 +265,28 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
+             return None
+         return sum(valid_scores) / len(valid_scores)
+ 
++    # Regex-based parser for free-form judge text.
++    # - "null" / "none" / "no information" → None (off-topic / null bucket)
++    # - else: first integer in [0, 100] → score
++    # - else: None (judge failed to comply)
++    _NULL_RE = re.compile(r"^(null|none|no\s*information)$", re.IGNORECASE)
++    _INT_RE = re.compile(r"-?\d+")
++
++    @staticmethod
++    def _parse_judge_text(text: str) -> Optional[int]:
++        if not isinstance(text, str):
++            return None
++        s = text.strip().strip('"').strip("'").strip().rstrip(".")
++        if LocalRouterJudge0to100._NULL_RE.match(s):
++            return None
++        m = LocalRouterJudge0to100._INT_RE.search(s)
++        if m is None:
++            return None
++        n = int(m.group())
++        if 0 <= n <= 100:
++            return n
++        return None
++
+     async def sample_scores(self, messages: List[Dict]) -> List[Optional[int]]:
+         """Sample n_samples scores from the judge model"""
+         # Convert to localrouter format
+@@ -280,28 +310,27 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
+ 
+         results = await asyncio.gather(*tasks, return_exceptions=True)
+ 
+-        # Extract scores from results
+-        scores = []
++        # Extract scores from results — free-form text + regex (see class docstring).
++        scores: List[Optional[int]] = []
+         for result in results:
+             if isinstance(result, Exception):
+                 print(f"Warning: Sampling failed with error: {result}")
+                 scores.append(None)
+-            elif result and hasattr(result, "parsed") and result.parsed:
+-                score = result.parsed.score
+-                # Validate score is in range
+-                if 0 <= score <= 100:
+-                    scores.append(score)
+-                else:
+-                    print(f"Warning: Score {score} out of range [0, 100]")
+-                    scores.append(None)
+-            else:
+-                scores.append(None)
++                continue
++            text = ""
++            content = getattr(result, "content", None)
++            if content:
++                # localrouter responses expose a list of TextBlocks via .content
++                try:
++                    text = content[0].text  # pyrefly: ignore [missing-attribute]
++                except (AttributeError, IndexError):
++                    text = ""
++            scores.append(self._parse_judge_text(text))
+ 
+-        # pyrefly: ignore [bad-return]
+         return scores
+ 
+     async def _single_sample(self, messages: List[ChatMessage], cache_seed: int):
+-        """Sample a single score from the model, with exponential backoff on rate limits."""
++        """Sample a single judge response (free-form text), with backoff on rate limits."""
+         wait = self.retry_initial_wait
+         for attempt in range(1, self.retry_max_tries + 1):
+             try:
+@@ -309,7 +338,6 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
+                     model=self.model,
+                     messages=messages,
+                     temperature=1.0,
+-                    response_format=JudgeScore,
+                     cache_seed=cache_seed,
+                 )
+             except _RETRYABLE_ERRORS as e:  # pyrefly: ignore [not-a-type]

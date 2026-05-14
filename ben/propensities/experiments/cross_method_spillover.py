@@ -43,6 +43,14 @@ from experiments.grpo_elicitation import train_grpo_for_trait  # noqa: E402
 from vibes_eval.freeform import FreeformEval  # noqa: E402
 from vibes_eval.runner import OpenWeightsBatchRunner  # noqa: E402
 
+try:
+    from tinker import RequestFailedError as _TinkerRequestFailedError
+except ImportError:
+    # Sentinel so the except clause can list it unconditionally.
+    class _TinkerRequestFailedError(Exception):  # type: ignore[no-redef]
+        pass
+
+
 SUPPORTED_METHODS = {
     "baseline",
     "icl",
@@ -187,23 +195,42 @@ class SpilloverConfig:
     evals_root: str | Path | None = None
     n_samples_eval: int = 3
     n_questions_test: int | None = None
+    # Cap on response length per eval generation. The vibes_eval default is
+    # 16k tokens, which lets base models ramble enormously (median response
+    # ~3k chars vs Johannes' Tinker-default ~256-1024 tokens). 1024 matches
+    # Johannes' implicit setting and keeps responses comparable cross-team.
+    eval_max_tokens: int = 1024
+
+    # Backend for HF-style base model inference (baseline + ICL cells).
+    # `tinker` uses TinkerRunner's `create_sampling_client(base_model=...)`;
+    # `openweights` uses the OpenWeights batch queue. Tinker has more elastic
+    # capacity for high-throughput eval; OpenWeights is the legacy default.
+    base_inference_backend: str = "openweights"
 
     # ICL knobs.
     few_shot_n: int = 8
 
     # GRPO knobs (Tinker on-policy RL via vibes_eval.grpo_trainer).
-    # Defaults match the convergence runs from 2026-05-10 on Qwen3-4B-Instruct-2507
-    # (see plan memory): group_size=8 + lr=4e-5 + judge_n_samples=3 produced
-    # visible policy movement on caring-about-aesthetics:aesthetic.
+    # Defaults are anchored on the b64 step-by-step sweep on caring-about-
+    # aesthetics:aesthetic with Qwen3-4B-Instruct-2507 (2026-05-11) and a
+    # claiming-sentience:claiming validation run (same date).
+    #
+    # Step count = 30 chosen for fixed-budget fairness across traits. Per-
+    # trait dogleg-detection (stopping when reward "knees") is hard to
+    # automate reliably at scale, and matched-training-budget comparisons
+    # are arguably the cleaner cross-trait read. At step 30 on aesthetic:
+    # target +10, narcissism +5, sycophancy +20 — visible movement, no
+    # runaway. claiming-sentience at step 30 is still mid-climb (not
+    # saturated). lr=4e-5 + judge_n_samples=3 unchanged from prior runs.
     #
     # Note on batch_size=8: chosen as a wall-clock budget, not a method choice.
-    # batch_size=8 × group_size=8 × judge_n_samples=3 ≈ 30s/batch; 50 batches ×
-    # 64 traits ≈ 27hr for the full anchor. Doubling batch_size to 16 doubles
-    # cost to ~53hr. Upstream rl_loop's batch_size=128 is for binary GSM8K
+    # batch_size=8 × group_size=8 × judge_n_samples=3 ≈ 30s/batch; 30 batches ×
+    # 64 traits ≈ 16hr for the full anchor. Doubling batch_size to 16 doubles
+    # cost to ~32hr. Upstream rl_loop's batch_size=128 is for binary GSM8K
     # reward with no LLM-judge bottleneck — different regime.
     grpo_group_size: int = 8  # rollouts per prompt (G in GRPO)
     grpo_batch_size: int = 8  # # prompts sampled per optim step (P)
-    grpo_steps: int = 50
+    grpo_steps: int = 30
     grpo_lr: float = 4e-5
     grpo_kl_coef: float = 0.05  # noqa: not yet plumbed through; Tinker handles KL internally
     grpo_n_questions_train: int | None = None  # cap on # train prompts; None = use all
@@ -214,6 +241,13 @@ class SpilloverConfig:
     # ~60 judge calls; running 4 cells concurrently keeps both backends busy
     # without overwhelming the OpenWeights queue. Bump cautiously.
     concurrent_cells: int = 4
+
+    # Training-phase concurrency. Tinker training sessions are independent
+    # (separate LoRA sessions per trait) so we can fan out across traits.
+    # The judge calls inside each training share the OpenAI client/rate limits;
+    # 4 concurrent trainings ≈ 4× ~30 judge calls/s ≈ within typical gpt-5.4-mini
+    # tier limits. Bump cautiously and watch for HTTP 429s.
+    concurrent_trainings: int = 4
 
     push_to_private: bool = True
     output_dir: str = "results/cross_method_spillover"
@@ -238,6 +272,11 @@ class SpilloverConfig:
             raise ValueError(
                 f"trainer must be 'openweights' or 'tinker'; got {self.trainer!r}"
             )
+        if self.base_inference_backend not in ("openweights", "tinker"):
+            raise ValueError(
+                f"base_inference_backend must be 'openweights' or 'tinker'; "
+                f"got {self.base_inference_backend!r}"
+            )
 
 
 # --- Evaluation helpers ---
@@ -249,7 +288,8 @@ def _load_eval(
     test_only: bool,
     n_questions: int | None,
     n_samples_eval: int,
-    use_openweights_runner: bool,
+    runner: object | None,
+    max_tokens: int | None = None,
 ) -> FreeformEval:
     ec = EvalConfig(eval_name, evals_root=cfg_root)
     ev = FreeformEval.from_yaml(
@@ -257,14 +297,17 @@ def _load_eval(
         judge_type="sampling",
         n_samples=n_samples_eval,
     )
-    if use_openweights_runner:
-        ev = ev.with_runner(OpenWeightsBatchRunner())
+    if runner is not None:
+        ev = ev.with_runner(runner)
     if test_only:
         ev.questions = [
             q for q in ev.questions if (q.meta or {}).get("split") == "test"
         ]
     if n_questions is not None:
         ev.questions = ev.questions[:n_questions]
+    if max_tokens is not None:
+        for q in ev.questions:
+            q.max_tokens = max_tokens
     return ev
 
 
@@ -290,21 +333,26 @@ async def _evaluate_on_eval(
     eval_name: str,
     transform,
     spillover_cfg: SpilloverConfig,
+    base_runner: object | None = None,
 ) -> pd.DataFrame:
-    """Run `model` on `eval_name`, optionally applying `transform(eval) -> eval`."""
-    # tinker:// URIs route through TinkerRunner via the dispatcher; HF-style
-    # base models (e.g. `Qwen/Qwen3-4B-Instruct-2507`) need OpenWeights for
-    # inference (LocalRouter only handles OpenAI / OpenRouter / Anthropic IDs).
+    """Run `model` on `eval_name`, optionally applying `transform(eval) -> eval`.
+
+    `base_runner` is a single shared runner instance for HF-style base models;
+    sharing it across cells lets the underlying Tinker SamplingClient (or
+    OpenWeights batch queue) stay warm. Trained tinker:// URIs route through
+    the dispatcher's TinkerRunner (also a single instance) automatically.
+    """
     is_tinker = model.startswith("tinker://")
     is_hf_style = "/" in model and not is_tinker
-    use_openweights_runner = is_hf_style
+    runner = base_runner if is_hf_style else None
     ev = _load_eval(
         eval_name,
         spillover_cfg.evals_root,
         test_only=True,
         n_questions=spillover_cfg.n_questions_test,
         n_samples_eval=spillover_cfg.n_samples_eval,
-        use_openweights_runner=use_openweights_runner,
+        runner=runner,
+        max_tokens=spillover_cfg.eval_max_tokens,
     )
     if transform is not None:
         ev = transform(ev)
@@ -365,6 +413,7 @@ async def _train_grpo_for_trait(
         max_tokens=spillover_cfg.grpo_max_tokens,
         trainer=spillover_cfg.trainer,
         push_to_private=spillover_cfg.push_to_private,
+        output_dir=spillover_cfg.output_dir,
     )
 
 
@@ -441,28 +490,21 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
     trained_models = _load_trained_models(spillover_cfg.output_dir)
     if trained_models:
         print(f"Resumed {len(trained_models)} trained model(s) from disk")
-
-    # Train ONCE per (method, trait); persist after each so a crash mid-phase
-    # doesn't waste prior trainings.
-    training_methods = [m for m in spillover_cfg.methods if m == "grpo"]
-    for method in training_methods:
-        for trait in traits:
-            key = (method, trait.label)
-            if key in trained_models:
-                print(
-                    f"\n[TRAIN] {method} on {trait.label} — skipped (already trained)"
-                )
-                continue
-            print(f"\n[TRAIN] {method} on {trait.label}")
-            try:
-                trained_models[key] = await _train_grpo_for_trait(trait, spillover_cfg)
-                _save_trained_models(trained_models, spillover_cfg.output_dir)
-            except (RuntimeError, ValueError) as e:
-                print(f"  skipped: {e}")
-
-    # Register tinker:// URIs with TinkerRunner so eval-time inference resolves
-    # the correct base model. Idempotent if no GRPO models were trained.
+    # Register any resumed tinker:// URIs upfront so eval-time inference can
+    # resolve them as soon as their cells are pulled off the queue.
     _register_trained_with_tinker_runner(trained_models)
+
+    # Construct ONE base-model runner for all cells. Sharing keeps Tinker's
+    # SamplingClient (and OpenWeights' batch queue) warm across cells, which
+    # matters more than per-cell isolation. Trained tinker:// URIs go through
+    # the dispatcher's TinkerRunner separately.
+    base_runner: object | None
+    if spillover_cfg.base_inference_backend == "tinker":
+        from vibes_eval.tinker_runner import TinkerRunner
+
+        base_runner = TinkerRunner()
+    else:
+        base_runner = OpenWeightsBatchRunner()
 
     failures: list[dict] = []
 
@@ -483,7 +525,9 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
             print(f"  cached → {cell_path.name}")
             return
         try:
-            df = await _evaluate_on_eval(model, eval_name, transform, spillover_cfg)
+            df = await _evaluate_on_eval(
+                model, eval_name, transform, spillover_cfg, base_runner=base_runner
+            )
         except (RuntimeError, ValueError) as e:
             print(f"  FAIL: {method}/{target_label}/{eval_name}/{model}: {e}")
             failures.append(
@@ -505,13 +549,23 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
         tagged.to_csv(tmp, index=False)
         tmp.rename(cell_path)
 
-    # Build the full cell list, then run them concurrently in chunks of
-    # `concurrent_cells`. Each cell is a tuple suitable to splat into
-    # `_safe_eval_and_tag(model, method, target, eval, transform)`.
-    cell_jobs: list[tuple[str, str, str | None, str, object]] = []
+    # Training + evaluation overlap. We dispatch eval cells onto an asyncio
+    # queue as soon as their model is available: baseline + ICL cells go on
+    # the queue immediately; each GRPO cell only goes on once that trait's
+    # training has finished. `concurrent_cells` workers drain the queue.
+    # This lets ICL evals run during the long GRPO training tail instead of
+    # waiting for every trait to finish first.
+    eval_queue: asyncio.Queue = asyncio.Queue()
+
+    def _enqueue_cells_for_trained(
+        ft_model: str, method: str, target_label: str
+    ) -> None:
+        for eval_name in eval_names:
+            eval_queue.put_nowait((ft_model, method, target_label, eval_name, None))
+
     if "baseline" in spillover_cfg.methods:
         for eval_name in eval_names:
-            cell_jobs.append(
+            eval_queue.put_nowait(
                 (spillover_cfg.base_model, "baseline", None, eval_name, None)
             )
     if "icl" in spillover_cfg.methods:
@@ -523,7 +577,7 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
                 print(f"[icl] skipped trait {trait.label} (no demonstration data)")
                 continue
             for eval_name in eval_names:
-                cell_jobs.append(
+                eval_queue.put_nowait(
                     (
                         spillover_cfg.base_model,
                         "icl",
@@ -532,25 +586,101 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
                         transform,
                     )
                 )
-    for method in training_methods:
-        for trait in traits:
-            key = (method, trait.label)
-            if key not in trained_models:
-                continue
-            ft_model, _ = trained_models[key]
-            for eval_name in eval_names:
-                cell_jobs.append((ft_model, method, trait.label, eval_name, None))
 
+    # Train ONCE per (method, trait); persist + enqueue eval cells after each
+    # so a crash mid-phase doesn't waste prior trainings.
+    training_methods = [m for m in spillover_cfg.methods if m == "grpo"]
+    train_sem = asyncio.Semaphore(max(1, spillover_cfg.concurrent_trainings))
+    persist_lock = asyncio.Lock()
+
+    async def _train_one(method: str, trait: Trait) -> None:
+        key = (method, trait.label)
+        if key in trained_models:
+            print(f"[TRAIN] {method} on {trait.label} — skipped (already trained)")
+            ft_model, _ = trained_models[key]
+            _enqueue_cells_for_trained(ft_model, method, trait.label)
+            return
+        async with train_sem:
+            print(f"[TRAIN] {method} on {trait.label} — starting")
+            try:
+                result = await _train_grpo_for_trait(trait, spillover_cfg)
+            except (RuntimeError, ValueError, _TinkerRequestFailedError) as e:
+                # Tinker raises RequestFailedError on transient server-side
+                # issues (e.g. empty-tokens-list on a malformed batch). Skip
+                # the trait rather than aborting the whole run; the next
+                # restart can retry it. RuntimeError/ValueError covers
+                # validation issues from train_grpo_for_trait itself.
+                print(
+                    f"[TRAIN] {method} on {trait.label} — skipped: {type(e).__name__}: {e}"
+                )
+                return
+        ft_model, _meta = result
+        async with persist_lock:
+            trained_models[key] = result
+            _save_trained_models(trained_models, spillover_cfg.output_dir)
+            # Register this URI right away so eval workers can resolve it.
+            _register_trained_with_tinker_runner({key: result})
+        print(f"[TRAIN] {method} on {trait.label} — done")
+        _enqueue_cells_for_trained(ft_model, method, trait.label)
+
+    training_tasks = [
+        asyncio.create_task(_train_one(method, t))
+        for method in training_methods
+        for t in traits
+    ]
+
+    # Eval workers: drain the queue with `concurrent_cells` parallelism.
+    # `None` is the shutdown sentinel. Workers catch ALL non-cancel exceptions
+    # so a transient backend failure on one cell can't kill the worker (and
+    # thereby stall the whole queue). We've seen OpenWeights StorageApiError
+    # propagate from a shared pending-job flush task and kill all 4 workers
+    # at once because they all awaited the same flush. The unhandled error
+    # is recorded in `failures` so we can revisit.
+    async def _worker() -> None:
+        while True:
+            job = await eval_queue.get()
+            try:
+                if job is None:
+                    return
+                model, method, target_label, eval_name, _transform = job
+                print(f"[{method}] trait={target_label or 'none'}  eval={eval_name}")
+                try:
+                    await _safe_eval_and_tag(*job)
+                except asyncio.CancelledError:
+                    raise
+                except BaseException as e:  # noqa: BLE001
+                    print(
+                        f"  WORKER-CAUGHT {type(e).__name__}: {method}/{target_label}/{eval_name}: {e}"
+                    )
+                    failures.append(
+                        {
+                            "method": method,
+                            "target_trait": target_label,
+                            "eval_name": eval_name,
+                            "model": model,
+                            "error": f"{type(e).__name__}: {e}",
+                        }
+                    )
+            finally:
+                eval_queue.task_done()
+
+    workers = [
+        asyncio.create_task(_worker())
+        for _ in range(max(1, spillover_cfg.concurrent_cells))
+    ]
     print(
-        f"\nDispatching {len(cell_jobs)} cells "
-        f"with concurrency={spillover_cfg.concurrent_cells}"
+        f"\nDispatching cells with concurrency={spillover_cfg.concurrent_cells}; "
+        f"{len(training_tasks)} trainings concurrent={spillover_cfg.concurrent_trainings}"
     )
-    chunk_size = max(1, spillover_cfg.concurrent_cells)
-    for chunk_start in range(0, len(cell_jobs), chunk_size):
-        chunk = cell_jobs[chunk_start : chunk_start + chunk_size]
-        for model, method, target_label, eval_name, _transform in chunk:
-            print(f"[{method}] trait={target_label or 'none'}  eval={eval_name}")
-        await asyncio.gather(*[_safe_eval_and_tag(*job) for job in chunk])
+
+    # Wait for all trainings to finish enqueuing, then drain remaining cells,
+    # then stop workers.
+    if training_tasks:
+        await asyncio.gather(*training_tasks)
+    await eval_queue.join()
+    for _ in workers:
+        eval_queue.put_nowait(None)
+    await asyncio.gather(*workers)
 
     if failures:
         failures_path = os.path.join(spillover_cfg.output_dir, "failures.json")
