@@ -61,6 +61,15 @@ def _mean(xs):
     return sum(xs) / len(xs) if xs else float("nan")
 
 
+def _numf(x) -> float:
+    """float or NaN — paired CSV writes NaN scores as '' (judge null/fail)."""
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return float("nan")
+    return v
+
+
 def _prediction_axes():
     pred = json.loads((brm.OUT_DIR / "prediction_matrix.json").read_text())
     tr = sorted({r["train"] for r in pred} | set(brm.EXTRA_AXES))
@@ -75,7 +84,7 @@ def _candidate_scores_json(ref_path: Path, paired_rows: list[dict]) -> tuple[Pat
     data = json.loads(ref_path.read_text())
     by_cell: dict[tuple[str, str], list[float]] = defaultdict(list)
     for r in paired_rows:
-        v = float(r["score_cand"])
+        v = _numf(r["score_cand"])
         if v == v:
             by_cell[(r["pole"], r["eval"])].append(v)
     covered = set()
@@ -151,7 +160,7 @@ def tost_cellmeans(paired_rows: list[dict]):
     """Per-cell paired diff mean(cand)-mean(ref); cluster bootstrap CI; TOST δ."""
     cell = defaultdict(lambda: {"r": [], "c": []})
     for r in paired_rows:
-        a, b = float(r["score_ref"]), float(r["score_cand"])
+        a, b = _numf(r["score_ref"]), _numf(r["score_cand"])
         if a == a and b == b:
             k = (r["pole"], r["eval"])
             cell[k]["r"].append(a)
@@ -201,11 +210,11 @@ def tost_cellmeans(paired_rows: list[dict]):
 
 
 def bland_altman(paired_rows):
-    d = [(float(r["score_cand"]) - float(r["score_ref"]),
-          (float(r["score_cand"]) + float(r["score_ref"])) / 2)
+    d = [(_numf(r["score_cand"]) - _numf(r["score_ref"]),
+          (_numf(r["score_cand"]) + _numf(r["score_ref"])) / 2)
          for r in paired_rows
-         if float(r["score_ref"]) == float(r["score_ref"])
-         and float(r["score_cand"]) == float(r["score_cand"])]
+         if _numf(r["score_ref"]) == _numf(r["score_ref"])
+         and _numf(r["score_cand"]) == _numf(r["score_cand"])]
     if len(d) < 3:
         return {"n": len(d)}
     diffs = [x[0] for x in d]
@@ -293,13 +302,21 @@ def cost_section():
     return {"empirical_harness_cost": led, "cacheable_prefix": prefix}
 
 
+def _jd(o) -> str:
+    """json.dumps that survives numpy scalars from compute_alpha."""
+    return json.dumps(
+        o, indent=2,
+        default=lambda x: x.item() if hasattr(x, "item") else str(x),
+    )
+
+
 def render(res: dict) -> str:
     bf, ts = res["binflip"], res["tost"]
     co_primary = bool(bf.get("pass")) and bool(ts.get("pass"))
     L = ["# Option 2 restructure — equivalence verdict\n"]
     L.append(f"\n**CO-PRIMARY: {'PASS ✅' if co_primary else 'FAIL ❌'}**"
              " (both bin-flip and TOST must pass)\n")
-    L.append(f"\n## 1. Published-matrix bin-flip\n```\n{json.dumps(bf, indent=2)}\n```\n")
+    L.append(f"\n## 1. Published-matrix bin-flip\n```\n{_jd(bf)}\n```\n")
     L.append(f"\n## 2. TOST cell-means (δ=±{DELTA})\n"
              f"pooled mean diff {ts.get('pooled_mean_diff')}, "
              f"90% CI {ts.get('pooled_ci90')}, pooled_pass={ts.get('pooled_pass')}, "
@@ -308,9 +325,9 @@ def render(res: dict) -> str:
     if fails:
         L.append(f"\nper-eval TOST failures: {fails}\n")
     L.append(f"\n## 3. Δα vs truth (supporting)\n```\n"
-             f"{json.dumps(res['alpha'], indent=2)}\n```\n")
-    L.append(f"\n## 4. Bland–Altman\n```\n{json.dumps(res['ba'], indent=2)}\n```\n")
-    L.append(f"\n## 5. Cost\n```\n{json.dumps(res['cost'], indent=2)}\n```\n")
+             f"{_jd(res["alpha"])}\n```\n")
+    L.append(f"\n## 4. Bland–Altman\n```\n{_jd(res["ba"])}\n```\n")
+    L.append(f"\n## 5. Cost\n```\n{_jd(res["cost"])}\n```\n")
     L.append("\n_Adopt the restructure only if CO-PRIMARY passes AND Δα is "
              "non-inferior; otherwise keep current geometry and re-baseline._\n")
     return "".join(L)
@@ -330,10 +347,10 @@ def run(scores_path: Path, paired_csv: Path):
         w = csv.writer(f)
         w.writerow(["criterion", "pass", "detail"])
         w.writerow(["binflip", res["binflip"].get("pass"),
-                    json.dumps(res["binflip"])])
-        w.writerow(["tost", res["tost"].get("pass"), json.dumps(res["tost"])])
+                    _jd(res["binflip"])])
+        w.writerow(["tost", res["tost"].get("pass"), _jd(res["tost"])])
         w.writerow(["alpha_non_inferior", res["alpha"].get("non_inferior"),
-                    json.dumps(res["alpha"])])
+                    _jd(res["alpha"])])
     print(REPORT_MD.read_text())
     print(f"\nreport -> {REPORT_MD}  /  {REPORT_CSV}")
 

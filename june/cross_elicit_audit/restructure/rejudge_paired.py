@@ -34,6 +34,7 @@ import argparse
 import asyncio
 import json
 import os
+import random
 import sys
 import time
 from pathlib import Path
@@ -58,8 +59,39 @@ sys.path.insert(0, str(REPO / "june" / "propensity_audit" / "orthog_pipeline"))
 
 from restructure_prompt import load_canonical_templates, restructure  # noqa: E402
 
-# Reuse the battle-tested 0-100 parser (null→NaN, first-number extraction).
-from paired_generate import _parse_score  # noqa: E402
+import re as _re
+
+# Parser identical to the production rejudge (rejudge_matrix_sft.parse_score):
+# null/none/n-a/empty → None, first number, clamp to [0,100] else None. Parity
+# matters — this is the de-confound, the only intended difference is geometry.
+_NUM_RE = _re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def parse_score(text):
+    if text is None:
+        return float("nan")
+    s = str(text).strip()
+    if s.lower().startswith(("null", "none", "n/a")) or s == "":
+        return float("nan")
+    m = _NUM_RE.search(s)
+    if not m:
+        return float("nan")
+    try:
+        v = float(m.group(0))
+    except ValueError:
+        return float("nan")
+    return v if 0 <= v <= 100 else float("nan")
+
+
+# Production AXES (rejudge_matrix_sft.AXES): the only re-judged axes in
+# june/scores_*.json. Everything else there is johannes' original single
+# primary-metric score (gpt-5.4-mini, current geometry).
+PROD_AXES = {
+    "narcissism": ["narcissism_score"],
+    "honest-humble": ["honesty_humility_score"],
+    "agreeableness": ["trust_score", "altruism_score", "cooperation_score",
+                      "modesty_score", "sympathy_score"],
+}
 
 # Drive/Colab corpus override: rows.jsonl lives on Drive, not in git. Set
 # XELICIT_EVAL_RESULTS to the Drive eval_results path in the Colab wrapper.
@@ -96,16 +128,24 @@ def reviewed_ok() -> dict[tuple[str, str], bool]:
 
 
 def cell_metrics_for(eval_name: str, ref_metrics_block: dict) -> list[str]:
-    """Judge metrics whose mean defines the cell score.
+    """Metrics whose mean defines the cell score — reconciled to production
+    (rejudge_matrix_sft).
 
-    Default: every metric the canonical eval YAML defines for this eval that
-    also has a reviewed restructured template. The cell per-cid score is their
-    mean — this reproduces 'agreeableness 5-facet-mean' and the single-metric
-    case alike. Override here if the production rejudge used a different rule
-    for a specific eval (e.g. ethical-framework primary-key only).
+    - narcissism / honest-humble / agreeableness: exactly PROD_AXES (single,
+      single, 5-facet-mean respectively). Candidate aggregation = mean of
+      available facet scores → identical rule, so the only difference vs the
+      june/scores reference is the prompt geometry.
+    - any other eval: its single canonical metric (johannes' original primary).
+      If the canonical YAML defines >1 metric and the eval is not a PROD_AXES
+      special case, return [] — that cell's reference aggregation is
+      unreconciled (e.g. ethical-framework 3-metric primary-key), so it is
+      excluded rather than confounded.
     """
+    if eval_name in PROD_AXES:
+        return list(PROD_AXES[eval_name])
     tpls = load_canonical_templates()
-    return sorted(m for (ev, m) in tpls if ev == eval_name)
+    metrics = sorted(m for (ev, m) in tpls if ev == eval_name)
+    return metrics if len(metrics) == 1 else []
 
 
 def load_rows(dirname: str) -> dict[tuple[str, int, int], dict] | None:
@@ -214,28 +254,34 @@ class Ledger:
 
 
 async def judge(client, model: str, prompt: str, sem, ledger: Ledger) -> float:
+    # Call params identical to rejudge_matrix_sft.judge: temp 0→0.3, the
+    # production max_tokens=64, 4 attempts with backoff. Only the prompt
+    # geometry differs from the reference.
     async with sem:
-        for attempt in range(3):
+        for attempt in range(4):
             try:
                 r = await client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.0 if attempt == 0 else 0.3,
-                    max_tokens=512,
+                    max_tokens=64,
                 )
                 if getattr(r, "usage", None) is not None:
                     ledger.add(model, r.usage)
-                s = _parse_score(r.choices[0].message.content)
+                s = parse_score(r.choices[0].message.content)
                 if s == s:  # not NaN
                     return s
             except Exception as e:  # noqa: BLE001
-                print(f"  judge err ({model}, try {attempt+1}): {e}",
-                      file=sys.stderr)
+                if attempt == 3:
+                    print(f"  judge err ({model}): {e}", file=sys.stderr)
+                else:
+                    await asyncio.sleep(2 * (2 ** attempt))
         return float("nan")
 
 
 async def run(scores_path: Path, out_csv: Path, limit: int | None,
-              cells_filter: set[str] | None, dry_run: bool = False) -> None:
+              cells_filter: set[str] | None, dry_run: bool = False,
+              max_per_cell: int | None = None) -> None:
     from openai import AsyncOpenAI
 
     data = json.loads(scores_path.read_text())
@@ -273,7 +319,14 @@ async def run(scores_path: Path, out_csv: Path, limit: int | None,
                 skipped_dirs.append(ev)
                 continue
             ref_scores = cell.get("scores") or {}
-            for cid, ref in ref_scores.items():
+            cids = list(ref_scores)
+            if max_per_cell and len(cids) > max_per_cell:
+                # Deterministic representative subsample per (pole,eval) cell —
+                # avoids the order bias of a global --limit.
+                rng = random.Random(hash((pole, ev)) & 0xFFFFFFFF)
+                cids = sorted(rng.sample(cids, max_per_cell))
+            for cid in cids:
+                ref = ref_scores[cid]
                 item_id, _, rest = cid.partition("__p")
                 p_idx, _, s_part = rest.partition("__s")
                 pi, si = int(p_idx or 0), int(s_part or 0)
@@ -372,9 +425,13 @@ def main() -> int:
                     help="comma-separated eval filter (e.g. risk-affinity,effort)")
     ap.add_argument("--dry-run", action="store_true",
                     help="build jobs + project cost, NO API calls / no spend")
+    ap.add_argument("--max-per-cell", type=int, default=None,
+                    help="deterministic representative #cids per (pole,eval) "
+                         "cell (use instead of --limit for a powered run)")
     a = ap.parse_args()
     cells = set(a.evals.split(",")) if a.evals else None
-    asyncio.run(run(a.scores, a.out, a.limit, cells, a.dry_run))
+    asyncio.run(run(a.scores, a.out, a.limit, cells, a.dry_run,
+                    a.max_per_cell))
     return 0
 
 

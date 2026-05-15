@@ -2,6 +2,21 @@
 
 _Drafted 2026-05-15. Companion to `CROSS_ELICIT_JUDGE_COST.md` (see its "Option 2" section). This is a pre-registration: the equivalence margins and pass/fail criteria below are committed **before** any data is looked at._
 
+> ## ⛔ Empirical verdict (2026-05-15): CO-PRIMARY **FAIL** — do not adopt Option 2
+>
+> Powered run: 2,700 paired rows, 10 evals (agreeableness/narcissism/honest-humble reconciled to the exact production `rejudge_matrix_sft` aggregation; 7 single-metric evals), `gpt-5.4-mini`/`gemini-2.5-flash` per cell, **$3.76** empirical cost, cache hit **39 %** (the Option 2 cache lever is real).
+>
+> | Criterion | Result |
+> |---|---|
+> | **1. Bin-flip (co-primary)** | **FAIL** — 57 % of 290 published cells flip bin, 10 large-cell sign-flips |
+> | **2. TOST δ=3 (co-primary)** | pooled **PASS** (cell-mean diff **+0.96**, 90 % CI [0.14, 1.84]); per-eval **FAIL** (harm-refusal, self-preservation, sycophancy) → conjunction fails |
+> | 3. Δα vs truth (support) | **non-inferior** (+0.016, 95 % CI lo −0.042 > −0.05, n=238) |
+> | 4. Bland–Altman | mean bias **+0.55**, no proportional bias, but LoA ±~32 (high row variance) |
+>
+> **Interpretation.** Reconciling the agreeableness 5-facet aggregation collapsed the earlier alarming +5.3 bias to ~0 — the restructure is approximately **mean-unbiased** and **non-inferior vs ground truth**, but **high-variance at the row level** (LoA ±32). That variance destabilises the published binned matrix at this pilot's depth (6 cids/cell → cell-mean noise ≈ ±3.7, comparable to the ±3 bin boundary), which is most of the 57 % flip. So the bin-flip failure is **confounded by pilot depth** and not yet attributable to geometry per se. **Either way, the pre-registered co-primary criteria FAIL**, so on the committed rule Option 2 is **not adopted**; this empirically grounds the original decision to decline it.
+>
+> **Decisive cheap next step (not yet run):** a *same-geometry* re-judge control (re-judge the same responses with the **current** prompt at the same 6-cid depth) to measure the baseline noise-driven flip rate. If same-prompt also flips ~50 %, the geometry adds little and the metric just needs deeper cids/cell; if same-prompt flips ~5 %, geometry is the culprit. ~$2–4.
+
 ## Goal
 
 Realize the ~3× judge input-cost reduction from `CROSS_ELICIT_JUDGE_COST.md` **Option 2** — **only if** the restructured prompt is proven equivalent to the current one on the *published* results. Same model (`gpt-5.4-mini`), same rubric *content*; only the *position* of `{question}`/`{answer}` and the scoring instruction changes.
