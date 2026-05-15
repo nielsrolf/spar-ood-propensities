@@ -28,6 +28,7 @@ import glob
 import os
 import re
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -105,6 +106,7 @@ def restructure(template: str) -> tuple[str, list[str]]:
     return restructured, flags
 
 
+@lru_cache(maxsize=1)
 def load_canonical_templates() -> dict[tuple[str, str], str]:
     """{(eval, metric): template} from johannes/cross-elicit/evals/*/*_eval.yaml.
 

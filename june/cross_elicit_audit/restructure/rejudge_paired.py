@@ -50,7 +50,14 @@ from restructure_prompt import load_canonical_templates, restructure  # noqa: E4
 # Reuse the battle-tested 0-100 parser (null→NaN, first-number extraction).
 from paired_generate import _parse_score  # noqa: E402
 
-EVAL_RESULTS = REPO / "johannes" / "cross-elicit" / "eval_results"
+# Drive/Colab corpus override: rows.jsonl lives on Drive, not in git. Set
+# XELICIT_EVAL_RESULTS to the Drive eval_results path in the Colab wrapper.
+EVAL_RESULTS = Path(
+    os.environ.get(
+        "XELICIT_EVAL_RESULTS",
+        str(REPO / "johannes" / "cross-elicit" / "eval_results"),
+    )
+)
 MANIFEST = HERE / "reviewed_manifest.yaml"
 LEDGER = HERE / "cost_ledger.json"
 
@@ -92,7 +99,8 @@ def cell_metrics_for(eval_name: str, ref_metrics_block: dict) -> list[str]:
 
 def load_rows(dirname: str) -> dict[tuple[str, int, int], dict] | None:
     """{(item_id,p,s): {question, answer}} from <dir>/rows.jsonl, or None if the
-    eval_results dir is not present locally (corpus lives on synced env)."""
+    eval_results dir is not present locally. Fallback path only — the primary
+    response source is the local scored CSVs (see load_eval_responses)."""
     for base in (EVAL_RESULTS, EVAL_RESULTS / "finetuning"):
         p = base / dirname / "rows.jsonl"
         if p.exists():
@@ -108,6 +116,45 @@ def load_rows(dirname: str) -> dict[tuple[str, int, int], dict] | None:
                         out[k] = {"question": r["question"], "answer": r["answer"]}
             return out
     return None
+
+
+# data/<eval>_scored.csv: flattened (question, response, ...) per response —
+# the raw text IS local (~1GB). Responses are identical across judge-prompt
+# versions, so this older-scored corpus is a valid source of (q,a) text; the
+# reference SCORE still comes from june/scores_*.json (new prompts).
+SCORED_DIR = Path(
+    os.environ.get("XELICIT_SCORED_DIR",
+                   str(REPO / "june" / "cross_elicit_audit" / "data"))
+)
+_resp_cache: dict[str, dict[tuple[str, str, int, int], dict] | None] = {}
+
+
+def load_eval_responses(
+    eval_name: str, base_model: str
+) -> dict[tuple[str, str, int, int], dict] | None:
+    """{(pole, item_id, p_idx, s_idx): {question, answer}} for one eval's
+    scored.csv, filtered to base_model. Cached. None if the csv is absent."""
+    if eval_name in _resp_cache:
+        return _resp_cache[eval_name]
+    csvp = SCORED_DIR / f"{eval_name}_scored.csv"
+    if not csvp.exists():
+        _resp_cache[eval_name] = None
+        return None
+    import csv as _csv
+    out: dict[tuple[str, str, int, int], dict] = {}
+    with csvp.open() as fh:
+        for r in _csv.DictReader(fh):
+            if r.get("base_model") != base_model:
+                continue
+            try:
+                k = (r["pole"], r["item_id"],
+                     int(r["paraphrase_idx"]), int(r["sample_idx"]))
+            except (KeyError, ValueError):
+                continue
+            if k not in out and r.get("response"):
+                out[k] = {"question": r["question"], "answer": r["response"]}
+    _resp_cache[eval_name] = out
+    return out
 
 
 class Ledger:
@@ -177,7 +224,7 @@ async def judge(client, model: str, prompt: str, sem, ledger: Ledger) -> float:
 
 
 async def run(scores_path: Path, out_csv: Path, limit: int | None,
-              cells_filter: set[str] | None) -> None:
+              cells_filter: set[str] | None, dry_run: bool = False) -> None:
     from openai import AsyncOpenAI
 
     data = json.loads(scores_path.read_text())
@@ -205,16 +252,24 @@ async def run(scores_path: Path, out_csv: Path, limit: int | None,
                         n_unreviewed.add(f"{ev}/{m}")
                 continue
             model = (cell.get("meta") or {}).get("judge_model") or "openai/gpt-5.4-mini"
-            rows = load_rows((cell.get("meta") or {}).get("dirname", ""))
-            if rows is None:
-                skipped_dirs.append((cell.get("meta") or {}).get("dirname", "?"))
+            base_model = data.get("base_model", "")
+            # Primary: local scored CSV (responses are version-invariant).
+            resp = load_eval_responses(ev, base_model)
+            rows = None
+            if resp is None:  # fallback: eval_results rows.jsonl
+                rows = load_rows((cell.get("meta") or {}).get("dirname", ""))
+            if resp is None and rows is None:
+                skipped_dirs.append(ev)
                 continue
             ref_scores = cell.get("scores") or {}
             for cid, ref in ref_scores.items():
                 item_id, _, rest = cid.partition("__p")
                 p_idx, _, s_part = rest.partition("__s")
-                key = (item_id, int(p_idx or 0), int(s_part or 0))
-                qa = rows.get(key)
+                pi, si = int(p_idx or 0), int(s_part or 0)
+                if resp is not None:
+                    qa = resp.get((pole, item_id, pi, si))
+                else:
+                    qa = rows.get((item_id, pi, si))
                 if qa is None or not qa.get("answer"):
                     continue
                 prompts = [
@@ -228,11 +283,25 @@ async def run(scores_path: Path, out_csv: Path, limit: int | None,
 
     if limit:
         jobs = jobs[:limit]
-    print(f"jobs: {len(jobs)} cid×cell  | skipped(no rows.jsonl): "
-          f"{len(skipped_dirs)} dirs | unreviewed-skipped: {len(n_unreviewed)}")
+    n_calls = sum(len(j[4]) for j in jobs)
+    print(f"jobs: {len(jobs)} cid×cell ({n_calls} judge calls) | "
+          f"skipped(no responses): {len(skipped_dirs)} evals | "
+          f"unreviewed-skipped: {len(n_unreviewed)}")
     if not jobs:
-        print("Nothing to do. (On this laptop the eval_results corpus is "
-              "likely unsynced — run where rows.jsonl exists.)")
+        print("Nothing to do — no (response, reviewed-template) pairs resolved.")
+        ledger.dump()
+        return
+
+    # Rough projected cost (pre-cache list price; cache makes it lower).
+    est = 0.0
+    for j in jobs:
+        pin, _ = PRICING.get(j[3], (0.75, 3.0))
+        est += len(j[4]) * 1800 / 1e6 * pin   # ~1.8k input tok/call heuristic
+    print(f"projected cost (list price, pre-cache): ~${est:.2f}")
+
+    if dry_run:
+        print("DRY RUN — no API calls, nothing billed. "
+              "Re-run without --dry-run to execute the paired re-judge.")
         ledger.dump()
         return
 
@@ -290,9 +359,11 @@ def main() -> int:
                     help="cap #cid×cell jobs (pilot for σ_d)")
     ap.add_argument("--evals", default=None,
                     help="comma-separated eval filter (e.g. risk-affinity,effort)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="build jobs + project cost, NO API calls / no spend")
     a = ap.parse_args()
     cells = set(a.evals.split(",")) if a.evals else None
-    asyncio.run(run(a.scores, a.out, a.limit, cells))
+    asyncio.run(run(a.scores, a.out, a.limit, cells, a.dry_run))
     return 0
 
 
