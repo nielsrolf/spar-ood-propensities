@@ -126,7 +126,7 @@ OpenAI/OpenRouter auto-cache the longest shared prefix (the static rubric) but o
 
 _Writeup for team discussion. This is the ~3× input-cost lever; it was evaluated and consciously declined for now._
 
-> **Safe-adoption path now pre-registered:** see [`JUDGE_PROMPT_RESTRUCTURE_EQUIVALENCE.md`](JUDGE_PROMPT_RESTRUCTURE_EQUIVALENCE.md) — paired equivalence study (current vs restructured geometry, same `gpt-5.4-mini`), co-primary criteria on the published binned matrix + Krippendorff-α non-inferiority vs the human anchor. Implementation harness pending approval.
+> **Safe-adoption path now pre-registered:** see [`JUDGE_PROMPT_RESTRUCTURE_EQUIVALENCE.md`](JUDGE_PROMPT_RESTRUCTURE_EQUIVALENCE.md) — paired equivalence study (current vs restructured geometry, same `gpt-5.4-mini`), co-primary criteria on the published binned matrix + Krippendorff-α non-inferiority vs the ground-truth anchor (expert rows where they exist, else lay human). Implementation harness pending approval.
 
 **The idea.** Each judge call is `[~1,100-tok static rubric] + {question} + {answer} + [trailing "Respond with only a number" instruction]`. OpenAI caches only the stable *prefix*, and our variable `{question}/{answer}` sits in the **middle**, with a static instruction *after* `{answer}`. So only ~540–1,100 tokens are cache-eligible and the post-answer instruction never caches. Restructuring every judge template to `[entire static rubric incl. the response instruction] + {question} + {answer}` would make the whole rubric one cacheable prefix — on OpenRouter→OpenAI that drops cached input to ~50% price, ≈ **3× lower input cost** at high hit-rate (full battery **~$1,500 → ~$500**).
 

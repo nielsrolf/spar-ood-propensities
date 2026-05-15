@@ -18,7 +18,7 @@ Paired, judge-only, on **existing generated responses** (no regeneration):
 
 - **Reference arm:** `gpt-5.4-mini`, **current** prompt geometry. Reuse the existing scores in `johannes/cross-elicit/eval_results/finetuning/*/rows.jsonl` → **$0**.
 - **Candidate arm:** `gpt-5.4-mini`, **restructured** geometry, re-judging the *same* `(question, answer)` pairs.
-- **Ground-truth anchor:** human/expert audit labels in `june/cross_elicit_audit/output/<eval>/human_annotations*.csv` (~500–2,300 labeled rows/eval).
+- **Ground-truth anchor (expert-preferred):** for evals with an expert-rated subset — **agreeableness, honest-humble, narcissism, neuroticism** (`june/cross_elicit_audit/output/expert_review/`) — the non-inferiority anchor is the **expert** labels, *not* the lay `human_annotations.csv`. Rationale: prior work showed the two-axis judge correlated 0.92 with expert vs 0.45 with the lay rater, so lay labels are not a valid gold standard where expert ratings exist. All other evals fall back to lay `human_annotations.csv` (~500–2,300 rows/eval).
 
 The restructure is a **content-preserving reorder** of each judge template, not a rewrite: static rubric + worked examples + scoring instruction → then `{question}` → then `{answer}`. Per-template human review is mandatory: some rubrics use post-hoc deixis ("the response above"), which must be made position-neutral rather than blindly moved. That review risk is itself part of what this study gates.
 
@@ -33,7 +33,7 @@ Pre-registered on the **published binned spillover** (`june/build_results_matrix
 
 ### Supporting (non-inferiority that licenses the swap)
 
-3. **Δ Krippendorff α vs human.** Reuse `june/cross_elicit_audit/compute_alpha.py` (`alpha_interval`, `alpha_ordinal`, `bootstrap_ci`, BUCKET/`bin5`). Paired bootstrap on `α(candidate↔human) − α(reference↔human)` over audited rows; non-inferior iff **lower 95% CI > −0.05** (ordinal coding).
+3. **Δ Krippendorff α vs ground truth (expert where it exists, else lay human).** Reuse `june/cross_elicit_audit/compute_alpha.py` (`alpha_interval`, `alpha_ordinal`, `bootstrap_ci`, BUCKET/`bin5`). Paired bootstrap on `α(candidate↔truth) − α(reference↔truth)` over the anchored rows; non-inferior iff **lower 95% CI > −0.05** (ordinal coding). **Coverage caveat:** expert anchoring exists for only 4 evals at small n (agreeableness ~11; narcissism ~16; neuroticism ~32; honest-humble ~30 expert-scored) → wide CIs there; treat the expert-anchored result as **directional/secondary** and report it per-eval, never pooled with the lay-anchored 27. This caveat does **not** weaken the study: criteria 1–2 (bin-flip, TOST on cell means) are the co-primary equivalence claims and need no ground truth.
 4. **Bias / proportional bias.** Bland–Altman: mean bias vs ±3, and regress difference on mean (catches a geometry that compresses extremes); reported per-eval.
 5. **Realized saving.** Capture per-call input/cached-token telemetry; confirm the restructure achieves **≥ ~2.5× input-cost reduction** at production concurrency. A restructure that recalibrates *and* fails to cache is the worst outcome — this gates it out.
 
