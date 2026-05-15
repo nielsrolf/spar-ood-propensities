@@ -1,0 +1,80 @@
+# Judge-Prompt Restructure (Option 2) — Equivalence Pre-Registration
+
+_Drafted 2026-05-15. Companion to `CROSS_ELICIT_JUDGE_COST.md` (see its "Option 2" section). This is a pre-registration: the equivalence margins and pass/fail criteria below are committed **before** any data is looked at._
+
+## Goal
+
+Realize the ~3× judge input-cost reduction from `CROSS_ELICIT_JUDGE_COST.md` **Option 2** — **only if** the restructured prompt is proven equivalent to the current one on the *published* results. Same model (`gpt-5.4-mini`), same rubric *content*; only the *position* of `{question}`/`{answer}` and the scoring instruction changes.
+
+## Background: Option 2, and why it was declined
+
+- **The lever.** Each judge call is `[~1,100-tok rubric + worked examples] … {question} … {answer} … [trailing "respond with only a number" instruction]`. Providers cache only the stable *prefix*; our variable Q/A sit mid-prompt with a static instruction *after* `{answer}`, so only ~540–1,100 tokens are cache-eligible and the post-answer instruction never caches. Restructuring to `[entire static rubric incl. the response instruction] + {question} + {answer}` makes the whole rubric one cacheable prefix → ≈3× lower input cost at high hit-rate (full battery **~$1,500 → ~$500**).
+- **Why it was declined (unilaterally).** (1) LLM judges are position-sensitive; moving the scoring instruction relative to the answer measurably shifts scores. (2) That invalidates apples-to-apples comparison with all existing `scores_*.json`, the human/expert audit, and the Krippendorff α reliability work — unless every judge is re-validated. (3) It is a shared pipeline (Johannes' `cross-elicit/evals/*` plus the orthog templates) feeding everyone's downstream analysis; it needs sign-off, not a perf patch.
+- **What safe adoption requires** = this study: prove equivalence on the published matrix **and** non-inferiority vs the human/expert anchor, against a pre-registered margin, before any production re-score. If it fails, keep the current geometry and re-baseline (treat pre/post as separate generations, never pool).
+
+## Design
+
+Paired, judge-only, on **existing generated responses** (no regeneration):
+
+- **Reference arm:** `gpt-5.4-mini`, **current** prompt geometry. Reuse the existing scores in `johannes/cross-elicit/eval_results/finetuning/*/rows.jsonl` → **$0**.
+- **Candidate arm:** `gpt-5.4-mini`, **restructured** geometry, re-judging the *same* `(question, answer)` pairs.
+- **Ground-truth anchor:** human/expert audit labels in `june/cross_elicit_audit/output/<eval>/human_annotations*.csv` (~500–2,300 labeled rows/eval).
+
+The restructure is a **content-preserving reorder** of each judge template, not a rewrite: static rubric + worked examples + scoring instruction → then `{question}` → then `{answer}`. Per-template human review is mandatory: some rubrics use post-hoc deixis ("the response above"), which must be made position-neutral rather than blindly moved. That review risk is itself part of what this study gates.
+
+## Equivalence definition
+
+Pre-registered on the **published binned spillover** (`june/build_results_matrix.py:_bin`): `|Δ|<3 → 0` (negligible), `3≤|Δ|<8 → ±1` (small), `|Δ|≥8 → ±2` (large). The smallest Δ the conclusions rely on is the **3-point boundary** — so equivalence is defined on the matrix that gets published, not on raw rows.
+
+### Co-primary criteria (BOTH must pass)
+
+1. **Published-matrix bin-flip rate ≈ 0.** Recompute `finetuned_scores_*.json` → `results_matrix_*.json` under each geometry; count cells whose binned Δ changes. Equivalent iff the cluster-bootstrap **upper 95% CI** on flip-rate is **≤ 1% of cells** and **0 sign-flips among `|Δ|≥8` cells**.
+2. **TOST on per-cell mean difference, δ = ±3.** Per (pole×eval) cell, paired `mean(candidate) − mean(reference)`; equivalent iff the **90% CI lies entirely within ±3**. Cluster bootstrap over items, aggregated to cell level (cell means average out row noise — the honest level for the strong claim).
+
+### Supporting (non-inferiority that licenses the swap)
+
+3. **Δ Krippendorff α vs human.** Reuse `june/cross_elicit_audit/compute_alpha.py` (`alpha_interval`, `alpha_ordinal`, `bootstrap_ci`, BUCKET/`bin5`). Paired bootstrap on `α(candidate↔human) − α(reference↔human)` over audited rows; non-inferior iff **lower 95% CI > −0.05** (ordinal coding).
+4. **Bias / proportional bias.** Bland–Altman: mean bias vs ±3, and regress difference on mean (catches a geometry that compresses extremes); reported per-eval.
+5. **Realized saving.** Capture per-call input/cached-token telemetry; confirm the restructure achieves **≥ ~2.5× input-cost reduction** at production concurrency. A restructure that recalibrates *and* fails to cache is the worst outcome — this gates it out.
+
+**Corrections.** Cluster bootstrap (rows nested in items → evals → train_axes; naïve n overstates power). Holm or a hierarchical model across the 31 evals — per-eval claims, because templates differ ~12× in size and the recalibration risk scales with template structure. Report per-eval, not only pooled.
+
+## Power & sample size
+
+Paired TOST per stratum: `n ≈ (z_{1-α}+z_{1-β})²·σ_d²/δ²`, σ_d = SD of the per-row (candidate−reference) difference on 0–100.
+
+| δ \ σ_d | 10 | 15 | 20 |
+|---|--:|--:|--:|
+| ±3 | 69 | 155 | 275 |
+| ±5 | 25 | 56 | 99 |
+| ±8 | 10 | 22 | 39 |
+
+power 0.80, α 0.05; ×1.49 for power 0.90; × design-effect for clustering; ×31 for per-eval claims.
+
+**σ_d must come from a pilot.** This is *same model, same rubric content, different geometry* — expected σ_d **smaller** than cross-model differences. `june/cross_elicit_audit/rejudge/model_bakeoff_results.csv` (857 rows; gpt-5.4-mini vs gemini/gpt-4o-mini, SD(err) ≈ 9–12) is only a **conservative upper-bound prior** (cross-*model*, not cross-*geometry*). Run a **50-row stratified pilot** of restructured-vs-current first to fix σ_d, then size the main run.
+
+## Cost
+
+Paired, judge-only, reference reused → only the candidate (restructured, already cache-optimized) calls are billed:
+
+| Design | Candidate cost (gpt-5.4-mini, restructured) |
+|---|--:|
+| 50-row pilot (σ_d) | <$0.20 |
+| Per-eval power ~100/eval × 31 ≈ 3,100 rows | ~$1–4 |
+| Full slice ~150/eval × 31 ≈ 4,650 rows | ~$2–6 |
+
+The binding constraints are **not budget**: (a) pre-registering δ (done, above); (b) the human-anchored claim (#3) is capped by labeled-row count (ample); (c) careful per-template content-preserving review.
+
+## If approved — implementation outline
+
+Reuse-heavy; **no production eval YAML or runner is touched until the study passes.**
+
+1. `restructure/restructure_prompt.py` — content-preserving reorder + `--review` side-by-side diff with a `reviewed: true` manifest gate.
+2. `restructure/rejudge_paired.py` — reuse the `june/propensity_audit/run_alt_judges.py` engine (`judge_score`) with `model=gpt-5.4-mini` + restructured template over a stratified sample of existing `rows.jsonl`; reference scores read free from `rows.jsonl`; capture token/cost telemetry. → `paired_scores.csv`.
+3. `restructure/equivalence.py` — cluster bootstrap; `tost_cell_means(δ=3)`; `binflip` via `build_results_matrix.py:_bin`; `delta_alpha_vs_human` reusing `compute_alpha.py`; Bland–Altman; Holm across evals. → `equivalence_report.{md,csv}`.
+4. Matrix A/B: run `summarize_FT.py` → `build_results_matrix.py` for both arms; diff.
+
+**Pass iff:** bin-flip CI ≤ 1% & 0 large-cell sign-flips **and** TOST(δ=3) passes pooled + per-eval (Holm) **and** Δα lower CI > −0.05 **and** realized input-cost reduction ≥ 2.5×. On pass: stage restructured templates as one reviewed commit + re-baseline note. On fail: keep current geometry; report which evals/cells broke.
+
+---
+_Reusable components (unmodified): `june/cross_elicit_audit/compute_alpha.py`, `june/propensity_audit/run_alt_judges.py`, `june/build_results_matrix.py`, `johannes/cross-elicit/scripts/summarize_FT.py`, `model_bakeoff_results.csv`._
