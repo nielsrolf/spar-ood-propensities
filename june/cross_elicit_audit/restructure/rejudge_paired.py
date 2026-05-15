@@ -281,16 +281,25 @@ async def judge(client, model: str, prompt: str, sem, ledger: Ledger) -> float:
 
 async def run(scores_path: Path, out_csv: Path, limit: int | None,
               cells_filter: set[str] | None, dry_run: bool = False,
-              max_per_cell: int | None = None) -> None:
+              max_per_cell: int | None = None,
+              geometry: str = "restructured") -> None:
     from openai import AsyncOpenAI
 
     data = json.loads(scores_path.read_text())
-    rev = reviewed_ok()
     tpls = load_canonical_templates()
-    restructured: dict[tuple[str, str], str] = {}
-    for k, t in tpls.items():
-        if rev.get(k):
-            restructured[k] = restructure(t)[0]
+    # Candidate template per (eval,metric):
+    #   restructured -> the Option 2 reorder (reviewed-gated)
+    #   current      -> the UNMODIFIED canonical prompt = same-geometry
+    #                   control; candidate vs reference then differs ONLY by
+    #                   judge resampling noise, giving the baseline bin-flip.
+    if geometry == "current":
+        restructured = dict(tpls)
+        print("GEOMETRY=current (same-prompt control: measures baseline "
+              "resampling-noise bin-flip, no restructure)")
+    else:
+        rev = reviewed_ok()
+        restructured = {k: restructure(t)[0]
+                        for k, t in tpls.items() if rev.get(k)}
 
     ledger = Ledger()
     jobs: list[tuple] = []          # (pole, eval, cid, model, [prompts], ref)
@@ -428,10 +437,14 @@ def main() -> int:
     ap.add_argument("--max-per-cell", type=int, default=None,
                     help="deterministic representative #cids per (pole,eval) "
                          "cell (use instead of --limit for a powered run)")
+    ap.add_argument("--geometry", choices=("restructured", "current"),
+                    default="restructured",
+                    help="restructured = Option 2 reorder; current = "
+                         "same-prompt control (baseline resampling-noise flip)")
     a = ap.parse_args()
     cells = set(a.evals.split(",")) if a.evals else None
     asyncio.run(run(a.scores, a.out, a.limit, cells, a.dry_run,
-                    a.max_per_cell))
+                    a.max_per_cell, a.geometry))
     return 0
 
 

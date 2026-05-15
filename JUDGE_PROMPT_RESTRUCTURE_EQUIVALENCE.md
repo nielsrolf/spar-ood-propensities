@@ -2,7 +2,9 @@
 
 _Drafted 2026-05-15. Companion to `CROSS_ELICIT_JUDGE_COST.md` (see its "Option 2" section). This is a pre-registration: the equivalence margins and pass/fail criteria below are committed **before** any data is looked at._
 
-> ## ⛔ Empirical verdict (2026-05-15): CO-PRIMARY **FAIL** — do not adopt Option 2
+> ## ⚖️ Empirical verdict (2026-05-16): pre-registered co-primary **INCONCLUSIVE at pilot depth**; no detectable recalibration — deeper confirmatory run needed before adopt
+>
+> _The 2026-05-15 powered run (below) returned a co-primary FAIL, but the same-prompt control (next box) shows that FAIL is a 6-cid/cell measurement artifact — the current prompt fails it against itself. Net: no evidence Option 2 breaks comparability; not yet a clean PASS either. Read both boxes together._
 >
 > Powered run: 2,700 paired rows, 10 evals (agreeableness/narcissism/honest-humble reconciled to the exact production `rejudge_matrix_sft` aggregation; 7 single-metric evals), `gpt-5.4-mini`/`gemini-2.5-flash` per cell, **$3.76** empirical cost, cache hit **39 %** (the Option 2 cache lever is real).
 >
@@ -15,7 +17,22 @@ _Drafted 2026-05-15. Companion to `CROSS_ELICIT_JUDGE_COST.md` (see its "Option 
 >
 > **Interpretation.** Reconciling the agreeableness 5-facet aggregation collapsed the earlier alarming +5.3 bias to ~0 — the restructure is approximately **mean-unbiased** and **non-inferior vs ground truth**, but **high-variance at the row level** (LoA ±32). That variance destabilises the published binned matrix at this pilot's depth (6 cids/cell → cell-mean noise ≈ ±3.7, comparable to the ±3 bin boundary), which is most of the 57 % flip. So the bin-flip failure is **confounded by pilot depth** and not yet attributable to geometry per se. **Either way, the pre-registered co-primary criteria FAIL**, so on the committed rule Option 2 is **not adopted**; this empirically grounds the original decision to decline it.
 >
-> **Decisive cheap next step (not yet run):** a *same-geometry* re-judge control (re-judge the same responses with the **current** prompt at the same 6-cid depth) to measure the baseline noise-driven flip rate. If same-prompt also flips ~50 %, the geometry adds little and the metric just needs deeper cids/cell; if same-prompt flips ~5 %, geometry is the culprit. ~$2–4.
+> ### 🔬 Same-prompt control (2026-05-16) — the bin-flip FAIL is a measurement artifact
+>
+> Ran the control: re-judge the same 2,700 responses with the **current** (unmodified) prompt, same model/params/depth — so candidate-vs-reference differs *only* by judge resampling noise. $3.85, cache 22 %.
+>
+> | Metric | Reference vs **restructured** | Reference vs **current prompt (control)** |
+> |---|---|---|
+> | Bin-flip rate | 56.9 % | **56.2 %** |
+> | Large-cell sign-flips | 10 | **23** |
+> | TOST pooled cell-mean diff | +0.96 [0.14, 1.84] | +0.47 [−0.03, 0.99] |
+> | TOST per-eval fails | harm-refusal, self-pres, sycophancy | harm-refusal, power-seeking, sycophancy |
+> | Δα vs truth | non-inferior | — |
+> | Cache hit | **39 %** | 22 % |
+>
+> **The current prompt flips 56 % of published bins against *itself*.** The restructure adds **no detectable excess** (56.9 vs 56.2; *fewer* large sign-flips). At 6 cids/cell the cell-mean sampling error (~±3.7) swamps the ±3/±8 bin boundaries, so the pre-registered bin-flip criterion **has no discriminating power at this depth** — it FAILs for the production prompt unchanged. The per-eval TOST failures are likewise mostly baseline noise (similar eval set for the same-prompt control).
+>
+> **Revised read.** The pre-registered co-primary is **inconclusive at pilot depth**, *not* evidence against Option 2. On all powered, depth-robust signals the restructure is benign: **mean-unbiased** (+0.96 ≈ the +0.47 same-prompt baseline), **non-inferior vs ground truth**, **no excess bin instability or sign-flips vs re-running the current prompt**, and it **improves caching (39 % vs 22 %)** — direct evidence the ~3× lever works. **Gating next step before adoption:** a depth-increased confirmatory run (≥~30 cids/cell so cell means stabilise and bin-flip regains power), comparing restructured-vs-reference against same-prompt-vs-reference at that depth. Cumulative study spend so far: ~$7.7.
 
 ## Goal
 
