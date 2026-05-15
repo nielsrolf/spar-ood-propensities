@@ -35,6 +35,7 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[3]
 XELICIT_EVALS = REPO / "johannes" / "cross-elicit" / "evals"
+ORTHOG_EVALS = REPO / "shared" / "evals_orthogonalized"
 HERE = Path(__file__).resolve().parent
 MANIFEST = HERE / "reviewed_manifest.yaml"
 REVIEW_MD = HERE / "restructure_review.md"
@@ -207,15 +208,215 @@ def cmd_show(ev: str, metric: str | None) -> int:
     return 0
 
 
+def _orthog_files() -> list[Path]:
+    out = []
+    for d in sorted(ORTHOG_EVALS.glob("*/")):
+        f = d / f"{d.name}_eval.yaml"
+        if f.exists():
+            out.append(f)
+    return out
+
+
+def _strip_jp(doc):
+    """Return doc with every item's judge_prompts replaced by a sentinel, so
+    two docs can be compared for structural identity *outside* the prompts."""
+    import copy
+    d = copy.deepcopy(doc)
+    for it in d:
+        if isinstance(it, dict) and "judge_prompts" in it:
+            it["judge_prompts"] = "<JP>"
+    return d
+
+
+def splice_file(path: Path) -> tuple[str, dict]:
+    """Reorder every judge-prompt block scalar in `path` in place via raw
+    line splicing (anchor/format/comments preserved — only the prompt lines
+    move). Returns (new_text, {metric: n_flags}). Raises on any ambiguity."""
+    raw = path.read_text()
+    doc = yaml.safe_load(raw)
+    jp = doc[0]["judge_prompts"]
+    info = {}
+    text = raw
+    for metric, old in jp.items():
+        new, flags = restructure(old)  # raises if not content-preserving
+        info[metric] = len(flags)
+        # Locate the single anchor-definition of this metric. Style is
+        # either a block scalar (`metric: |-`) or a double-quoted scalar
+        # (`metric: "..."`, possibly multi-line). Both → emit a `|-` block
+        # with the restructured content (parsed value is identical; the
+        # deep-compare safety net verifies).
+        kdef = re.compile(rf"^(?P<i>[ ]+){re.escape(metric)}:[ ]*"
+                          rf"(?P<sty>\|-?|>-?|\"|')")
+        hits = [m for m in (kdef.match(ln) for ln in text.split("\n")) if m]
+        if len(hits) != 1:
+            raise ValueError(
+                f"{path.name}: expected exactly 1 definition for {metric!r}, "
+                f"found {len(hits)} (anchor assumption broken)")
+        lines = text.split("\n")
+        k = next(n for n, ln in enumerate(lines) if kdef.match(ln))
+        m = kdef.match(lines[k])
+        key_indent = len(m.group("i"))
+        cind = key_indent + 2
+        rebuilt = ["" if not s.strip() else (" " * cind + s)
+                   for s in new.split("\n")]
+        head = f"{' ' * key_indent}{metric}: |-"
+
+        if m.group("sty").startswith(('|', '>')):
+            # Block scalar: content = following blank / deeper-indented lines.
+            j = k + 1
+            while j < len(lines):
+                ln = lines[j]
+                if ln.strip() == "" or (
+                        len(ln) - len(ln.lstrip(" ")) > key_indent):
+                    j += 1
+                    continue
+                break
+            lines[k:j] = [head] + rebuilt
+            text = "\n".join(lines)
+        else:
+            # Quoted scalar (" or '): scan for the closing quote. Only the
+            # quote position matters (independent of YAML folding). Escapes:
+            #   "  → backslash escapes the next char
+            #   '  → a doubled '' is a literal quote, single ' ends it
+            q = m.group("sty")
+            qpos = text.index(q, text.index(f"{metric}:"))
+            i = qpos + 1
+            while i < len(text):
+                c = text[i]
+                if q == '"' and c == "\\":
+                    i += 2
+                    continue
+                if c == q:
+                    if q == "'" and i + 1 < len(text) and text[i + 1] == "'":
+                        i += 2
+                        continue
+                    break
+                i += 1
+            else:
+                raise ValueError(f"{path.name}: unterminated quoted scalar "
+                                  f"for {metric!r}")
+            line_start = text.rfind("\n", 0, qpos) + 1
+            text = (text[:line_start] + head + "\n" + "\n".join(rebuilt)
+                    + text[i + 1:])
+    return text, info
+
+
+def verify_only_prompts(path: Path, new_text: str) -> tuple[bool, str]:
+    """new_text must parse, be structurally identical to the original
+    EXCEPT every judge prompt == restructure(original prompt)."""
+    try:
+        orig = yaml.safe_load(path.read_text())
+        new = yaml.safe_load(new_text)
+    except yaml.YAMLError as e:
+        return False, f"new YAML fails to parse: {e}"
+    if len(orig) != len(new):
+        return False, f"item count changed {len(orig)}→{len(new)}"
+    if _strip_jp(orig) != _strip_jp(new):
+        return False, "structure changed outside judge_prompts"
+    ojp, njp = orig[0]["judge_prompts"], new[0]["judge_prompts"]
+    if set(ojp) != set(njp):
+        return False, "metric set changed"
+    for m in ojp:
+        exp, _ = restructure(ojp[m])
+        if njp[m] != exp:
+            return False, f"{m}: prompt != restructure(original)"
+    # every item must still share the (now-restructured) prompts
+    if any(it.get("judge_prompts") != njp for it in new
+           if isinstance(it, dict) and "judge_prompts" in it):
+        return False, "anchor/alias broken (items diverge)"
+    return True, "ok"
+
+
+def cmd_apply_orthog(dry_run: bool) -> int:
+    files = _orthog_files()
+    print(f"shared/evals_orthogonalized: {len(files)} eval YAMLs\n")
+    planned: list[tuple[Path, str]] = []
+    deixis_total = 0
+    for f in files:
+        try:
+            new_text, info = splice_file(f)
+            ok, why = verify_only_prompts(f, new_text)
+        except (ValueError, AssertionError) as e:
+            print(f"  ✗ {f.parent.name:32s} ABORT: {e}")
+            return 1
+        nflag = sum(info.values())
+        deixis_total += nflag
+        if not ok:
+            print(f"  ✗ {f.parent.name:32s} SAFETY FAIL: {why}")
+            return 1
+        nchg = sum(1 for a, b in zip(f.read_text().split("\n"),
+                                     new_text.split("\n")) if a != b)
+        print(f"  ✓ {f.parent.name:32s} ok  (~{nchg} lines move"
+              f"{', '+str(nflag)+' deixis-flag' if nflag else ''})")
+        planned.append((f, new_text))
+
+    if deixis_total:
+        print(f"\n⚠️  {deixis_total} deixis flag(s) — review before applying.")
+    if dry_run:
+        print(f"\nDRY RUN — verified {len(planned)}/{len(files)} files would "
+              f"restructure safely (parse + deep-equal-modulo-prompts). "
+              f"Nothing written.")
+        return 0
+
+    # All verified. Apply with per-file .bak + re-verify from disk; any
+    # failure → restore everything (all-or-nothing).
+    done: list[Path] = []
+    for f, new_text in planned:
+        bak = f.with_suffix(f.suffix + ".bak")
+        bak.write_text(f.read_text())
+        f.write_text(new_text)
+        ok, why = verify_only_prompts_ondisk(f, bak)
+        if not ok:
+            print(f"  ✗ {f.parent.name} post-write verify failed: {why} — "
+                  f"restoring all.")
+            for g in done + [f]:
+                gb = g.with_suffix(g.suffix + ".bak")
+                if gb.exists():
+                    g.write_text(gb.read_text())
+            return 1
+        done.append(f)
+    for f in done:
+        f.with_suffix(f.suffix + ".bak").unlink(missing_ok=True)
+    print(f"\n✅ Switched {len(done)} orthogonalized eval YAMLs to the "
+          f"restructured (cache-friendly) judge geometry.")
+    return 0
+
+
+def verify_only_prompts_ondisk(path: Path, bak: Path) -> tuple[bool, str]:
+    """Re-verify after write: compare on-disk file against its .bak."""
+    try:
+        orig = yaml.safe_load(bak.read_text())
+        new = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as e:
+        return False, f"parse: {e}"
+    if len(orig) != len(new) or _strip_jp(orig) != _strip_jp(new):
+        return False, "structure drift"
+    ojp, njp = orig[0]["judge_prompts"], new[0]["judge_prompts"]
+    if set(ojp) != set(njp):
+        return False, "metric set"
+    for m in ojp:
+        exp, _ = restructure(ojp[m])
+        if njp[m] != exp:
+            return False, f"{m} mismatch"
+    return True, "ok"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--review", action="store_true",
                     help="write reviewed_manifest.yaml + restructure_review.md")
     ap.add_argument("--show", metavar="EVAL", help="print restructured template")
+    ap.add_argument("--apply-orthog", action="store_true",
+                    help="rewrite shared/evals_orthogonalized/*/*_eval.yaml "
+                         "judge prompts to the restructured geometry in place")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="with --apply-orthog: verify only, write nothing")
     ap.add_argument("metric", nargs="?", help="optional metric for --show")
     a = ap.parse_args()
     if a.review:
         return cmd_review()
+    if a.apply_orthog:
+        return cmd_apply_orthog(a.dry_run)
     if a.show:
         return cmd_show(a.show, a.metric)
     ap.print_help()

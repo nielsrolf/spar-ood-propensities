@@ -2,9 +2,23 @@
 
 _Drafted 2026-05-15. Companion to `CROSS_ELICIT_JUDGE_COST.md` (see its "Option 2" section). This is a pre-registration: the equivalence margins and pass/fail criteria below are committed **before** any data is looked at._
 
-> ## ⚖️ Empirical verdict (2026-05-16): pre-registered co-primary **INCONCLUSIVE at pilot depth**; no detectable recalibration — deeper confirmatory run needed before adopt
+> ## ⛔ FINAL verdict (2026-05-16): **DO NOT ADOPT — the restructure recalibrates the judge for rubric-after-answer prompts.** Production NOT switched.
 >
-> _The 2026-05-15 powered run (below) returned a co-primary FAIL, but the same-prompt control (next box) shows that FAIL is a 6-cid/cell measurement artifact — the current prompt fails it against itself. Net: no evidence Option 2 breaks comparability; not yet a clean PASS either. Read both boxes together._
+> _A clean **temperature-0 paired retest** (only the geometry varies — no resampling noise) on the 5 orthogonalized prompts not byte-covered by the main study is decisive:_
+>
+> | Eval (orthog prompt) | mean Δ (restructured − current) | median | sd | TOST δ=3 | Pearson |
+> |---|--:|--:|--:|:--:|--:|
+> | ethical-framework-deontological | **−27.0** | −25 | 31 | ❌ | 0.53 |
+> | ethical-framework-utilitarian | **−13.3** | 0 | 34 | ❌ | 0.48 |
+> | neuroticism | +0.8 | 0 | 17 | ❌ | 0.77 |
+> | resource-acquisition | −1.0 | 0 | 14 | ❌ | 0.77 |
+> | narcissism | −0.2 | 0 | 8 | ✅ | 0.89 |
+>
+> **1/5 pass.** Mechanism (confirmed by inspection, token-multiset identical so a pure reorder): ethical-framework places the **scoring rubric + scale *after* `{answer}`** by design ("read the answer, then here's how to score it"). Option 2's whole point is to move that trailing block *before* Q/A for caching — which moves the rubric away from the answer and shifts scores ~25+ points. A lexical deixis check cannot catch this; it is a structural/recency effect.
+>
+> **This also invalidates the earlier "no detectable recalibration" read.** That used temp 0/0.3 (resampling noise) + the noise-masked bin-flip and was dominated by reorder-robust cross-elicit prompts; the clean temp-0 paired method exposes large per-prompt structural shifts the earlier methodology could not see. The benign-on-average finding does **not** generalize.
+>
+> **Decision: Option 2 is not safe as a blanket transform.** `shared/evals_orthogonalized` was **NOT switched** (verified: no YAML modified). Any future use must be **per-prompt**, gated on a temp-0 paired equivalence test, and excludes every prompt whose rubric/scale follows the answer (ethical-framework-*, and re-validate the rest — the "31 identical" included). The boxes below are superseded by this one.
 >
 > Powered run: 2,700 paired rows, 10 evals (agreeableness/narcissism/honest-humble reconciled to the exact production `rejudge_matrix_sft` aggregation; 7 single-metric evals), `gpt-5.4-mini`/`gemini-2.5-flash` per cell, **$3.76** empirical cost, cache hit **39 %** (the Option 2 cache lever is real).
 >
