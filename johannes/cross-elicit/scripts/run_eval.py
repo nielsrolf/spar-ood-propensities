@@ -119,6 +119,14 @@ def select_renderer_name(base_model: str) -> str:
 
 from openai import AsyncOpenAI, RateLimitError  # noqa: E402
 
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+from judge_coherence_src import (  # noqa: E402
+    build_judge_prompt as build_coherence_prompt,
+    parse_judge_text as parse_coherence_text,
+    PROMPT_VERSION as COHERENCE_PROMPT_VERSION,
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config — edit these
@@ -129,6 +137,24 @@ EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results")
 
 SAMPLES_PER_PARAPHRASE = 1
 JUDGE_MODEL = "gpt-5.4-mini"
+
+# Coherence prescreen (Phase 1.5): a cheap gpt-4o-mini pass runs BEFORE trait
+# judging. Answers whose coherence score is below COHERENCE_THRESHOLD are NOT
+# trait-judged at all — each metric emits bucket="incoherent", score=None.
+# This (a) matches how downstream analysis (visualize_eval_matrix.py,
+# june/cross_elicit_audit/analyze.py) already treats coherence<50 as missing,
+# and (b) skips the expensive multi-metric trait calls on garbage generations
+# (~12% of cross-elicit rows). The coherence_rows.jsonl / coherence_summary.json
+# sidecars are written in the src-v1 schema so the post-hoc coherence_hook /
+# judge_coherence_src.py become idempotent no-ops (they resume and find every
+# key already judged). Set COHERENCE_PRESCREEN=0 for legacy behavior (no
+# inline prescreen; the post-hoc coherence_hook handles it and every row is
+# trait-judged).
+COHERENCE_PRESCREEN = os.environ.get("COHERENCE_PRESCREEN", "1") != "0"
+# Direct OpenAI alias (the shared judge_client transport), not the OpenRouter
+# "openai/gpt-4o-mini" alias judge_coherence_src.py uses standalone.
+COHERENCE_JUDGE_MODEL = os.environ.get("COHERENCE_JUDGE_MODEL", "gpt-4o-mini")
+COHERENCE_THRESHOLD = 50.0  # parity with visualize_eval_matrix.COHERENCE_THRESHOLD
 
 # Concurrency for tinker (sampling) and openai (judge) calls is AIMD-controlled
 # (see AdaptiveLimiter below): starts at *_START, +1 per AIMD_SUCCESS_STEP
@@ -546,14 +572,113 @@ async def run(args):
         answers_map[key] = answers
     print(f"Sampling done in {time.time() - t_phase1:.0f}s.")
 
+    # ── Phase 1.5: coherence prescreen ──────────────────────────────────────
+    # One cheap call per unique answer. Below-threshold answers are gated out
+    # of the (expensive, multi-metric) trait judging in Phase 2.
+    incoherent_keys: set[tuple[str, int, int]] = set()
+    coherence_score_map: dict[tuple[str, int, int], int | None] = {}
+    if COHERENCE_PRESCREEN:
+        async def call_coherence(prompt: str) -> str:
+            try:
+                resp = await call_with_aimd(
+                    judge_limiter,
+                    lambda: judge_client.chat.completions.create(
+                        model=COHERENCE_JUDGE_MODEL,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=5,
+                        temperature=0.0,
+                    ),
+                )
+                return resp.choices[0].message.content or ""
+            except Exception as e:  # noqa: BLE001 — best-effort, see below
+                return f"__JUDGE_ERROR__: {e!r}"
+
+        coh_metas: list[dict] = []
+        for it in test_items:
+            item_id = it["id"]
+            for p_idx, paraphrase in enumerate(it.get("paraphrases") or []):
+                for s_idx, ans in enumerate(answers_map.get((item_id, p_idx), [])):
+                    coh_metas.append({
+                        "item_id": item_id,
+                        "paraphrase_idx": p_idx,
+                        "sample_idx": s_idx,
+                        "question": paraphrase,
+                        "answer": ans,
+                    })
+        print(
+            f"\nCoherence prescreen ({COHERENCE_PROMPT_VERSION}) with "
+            f"{COHERENCE_JUDGE_MODEL} on {len(coh_metas)} unique answers "
+            f"(threshold {COHERENCE_THRESHOLD:.0f})..."
+        )
+
+        async def judge_coherence_one(meta: dict) -> dict:
+            ans = meta["answer"]
+            # Empty answer → null (parity with judge_coherence_src.py); no call.
+            if not isinstance(ans, str) or not ans.strip():
+                return {**meta, "judge_response": "", "bucket": "null",
+                        "score": None, "judge_model": COHERENCE_JUDGE_MODEL,
+                        "judge_prompt_version": COHERENCE_PROMPT_VERSION}
+            text = await call_coherence(build_coherence_prompt(meta["question"], ans))
+            bucket, score = parse_coherence_text(text)
+            return {**meta, "judge_response": text, "bucket": bucket,
+                    "score": score, "judge_model": COHERENCE_JUDGE_MODEL,
+                    "judge_prompt_version": COHERENCE_PROMPT_VERSION}
+
+        coh_rows_path = os.path.join(out_dir, "coherence_rows.jsonl")
+        coh_summary_path = os.path.join(out_dir, "coherence_summary.json")
+        coh_tasks = [asyncio.create_task(judge_coherence_one(m)) for m in coh_metas]
+        coh_rows: list[dict] = []
+        t_coh = time.time()
+        with open(coh_rows_path, "w") as cf:
+            for cr in coh_tasks:
+                row = await cr
+                coh_rows.append(row)
+                cf.write(json.dumps(row) + "\n")
+                key = (row["item_id"], row["paraphrase_idx"], row["sample_idx"])
+                # Gate only on a confident numeric below-threshold verdict.
+                # null/fail (empty answer, flaky judge) are NOT gated — they
+                # still get trait-judged, matching downstream `coh.notna() &
+                # coh < threshold` masking. This fails safe: a broken
+                # coherence judge degrades to legacy behavior, never silently
+                # drops real data.
+                coherence_score_map[key] = row["score"]
+                if row["bucket"] == "numeric" and row["score"] is not None \
+                        and row["score"] < COHERENCE_THRESHOLD:
+                    incoherent_keys.add(key)
+        coh_numeric = [r["score"] for r in coh_rows if r["bucket"] == "numeric"]
+        with open(coh_summary_path, "w") as f:
+            json.dump({
+                "folder": out_dir,
+                "judge_model": COHERENCE_JUDGE_MODEL,
+                "judge_prompt_version": COHERENCE_PROMPT_VERSION,
+                "n_total": len(coh_rows),
+                "n_numeric": len(coh_numeric),
+                "n_nulls": sum(1 for r in coh_rows if r["bucket"] == "null"),
+                "n_fails": sum(1 for r in coh_rows if r["bucket"] == "fail"),
+                "n_incoherent": len(incoherent_keys),
+                "coherence_threshold": COHERENCE_THRESHOLD,
+                "min": min(coh_numeric) if coh_numeric else None,
+                "max": max(coh_numeric) if coh_numeric else None,
+                "mean": statistics.fmean(coh_numeric) if coh_numeric else None,
+                "judged_at": datetime.now().isoformat(timespec="seconds"),
+            }, f, indent=2)
+        print(
+            f"  coherence done in {time.time() - t_coh:.0f}s: "
+            f"{len(incoherent_keys)}/{len(coh_metas)} answers gated "
+            f"(<{COHERENCE_THRESHOLD:.0f}); these skip trait judging."
+        )
+
     # Phase 2: judge every (item, paraphrase, sample, metric)
     print(
         f"\nJudging with {JUDGE_MODEL} (default; per-metric `judge_models:` overrides honored) "
         f"(concurrency start={JUDGE_CONCURRENCY_START}, "
         f"range [{JUDGE_CONCURRENCY_MIN},{JUDGE_CONCURRENCY_MAX}])..."
     )
-    judge_jobs: list[tuple[dict, asyncio.Task]] = []
     judge_model_by_metric: dict[str, str] = {}  # for the run summary
+    # Coherent (item,p,s) → list of judge specs to actually call.
+    # Incoherent (item,p,s) → pre-made rows, no trait call (gated).
+    judge_specs: list[tuple[dict, str, str, str]] = []  # (meta, filled, model, template)
+    gated_rows: list[dict] = []
     for it in test_items:
         item_id = it["id"]
         judge_prompts = it.get("judge_prompts") or {}
@@ -563,8 +688,9 @@ async def run(args):
         for p_idx, paraphrase in enumerate(it.get("paraphrases") or []):
             answers = answers_map.get((item_id, p_idx), [])
             for s_idx, ans in enumerate(answers):
+                key = (item_id, p_idx, s_idx)
+                gated = key in incoherent_keys
                 for metric, template in judge_prompts.items():
-                    filled = fill_judge_template(template, paraphrase, ans)
                     metric_model = judge_models.get(metric, JUDGE_MODEL)
                     judge_model_by_metric[metric] = metric_model
                     meta = {
@@ -576,69 +702,118 @@ async def run(args):
                         "answer": ans,
                         "judge_model": metric_model,
                     }
-                    task = asyncio.create_task(
-                        call_judge(judge_client, filled, judge_limiter, model=metric_model)
-                    )
-                    judge_jobs.append((meta, task))
-    print(f"  queued {len(judge_jobs)} judge calls; awaiting...")
+                    if gated:
+                        gated_rows.append({
+                            **meta,
+                            "judge_response": "",
+                            "bucket": "incoherent",
+                            "score": None,
+                            "coherence_score": coherence_score_map.get(key),
+                        })
+                        continue
+                    filled = fill_judge_template(template, paraphrase, ans)
+                    judge_specs.append((meta, filled, metric_model, template))
+
+    # Behavior-preserving cache warmup: OpenAI/OpenRouter auto-cache the longest
+    # shared prefix (the static rubric) but only ≥1 prior hit on that prefix,
+    # so firing all N concurrently cold-misses the first wave. Run ONE call per
+    # distinct (model, template) serially first to populate the prefix, then
+    # unleash the rest concurrently. Pure reordering — identical outputs, no
+    # prompt-text changes, no recalibration. (The large ~3x caching win needs a
+    # prompt restructure that shifts judge scores — see CROSS_ELICIT_JUDGE_COST.md.)
+    seen_prefixes: set[tuple[str, str]] = set()
+    warm_specs: list[tuple[dict, str, str, str]] = []
+    rest_specs: list[tuple[dict, str, str, str]] = []
+    for spec in judge_specs:
+        _, _, model, template = spec
+        pk = (model, template)
+        if pk not in seen_prefixes:
+            seen_prefixes.add(pk)
+            warm_specs.append(spec)
+        else:
+            rest_specs.append(spec)
+
+    total = len(gated_rows) + len(judge_specs)
+    print(
+        f"  {len(gated_rows)} rows gated as incoherent (no trait call); "
+        f"{len(judge_specs)} judge calls "
+        f"({len(warm_specs)} serial cache-warmup + {len(rest_specs)} concurrent)..."
+    )
 
     rows: list[dict] = []
     t_phase2 = time.time()
-    progress_every = max(1, len(judge_jobs) // 20)  # ~20 progress lines total
+    progress_every = max(1, total // 20)  # ~20 progress lines total
 
     # Running per-metric tallies for live display.
     metric_numeric: dict[str, list[int]] = {}
     metric_null: dict[str, int] = {}
     metric_fail: dict[str, int] = {}
+    metric_incoh: dict[str, int] = {}
+    written = 0
 
     with open(rows_path, "w") as fout:
-        for i, (meta, task) in enumerate(judge_jobs, 1):
-            judge_text = await task
-            bucket, score = parse_judge_text(judge_text)
-            row = {
-                **meta,
-                "judge_response": judge_text,
-                "bucket": bucket,
-                "score": score,
-            }
+        def emit(row: dict) -> None:
+            nonlocal written
             rows.append(row)
             fout.write(json.dumps(row) + "\n")
             fout.flush()
-
-            metric = meta["metric"]
+            written += 1
+            metric = row["metric"]
+            bucket = row["bucket"]
             if bucket == "numeric":
-                metric_numeric.setdefault(metric, []).append(score)
+                metric_numeric.setdefault(metric, []).append(row["score"])
             elif bucket == "null":
                 metric_null[metric] = metric_null.get(metric, 0) + 1
+            elif bucket == "incoherent":
+                metric_incoh[metric] = metric_incoh.get(metric, 0) + 1
             else:
                 metric_fail[metric] = metric_fail.get(metric, 0) + 1
-
-            print(
-                f"  [{i}/{len(judge_jobs)}] {meta['item_id']}#"
-                f"{meta['paraphrase_idx']}.{meta['sample_idx']} "
-                f"{metric} → {bucket}{f'={score}' if score is not None else ''}"
-            )
-
-            if i % progress_every == 0 or i == len(judge_jobs):
+            if written % progress_every == 0 or written == total:
                 elapsed = time.time() - t_phase2
-                rate = i / elapsed if elapsed > 0 else 0
-                eta = (len(judge_jobs) - i) / rate if rate > 0 else float("inf")
+                rate = written / elapsed if elapsed > 0 else 0
+                eta = (total - written) / rate if rate > 0 else float("inf")
                 print(
-                    f"  ── progress {i}/{len(judge_jobs)} "
+                    f"  ── progress {written}/{total} "
                     f"[elapsed {elapsed:.0f}s, ETA {eta:.0f}s]  "
                     f"[{judge_limiter.state_str()}]"
                 )
-                for m in sorted(set(metric_numeric) | set(metric_null) | set(metric_fail)):
+                for m in sorted(set(metric_numeric) | set(metric_null)
+                                | set(metric_fail) | set(metric_incoh)):
                     nums = metric_numeric.get(m, [])
-                    n_null = metric_null.get(m, 0)
-                    n_fail = metric_fail.get(m, 0)
                     mean_str = f"{statistics.fmean(nums):.1f}" if nums else "-"
                     min_str = min(nums) if nums else "-"
                     max_str = max(nums) if nums else "-"
                     print(
-                        f"     [{m}] numeric={len(nums)} null={n_null} fail={n_fail}  "
+                        f"     [{m}] numeric={len(nums)} "
+                        f"null={metric_null.get(m, 0)} fail={metric_fail.get(m, 0)} "
+                        f"incoherent={metric_incoh.get(m, 0)}  "
                         f"min={min_str} mean={mean_str} max={max_str}"
                     )
+
+        # Gated rows first (no API cost).
+        for row in gated_rows:
+            emit(row)
+
+        # Serial cache-warmup pass.
+        for meta, filled, model, _ in warm_specs:
+            judge_text = await call_judge(
+                judge_client, filled, judge_limiter, model=model
+            )
+            bucket, score = parse_judge_text(judge_text)
+            emit({**meta, "judge_response": judge_text,
+                  "bucket": bucket, "score": score})
+
+        # Concurrent pass (prefixes now cached).
+        rest_jobs = [
+            (meta, asyncio.create_task(
+                call_judge(judge_client, filled, judge_limiter, model=model)))
+            for meta, filled, model, _ in rest_specs
+        ]
+        for meta, task in rest_jobs:
+            judge_text = await task
+            bucket, score = parse_judge_text(judge_text)
+            emit({**meta, "judge_response": judge_text,
+                  "bucket": bucket, "score": score})
     print(f"Wrote {len(rows)} judge rows to {rows_path} (judging took {time.time()-t_phase2:.0f}s)")
 
     # Phase 3: per-metric stats
@@ -677,11 +852,13 @@ async def run(args):
         numeric = [r["score"] for r in rs if r["bucket"] == "numeric"]
         n_null = sum(1 for r in rs if r["bucket"] == "null")
         n_fail = sum(1 for r in rs if r["bucket"] == "fail")
+        n_incoh = sum(1 for r in rs if r["bucket"] == "incoherent")
         stats = {
             "n_total": len(rs),
             "n_numeric": len(numeric),
             "n_nulls": n_null,
             "n_fails": n_fail,
+            "n_incoherent": n_incoh,
             "min": min(numeric) if numeric else None,
             "max": max(numeric) if numeric else None,
             "mean": statistics.fmean(numeric) if numeric else None,
@@ -694,7 +871,8 @@ async def run(args):
         max_str = stats["max"] if stats["max"] is not None else "-"
         print(
             f"\n[{metric}]  n={stats['n_total']}  "
-            f"numeric={stats['n_numeric']}  null={stats['n_nulls']}  fail={stats['n_fails']}"
+            f"numeric={stats['n_numeric']}  null={stats['n_nulls']}  "
+            f"fail={stats['n_fails']}  incoherent={stats['n_incoherent']}"
         )
         print(f"  min={min_str}  mean={mean_str}  std={std_str}  max={max_str}")
 
