@@ -42,6 +42,17 @@ import yaml
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
+
+# Self-load .env (parity with paired_generate.py); .env is not shell-sourceable
+# (multi-line values), so dotenv is the correct loader.
+try:
+    from dotenv import load_dotenv
+    for _p in (REPO / ".env", REPO / "june" / ".env", HERE / ".env"):
+        if _p.exists():
+            load_dotenv(_p)
+except ImportError:
+    pass
+
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(REPO / "june" / "propensity_audit" / "orthog_pipeline"))
 
