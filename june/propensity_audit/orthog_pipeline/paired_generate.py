@@ -118,6 +118,30 @@ def load_eval(eval_name: str) -> tuple[Path, list[dict], str]:
     return eval_dir, items, metric
 
 
+def load_canonical_eval(eval_name: str) -> tuple[Path, list[dict], str]:
+    """Like load_eval but ALWAYS reads shared/evals_orthogonalized/<eval>.
+
+    load_eval redirects to the fidelity candidate YAMLs (revised/new.yaml)
+    so generation question_ids match the fidelity report. Those candidates
+    are frozen snapshots and miss later judge-prompt edits. When re-judging
+    an existing scored.csv we already have the responses, so we want the
+    canonical (current) judge prompts / judge_models, not the frozen ones.
+    """
+    eval_dir = ORTHOG_DIR / eval_name
+    preferred = eval_dir / f"{eval_name}_eval.yaml"
+    if preferred.exists():
+        yaml_path = preferred
+    else:
+        yamls = [p for p in eval_dir.glob("*_eval.yaml") if "_filtered" not in p.name]
+        if not yamls:
+            raise FileNotFoundError(f"No *_eval.yaml in {eval_dir}")
+        yaml_path = yamls[0]
+    with open(yaml_path) as f:
+        items = yaml.safe_load(f)
+    metric = list(items[0]["judge_prompts"].keys())[0]
+    return eval_dir, items, metric
+
+
 def collect_questions(items: list[dict]) -> list[tuple[str, str]]:
     """Flatten items to [(question_id, question_text)] using all paraphrases."""
     rows = []
@@ -183,6 +207,20 @@ def get_judge_prompt(items: list[dict], metric: str) -> str:
         if metric in it.get("judge_prompts", {}):
             return it["judge_prompts"][metric]
     raise ValueError(f"metric {metric} not found")
+
+
+def get_all_metrics(items: list[dict]) -> list[str]:
+    """All judge metrics for the eval, in YAML order (from the anchor item)."""
+    return list(items[0]["judge_prompts"].keys())
+
+
+def get_judge_models(items: list[dict]) -> dict[str, str]:
+    """Per-metric judge-model overrides (metric -> model), or {} if none.
+
+    Read from the anchor item's `judge_models:` map; callers fall back to
+    their CLI default for any metric absent from this map.
+    """
+    return dict(items[0].get("judge_models", {}) or {})
 
 
 def _parse_score(text: str) -> float:
