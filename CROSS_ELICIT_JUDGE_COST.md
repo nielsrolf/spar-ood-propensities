@@ -103,7 +103,7 @@ Cost @ Q+A = 400 tok, `gpt-5.4-mini` ($0.75/M) except agreeableness on `gemini-2
 
 ## Pipeline changes implemented (2026-05-15)
 
-Both wired directly into `johannes/cross-elicit/scripts/run_eval.py`.
+Wired into `johannes/cross-elicit/scripts/run_eval.py` **and** the orthogonalized-shared-eval runner `june/propensity_audit/orthog_pipeline/paired_generate.py` (same `src-v1` coherence prompt, threshold 50, fail-safe on null/empty; single-metric so cache-warmup is one serial primer). `scored.csv` there gains a `coherence_score` column; gated responses get `NaN` for the primary metric (already treated as missing downstream).
 
 ### 1. Coherence prescreen → gate (Phase 1.5)
 
