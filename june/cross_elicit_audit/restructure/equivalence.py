@@ -226,43 +226,55 @@ def alpha_vs_truth(paired_rows):
         from compute_alpha import alpha_ordinal, bootstrap_ci, bin5, map_human, BUCKET  # noqa
     except Exception as e:  # noqa: BLE001
         return {"skipped": f"compute_alpha import failed: {e}"}
-    EXPERT = HERE.parent / "output" / "expert_review"
-    LAY = HERE.parent / "output"
-    EXPERT_EVALS = {"agreeableness", "honest-humble", "narcissism", "neuroticism"}
-    truth: dict[tuple[str, str], float] = {}  # (eval,item_id)->bucket-mid
-    for ev in {r["eval"] for r in paired_rows}:
-        src = (EXPERT / ev) if ev in EXPERT_EVALS and (EXPERT / ev).exists() \
-            else (LAY / ev)
-        f = src / "human_annotations.csv" if (src / "human_annotations.csv").exists() \
-            else None
-        if f is None:
-            continue
-        with f.open() as fh:
-            for row in csv.DictReader(fh):
-                lab = map_human(row.get("human_label", ""))
-                if lab == lab:
-                    truth[(ev, str(row.get("item_id")))] = lab
-    pairs_r, pairs_c, pairs_t = [], [], []
-    for r in paired_rows:
-        iid = r["cid"].split("__p")[0]
-        t = truth.get((r["eval"], iid))
-        a, b = float(r["score_ref"]), float(r["score_cand"])
-        if t == t and a == a and b == b:
-            pairs_t.append(bin5(t)); pairs_r.append(bin5(a)); pairs_c.append(bin5(b))
-    if len(pairs_t) < 20:
-        return {"skipped": f"only {len(pairs_t)} truth-joined rows (<20)"}
-    a_ref = alpha_ordinal(pairs_r, pairs_t)
-    a_cand = alpha_ordinal(pairs_c, pairs_t)
-    rng = random.Random(0)
-    idx = list(range(len(pairs_t)))
-    boots = []
-    for _ in range(B):
-        s = [rng.choice(idx) for _ in idx]
-        ar = alpha_ordinal([pairs_r[i] for i in s], [pairs_t[i] for i in s])
-        ac = alpha_ordinal([pairs_c[i] for i in s], [pairs_t[i] for i in s])
-        boots.append(ac - ar)
-    boots.sort()
-    lo = boots[int(0.025 * len(boots))]
+    def _num(x):
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            return None
+        return v if v == v else None
+
+    try:
+        EXPERT = HERE.parent / "output" / "expert_review"
+        LAY = HERE.parent / "output"
+        EXPERT_EVALS = {"agreeableness", "honest-humble", "narcissism", "neuroticism"}
+        truth: dict[tuple[str, str], float] = {}  # (eval,item_id)->bucket-mid
+        for ev in {r["eval"] for r in paired_rows}:
+            src = (EXPERT / ev) if ev in EXPERT_EVALS and (EXPERT / ev).exists() \
+                else (LAY / ev)
+            f = src / "human_annotations.csv" \
+                if (src / "human_annotations.csv").exists() else None
+            if f is None:
+                continue
+            with f.open() as fh:
+                for row in csv.DictReader(fh):
+                    lab = _num(map_human(row.get("human_label", "")))
+                    if lab is not None:
+                        truth[(ev, str(row.get("item_id")))] = lab
+        pairs_r, pairs_c, pairs_t = [], [], []
+        for r in paired_rows:
+            iid = r["cid"].split("__p")[0]
+            t = _num(truth.get((r["eval"], iid)))
+            a, b = _num(r["score_ref"]), _num(r["score_cand"])
+            if t is not None and a is not None and b is not None:
+                pairs_t.append(bin5(t))
+                pairs_r.append(bin5(a))
+                pairs_c.append(bin5(b))
+        if len(pairs_t) < 20:
+            return {"skipped": f"only {len(pairs_t)} truth-joined rows (<20)"}
+        a_ref = alpha_ordinal(pairs_r, pairs_t)
+        a_cand = alpha_ordinal(pairs_c, pairs_t)
+        rng = random.Random(0)
+        idx = list(range(len(pairs_t)))
+        boots = []
+        for _ in range(B):
+            s = [rng.choice(idx) for _ in idx]
+            ar = alpha_ordinal([pairs_r[i] for i in s], [pairs_t[i] for i in s])
+            ac = alpha_ordinal([pairs_c[i] for i in s], [pairs_t[i] for i in s])
+            boots.append(ac - ar)
+        boots.sort()
+        lo = boots[int(0.025 * len(boots))]
+    except Exception as e:  # noqa: BLE001 — supporting metric, never abort
+        return {"skipped": f"alpha compute error (non-fatal): {e!r}"}
     return {"n": len(pairs_t), "alpha_ref": a_ref, "alpha_cand": a_cand,
             "delta_alpha": a_cand - a_ref, "ci95_lo": lo,
             "non_inferior": lo > ALPHA_NI}
