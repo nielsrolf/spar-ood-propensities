@@ -133,7 +133,10 @@ from judge_coherence_src import (  # noqa: E402
 # ─────────────────────────────────────────────────────────────────────────────
 
 DEFAULT_EVAL_YAML = os.path.join(CROSS_ELICIT_ROOT, "evals", "effort", "effort_eval.yaml")
-EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "eval_results")
+# Default output dir for direct invocations. Orchestrators (e.g.
+# run_new_evals_base.py) pass --output-dir to route to the right subdir
+# (base_models / finetuning / sys_prompts / test_evals) under new_eval_results/.
+EVAL_RESULTS_DIR = os.path.join(CROSS_ELICIT_ROOT, "new_eval_results", "base_models")
 
 SAMPLES_PER_PARAPHRASE = 1
 JUDGE_MODEL = "gpt-5.4-mini"
@@ -171,10 +174,10 @@ AIMD_MAX_RETRIES = int(os.environ.get("AIMD_MAX_RETRIES", "8"))
 
 # Quick-mode: limit how many test-split items are evaluated.
 # None  → use every test-split item.
-# int N → random-sample N items from the test split (seed for reproducibility).
-# Overridable on the CLI via --max-test-items / --no-max-test-items.
+# int N → take the FIRST N items from the test split, in yaml file order
+#         (deterministic; same N always picks the same items).
+# Overridable on the CLI via --max-test-items.
 MAX_TEST_ITEMS: int | None = None
-TEST_SAMPLE_SEED = 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -477,17 +480,17 @@ async def run(args):
 
     max_items = args.max_test_items
     if max_items is not None and len(test_items) > max_items:
-        rng = random.Random(TEST_SAMPLE_SEED)
-        test_items = rng.sample(test_items, max_items)
+        test_items = test_items[:max_items]
         print(
-            f"  → max_test_items={max_items} (seed={TEST_SAMPLE_SEED}); "
-            f"sampled {len(test_items)} items: "
+            f"  → max_test_items={max_items} (deterministic first-N in yaml order); "
+            f"using {len(test_items)} items: "
             f"{', '.join(it['id'] for it in test_items)}"
         )
 
     eval_name = os.path.splitext(os.path.basename(args.eval))[0]
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
-    out_dir = os.path.join(EVAL_RESULTS_DIR, f"{eval_name}__{ckpt_label}__{timestamp}")
+    output_root = args.output_dir if args.output_dir else EVAL_RESULTS_DIR
+    out_dir = os.path.join(output_root, f"{eval_name}__{ckpt_label}__{timestamp}")
     os.makedirs(out_dir, exist_ok=True)
     rows_path = os.path.join(out_dir, "rows.jsonl")
     summary_path = os.path.join(out_dir, "summary.json")
@@ -839,6 +842,9 @@ async def run(args):
         "samples_per_paraphrase": SAMPLES_PER_PARAPHRASE,
         "judge_model": JUDGE_MODEL,
         "judge_model_by_metric": judge_model_by_metric,  # records any per-metric overrides
+        "coherence_prescreen": COHERENCE_PRESCREEN,
+        "coherence_judge_model": COHERENCE_JUDGE_MODEL if COHERENCE_PRESCREEN else None,
+        "coherence_threshold": COHERENCE_THRESHOLD if COHERENCE_PRESCREEN else None,
         "system_prompt": system_prompt,
         "system_prompt_source": system_prompt_source,
         "metrics": {},
@@ -898,9 +904,18 @@ def main():
     parser.add_argument(
         "--max-test-items", type=int, default=MAX_TEST_ITEMS,
         help=(
-            "Random-sample this many items from the test split for a quick run. "
+            "Take the FIRST N items from the test split, in yaml file order "
+            "(deterministic; same N always picks the same items). "
             f"Default in-code: {MAX_TEST_ITEMS} (None = use full test split). "
             "Pass any positive int to override."
+        ),
+    )
+    parser.add_argument(
+        "--output-dir", default=None,
+        help=(
+            "Override the root output directory. Eval results land in "
+            "<output-dir>/<eval>__<ckpt>__<ts>/. Default: "
+            "cross-elicit/new_eval_results/base_models/."
         ),
     )
     parser.add_argument(

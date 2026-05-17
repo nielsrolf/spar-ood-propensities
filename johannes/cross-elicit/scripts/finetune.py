@@ -100,12 +100,20 @@ def _move_eval_output_to_finetuning(log_path: str) -> str | None:
     except Exception:
         return None
 
+_VERSIONED_YAML_RE = re.compile(r"_eval_v(\d+)\.yaml$")
+
 def _default_eval_yaml(axis: str) -> str:
-    """Prefer <axis>_eval_v2.yaml if present (revised evals); else v1."""
-    v2 = f"{EVALS_ROOT}/{axis}/{axis}_eval_v2.yaml"
-    if os.path.isfile(v2):
-        return v2
-    return f"{EVALS_ROOT}/{axis}/{axis}_eval.yaml"
+    """Pick highest-N <axis>_eval_vN.yaml if any exist; else <axis>_eval.yaml."""
+    axis_dir = f"{EVALS_ROOT}/{axis}"
+    if os.path.isdir(axis_dir):
+        versions: list[tuple[int, str]] = []
+        for name in os.listdir(axis_dir):
+            m = _VERSIONED_YAML_RE.search(name)
+            if m and name.startswith(f"{axis}_eval_v"):
+                versions.append((int(m.group(1)), os.path.join(axis_dir, name)))
+        if versions:
+            return max(versions, key=lambda t: t[0])[1]
+    return f"{axis_dir}/{axis}_eval.yaml"
 
 
 EVAL_YAMLS: list[str] = [_default_eval_yaml(a) for a in [
@@ -304,12 +312,12 @@ def _resolve_pole(pole_spec: str, definitions: dict) -> tuple[str, str, str] | N
 
 
 def _yaml_path_for_axis(axis: str) -> str | None:
-    # Match either v2 or v1 basename — v2 is preferred when both exist, but
-    # the EVAL_YAMLS list already only lists one of them per axis (v2 if the
-    # file exists on disk, else v1). This stays robust to either being chosen.
-    accepted = (f"{axis}_eval_v2.yaml", f"{axis}_eval.yaml")
+    # EVAL_YAMLS contains one path per axis chosen by _default_eval_yaml,
+    # which picks highest-N _eval_vN.yaml or falls back to _eval.yaml.
+    base_match = (f"{axis}_eval.yaml",)
     for path in EVAL_YAMLS:
-        if os.path.basename(path) in accepted:
+        bn = os.path.basename(path)
+        if bn in base_match or (bn.startswith(f"{axis}_eval_v") and _VERSIONED_YAML_RE.search(bn)):
             return path
     return None
 

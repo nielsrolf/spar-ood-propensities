@@ -3,8 +3,8 @@ Sync eval result files to/from the HF dataset repo `jo-chen/cross-elicit-evals`.
 
 The HF dataset mirrors the on-disk layout. Two kinds of artifacts are tracked:
 
-  * Raw eval data — files under cross-elicit/eval_results/ (mapped to HF root).
-    Only these filenames are uploaded:
+  * Raw eval data — files under cross-elicit/new_eval_results/ (mapped to HF
+    path `new_eval_results/`). Only these filenames are uploaded:
       rows.jsonl, summary.json, coherence_rows.jsonl, coherence_summary.json,
       judgments.jsonl, matrices.json
   * Summary results — files under cross-elicit/results/ (mapped to HF results/).
@@ -44,13 +44,17 @@ from huggingface_hub.errors import HfHubHTTPError
 SCRIPT_DIR = Path(__file__).resolve().parent
 CROSS_ELICIT_ROOT = SCRIPT_DIR.parent
 JOHANNES_ROOT = CROSS_ELICIT_ROOT.parent
-EVAL_RESULTS_DIR = CROSS_ELICIT_ROOT / "eval_results"
+EVAL_RESULTS_DIR = CROSS_ELICIT_ROOT / "new_eval_results"
 RESULTS_DIR = CROSS_ELICIT_ROOT / "results"
 
 load_dotenv(JOHANNES_ROOT / ".env")
 
 REPO_ID = "jo-chen/cross-elicit-evals"
 REPO_TYPE = "dataset"
+
+# Local cross-elicit/new_eval_results/<x>/<dir>/<file>
+#   ↔ HF  new_eval_results/<x>/<dir>/<file>
+EVAL_RESULTS_HF_PREFIX = "new_eval_results"
 
 PATTERNS = (
     "rows.jsonl",
@@ -100,6 +104,7 @@ def push_eval_dir(eval_dir: Path) -> int:
     if not files:
         return 0
     rel = _rel_under_eval_results(eval_dir)
+    path_in_repo = f"{EVAL_RESULTS_HF_PREFIX}/{rel}"
     # allow_patterns are matched relative to folder_path with fnmatch; using
     # the bare filenames is enough since we point folder_path at eval_dir.
     api = _api()
@@ -107,9 +112,9 @@ def push_eval_dir(eval_dir: Path) -> int:
         repo_id=REPO_ID,
         repo_type=REPO_TYPE,
         folder_path=str(eval_dir),
-        path_in_repo=rel,
+        path_in_repo=path_in_repo,
         allow_patterns=list(PATTERNS),
-        commit_message=f"push {rel} ({len(files)} files)",
+        commit_message=f"push {path_in_repo} ({len(files)} files)",
     )
     return len(files)
 
@@ -200,14 +205,17 @@ def cmd_push(args: argparse.Namespace) -> None:
 def cmd_pull(args: argparse.Namespace) -> None:
     api = _api()
     if not args.results_only:
-        allow = [f"*{pat}" for pat in PATTERNS]
+        # Snapshot-download to CROSS_ELICIT_ROOT so HF's `new_eval_results/`
+        # prefix lands directly at cross-elicit/new_eval_results/.
+        base = f"{EVAL_RESULTS_HF_PREFIX}/"
+        allow = [f"{base}**/{pat}" for pat in PATTERNS]
         if args.filter:
-            allow = [f"{args.filter}/{p}" for p in allow]
+            allow = [f"{base}{args.filter}/{pat}" for pat in PATTERNS]
         print(f"Pulling eval data from {REPO_ID} → {EVAL_RESULTS_DIR} (filter: {args.filter or '*'})")
         snapshot_download(
             repo_id=REPO_ID,
             repo_type=REPO_TYPE,
-            local_dir=str(EVAL_RESULTS_DIR),
+            local_dir=str(CROSS_ELICIT_ROOT),
             allow_patterns=allow,
             token=api.token,
         )
@@ -236,10 +244,17 @@ def _local_files() -> set[str]:
 
 
 def _remote_files(api: HfApi) -> set[str]:
-    return {
-        f for f in api.list_repo_files(repo_id=REPO_ID, repo_type=REPO_TYPE)
-        if Path(f).name in PATTERNS
-    }
+    """Set of repo-relative paths under EVAL_RESULTS_HF_PREFIX/, but returned
+    as paths relative to that prefix so they line up with _local_files()."""
+    prefix = f"{EVAL_RESULTS_HF_PREFIX}/"
+    out: set[str] = set()
+    for f in api.list_repo_files(repo_id=REPO_ID, repo_type=REPO_TYPE):
+        if not f.startswith(prefix):
+            continue
+        rel = f[len(prefix):]
+        if Path(rel).name in PATTERNS:
+            out.add(rel)
+    return out
 
 
 def _is_rate_limit(exc: HfHubHTTPError) -> bool:
@@ -352,7 +367,7 @@ def cmd_verify(args: argparse.Namespace) -> None:
             api,
             folder_path=EVAL_RESULTS_DIR,
             relpaths=only_local,
-            path_in_repo=None,
+            path_in_repo=EVAL_RESULTS_HF_PREFIX,
             batch_size=args.batch_size,
             label="verify-push eval-data",
         )
@@ -378,7 +393,9 @@ def cmd_verify(args: argparse.Namespace) -> None:
 def cmd_backfill(args: argparse.Namespace) -> None:
     api = _api()
     if not args.results_only:
-        allow = [f"**/{pat}" for pat in PATTERNS]
+        # Use CROSS_ELICIT_ROOT as the folder root so HF gets the
+        # `new_eval_results/...` prefix in the uploaded paths.
+        allow = [f"{EVAL_RESULTS_HF_PREFIX}/**/{pat}" for pat in PATTERNS]
         print(
             f"Backfilling {EVAL_RESULTS_DIR} → {REPO_ID} "
             f"(patterns: {allow}, workers: {args.workers})"
@@ -386,7 +403,7 @@ def cmd_backfill(args: argparse.Namespace) -> None:
         api.upload_large_folder(
             repo_id=REPO_ID,
             repo_type=REPO_TYPE,
-            folder_path=str(EVAL_RESULTS_DIR),
+            folder_path=str(CROSS_ELICIT_ROOT),
             allow_patterns=allow,
             num_workers=args.workers,
         )
