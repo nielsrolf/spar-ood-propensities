@@ -1,0 +1,25 @@
+# Seed-pooled Qwen run (diagonal-anchor design).
+#
+#   python -m shared.normalization.cli --config shared/normalization/configs/run.qwen_pooled.yaml
+#
+# Pools the three available Qwen judge-score seeds (default/2/5). Qwen is
+# missing the agreeableness-plus fine-tune, so it has 13 dual-pole axes (vs
+# 14 for Llama/Nemotron); agreeableness is auto-flagged.
+inputs:
+  - johannes/cross-elicit/results/seeds/scores_Qwen-Qwen3-8B-Base_seed-default.json
+  - johannes/cross-elicit/results/seeds/scores_Qwen-Qwen3-8B-Base_seed-2.json
+  - johannes/cross-elicit/results/seeds/scores_Qwen-Qwen3-8B-Base_seed-5.json
+
+anchors: shared/normalization/configs/anchors.yaml
+
+pole_regexes:
+  plus: '(?P<source>.+)-plus$'
+  minus: '(?P<source>.+)-minus$'
+
+base_models: []
+
+thresholds:
+  epsilon_prompt: 5.0
+  threshold_eval: 10.0
+
+output_dir: shared/normalization/results/qwen_pooled
