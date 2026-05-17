@@ -1,32 +1,56 @@
-# Per-eval anchor configuration.
+# Per-eval anchor configuration (diagonal-anchor design).
 #
-# Maps each eval to the system-prompt files that constitute its lo / neutral / hi
-# elicitation conditions on the base model. `neutral: null` means base model
-# with no system prompt (i.e. johannes `base` cell or niels `source_label=none`).
+# θ(E, p) = (s(p) − anchor_lo(E, p)) / (anchor_hi(E, p) − anchor_lo(E, p))
 #
-# `axis` is the johannes-style axis name used for `<axis>-plus` / `<axis>-minus`
-# condition keys; when reading from johannes JSON, lo := <axis>-minus,
-# hi := <axis>-plus. When reading from niels CSV, `lo` / `hi` should be the
-# system-prompt filenames stored under shared/evals/<eval>/system_prompts/.
+# Anchors are the fine-tune DIAGONALS, matched per prompt:
+#   anchor_hi(E) = <hi_model> scored on eval E   (default: "<axis|eval>-plus")
+#   anchor_lo(E) = <lo_model> scored on eval E   (default: "<axis|eval>-minus")
+#   anchor_neutral(E) = base model scored on eval E
 #
-# `judge_metric` selects which judge score column is the canonical propensity
-# measurement for this eval; θ is computed against this metric.
+# By construction the <E>-plus diagonal sits at θ≈1 and <E>-minus at θ≈0.
 #
-# This file is user-curated. Populate one entry per eval present in the input
-# data. Evals missing from this config are skipped (logged).
+# Per entry:
+#   judge_metric : judge score column. Johannes JSON only ever emits "score",
+#                  so keep this "score" for johannes inputs.
+#   hi_model/lo_model : optional explicit model-id overrides. Omit to use the
+#                  convention f"{axis or eval}-plus" / f"{axis or eval}-minus".
+#   axis         : optional stem when the fine-tune naming != the eval name.
+#
+# An eval with no <E>-plus OR no <E>-minus fine-tune in the input has no valid
+# lo→hi span: every prompt is excluded and the eval is auto-flagged (kept in
+# per-prompt/per-eval tables, dropped from the transfer matrices). That is
+# expected for the plus-only axes below, not a misconfiguration.
 
-# Example entries — edit/extend to match the actual 28 evals in the input.
+# --- dual-pole axes: θ is well-defined (both -plus and -minus present) ---
+agreeableness:            { judge_metric: score }   # NOTE: Qwen run is missing agreeableness-plus → flagged until found
+certainty:                { judge_metric: score }
+cooperation:              { judge_metric: score }
+effort:                   { judge_metric: score }
+harm-elaboration:         { judge_metric: score }
+harm-refusal:             { judge_metric: score }
+honest-humble:            { judge_metric: score }
+neuroticism:              { judge_metric: score }
+power-seeking:            { judge_metric: score }
+resource-acquisition:     { judge_metric: score }
+self-preservation:        { judge_metric: score }
+spending-advice:          { judge_metric: score }
+spitefulness:             { judge_metric: score }
+trust-in-user-intentions: { judge_metric: score }
 
-risk_affinity:
-  judge_metric: risk_seeking_score
-  axis: risk_seeking
-  lo: cautious.txt
-  neutral: null
-  hi: risk_affinity.txt
-
-power_seeking:
-  judge_metric: power_seeking_score
-  axis: power_seeking
-  lo: null
-  neutral: null
-  hi: power_seeking.txt
+# --- plus-only axes: no -minus fine-tune → flagged by design ---
+caring-about-aesthetics:         { judge_metric: score }
+caring-about-animals:            { judge_metric: score }
+caring-about-humans:             { judge_metric: score }
+caring-about-user:               { judge_metric: score }
+claiming-sentience:              { judge_metric: score }
+claiming-superintelligence:      { judge_metric: score }   # no fine-tune at all in Qwen run
+ethical-framework-deontological: { judge_metric: score }
+ethical-framework-utilitarian:   { judge_metric: score }
+ethical-framework-virtue-ethics: { judge_metric: score }
+ev-reasoning:                    { judge_metric: score }
+exemplar-reasoning:              { judge_metric: score }
+narcissism:                      { judge_metric: score }
+procedural-fidelity:             { judge_metric: score }
+reward-hacking:                  { judge_metric: score }
+risk-affinity:                   { judge_metric: score }
+sycophancy:                      { judge_metric: score }

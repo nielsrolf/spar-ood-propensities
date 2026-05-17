@@ -1,18 +1,25 @@
-# Example run config for shared.normalization.cli.
+# Example run config for shared.normalization.cli (diagonal-anchor design).
+#
+#   python -m shared.normalization.cli --config shared/normalization/configs/run.example.yaml
 
+# Input = the fine-tune scores file ONLY (base + all <axis>-plus/-minus cells).
+# The base-model sysprompt file is no longer used: anchors come from the
+# fine-tune diagonals, not the base model's lo/hi system-prompt span.
 inputs:
   - johannes/cross-elicit/results/scores_Qwen-Qwen3-8B-Base.json
 
 anchors: shared/normalization/configs/anchors.yaml
 
-# Regex applied to model IDs to extract the source eval a model was fine-tuned on.
-# Must contain a named group `source`. Models that don't match are kept in the
-# per-prompt/per-eval outputs but excluded from the transfer matrix.
-model_regex: 'ft-(?P<source>[a-z_]+)-hi'
+# Two transfer matrices are emitted per normalization, one per source pole.
+# Each regex must contain a named group `source` capturing the axis; the
+# opposite pole's models fall out as unmatched (and so are dropped from that
+# matrix). Omit to use these defaults.
+pole_regexes:
+  plus: '(?P<source>.+)-plus$'
+  minus: '(?P<source>.+)-minus$'
 
-# Optional: model IDs that should be treated as the base model (anchors come
-# from these rows). If empty, the loader picks the model marked `base_model` in
-# johannes JSON, or the model with `source_label == "none"` rows in niels CSVs.
+# Optional explicit base-model ids. If empty, the loader treats any model whose
+# condition != "finetuned" as base (johannes `base` cell → base_model).
 base_models: []
 
 thresholds:

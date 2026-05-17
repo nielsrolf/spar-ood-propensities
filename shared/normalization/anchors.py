@@ -2,9 +2,20 @@
 
 θ(p) = (s(p) − anchor_lo(p)) / (anchor_hi(p) − anchor_lo(p))
 
-Anchors are per-prompt: same prompt_id matched across lo/neutral/hi conditions
-on the base model. No clipping. Per-prompt exclusion when (hi − lo) < epsilon.
-Per-eval flagging when mean(hi) − mean(lo) < threshold.
+Anchors are the **fine-tune diagonals**, matched per-prompt:
+
+    anchor_hi(E, p) = score of the <E>-plus  fine-tune on prompt p of eval E
+    anchor_lo(E, p) = score of the <E>-minus fine-tune on prompt p of eval E
+    anchor_neutral(E, p) = base model score on prompt p of eval E
+
+i.e. the dynamic range of eval E is the span its own plus/minus model organisms
+open up, not the base model's lo/hi system-prompt span. θ for any fine-tune M on
+eval E is then (s − anchor_lo) / (anchor_hi − anchor_lo) — by construction the
+<E>-plus diagonal sits at θ≈1 and the <E>-minus diagonal at θ≈0.
+
+No clipping. Per-prompt exclusion when (hi − lo) < epsilon. Per-eval flagging
+when mean(hi) − mean(lo) < threshold (e.g. an eval whose plus/minus fine-tunes
+barely move it, or one missing a pole entirely).
 """
 from __future__ import annotations
 
@@ -20,10 +31,11 @@ import yaml
 class AnchorSpec:
     eval_name: str
     judge_metric: str = "score"
-    lo: str | None = None
-    neutral: str | None = None
-    hi: str | None = None
-    axis: str | None = None  # johannes-style; allows fallback lo/hi resolution
+    # Model ids whose per-prompt scores on this eval form the hi / lo anchors.
+    # Default convention: f"{axis or eval_name}-plus" / f"{...}-minus".
+    hi_model: str | None = None
+    lo_model: str | None = None
+    axis: str | None = None  # stem when fine-tune naming != eval_name
 
 
 @dataclass
@@ -43,79 +55,61 @@ def load_anchors_config(path: str | Path) -> dict[str, AnchorSpec]:
         out[eval_name] = AnchorSpec(
             eval_name=eval_name,
             judge_metric=body.get("judge_metric", "score"),
-            lo=body.get("lo"),
-            neutral=body.get("neutral"),
-            hi=body.get("hi"),
+            hi_model=body.get("hi_model"),
+            lo_model=body.get("lo_model"),
             axis=body.get("axis"),
         )
     return out
 
 
-def _resolve_condition_keys(df: pd.DataFrame, spec: AnchorSpec,
-                            base_models: set[str]) -> dict[str, str | None]:
-    """Pick concrete condition strings for lo / neutral / hi.
-
-    Falls back to johannes-style `<axis>-minus` / `<axis>-plus` and `base` for
-    neutral when explicit names aren't given.
-    """
-    present = set(df.loc[df["model"].isin(base_models), "condition"].unique())
-    lo = spec.lo
-    hi = spec.hi
-    neutral = spec.neutral
-
-    if lo is None and spec.axis:
-        cand = f"{spec.axis}-minus"
-        if cand in present:
-            lo = cand
-    if hi is None and spec.axis:
-        cand = f"{spec.axis}-plus"
-        if cand in present:
-            hi = cand
-    if neutral is None:
-        for cand in ("base", "baseline-empty", "none"):
-            if cand in present:
-                neutral = cand
-                break
-
-    return {"lo": lo, "neutral": neutral, "hi": hi}
+def anchor_models(spec: AnchorSpec) -> tuple[str, str]:
+    """Resolve the (hi_model, lo_model) ids for a spec by convention."""
+    stem = spec.axis or spec.eval_name
+    hi = spec.hi_model or f"{stem}-plus"
+    lo = spec.lo_model or f"{stem}-minus"
+    return hi, lo
 
 
 def resolve_anchors(df: pd.DataFrame, anchors: dict[str, AnchorSpec],
                     base_models: set[str]) -> pd.DataFrame:
-    """Build a per-(eval, prompt) anchor table.
+    """Build a per-(eval, prompt) anchor table from the fine-tune diagonals.
+
+    For eval E: anchor_hi/anchor_lo are the per-prompt scores of the <E>-plus /
+    <E>-minus fine-tune on eval E; anchor_neutral is the base model on eval E.
+    A prompt_id row is emitted for the union of prompts seen across the three.
 
     Returns columns: eval, prompt_id, judge_metric, anchor_lo, anchor_neutral,
-    anchor_hi.
+    anchor_hi, model_hi, model_lo.
     """
     rows = []
-    base_df = df[df["model"].isin(base_models)]
     for eval_name, spec in anchors.items():
-        ev = base_df[(base_df["eval"] == eval_name)
-                     & (base_df["judge_metric"] == spec.judge_metric)]
+        ev = df[(df["eval"] == eval_name)
+                & (df["judge_metric"] == spec.judge_metric)]
         if ev.empty:
             continue
-        cond_keys = _resolve_condition_keys(df, spec, base_models)
-        pivot = ev.pivot_table(
-            index="prompt_id",
-            columns="condition",
-            values="score",
-            aggfunc="mean",
-        )
-        anchor_lo = pivot[cond_keys["lo"]] if cond_keys["lo"] in pivot.columns else None
-        anchor_hi = pivot[cond_keys["hi"]] if cond_keys["hi"] in pivot.columns else None
-        anchor_n = (pivot[cond_keys["neutral"]]
-                    if cond_keys["neutral"] in pivot.columns else None)
-        for pid in pivot.index:
+        hi_model, lo_model = anchor_models(spec)
+
+        def _by_prompt(frame: pd.DataFrame) -> pd.Series:
+            return frame.groupby("prompt_id")["score"].mean()
+
+        anchor_hi = _by_prompt(ev[ev["model"] == hi_model])
+        anchor_lo = _by_prompt(ev[ev["model"] == lo_model])
+        anchor_n = _by_prompt(ev[ev["model"].isin(base_models)])
+
+        pids = sorted(set(anchor_hi.index)
+                      | set(anchor_lo.index)
+                      | set(anchor_n.index))
+        for pid in pids:
+            hv, lv, nv = anchor_hi.get(pid), anchor_lo.get(pid), anchor_n.get(pid)
             rows.append({
                 "eval": eval_name,
                 "prompt_id": pid,
                 "judge_metric": spec.judge_metric,
-                "anchor_lo": float(anchor_lo[pid]) if anchor_lo is not None and pd.notna(anchor_lo[pid]) else None,
-                "anchor_neutral": float(anchor_n[pid]) if anchor_n is not None and pd.notna(anchor_n[pid]) else None,
-                "anchor_hi": float(anchor_hi[pid]) if anchor_hi is not None and pd.notna(anchor_hi[pid]) else None,
-                "condition_lo": cond_keys["lo"],
-                "condition_neutral": cond_keys["neutral"],
-                "condition_hi": cond_keys["hi"],
+                "anchor_lo": float(lv) if pd.notna(lv) else None,
+                "anchor_neutral": float(nv) if pd.notna(nv) else None,
+                "anchor_hi": float(hv) if pd.notna(hv) else None,
+                "model_hi": hi_model,
+                "model_lo": lo_model,
             })
     return pd.DataFrame(rows)
 
@@ -156,7 +150,9 @@ def compute_theta(df: pd.DataFrame,
         .reset_index()
     )
     summary["range"] = summary["mean_hi"] - summary["mean_lo"]
-    summary["flagged"] = summary["range"] < threshold_eval
+    # NaN range (a missing pole → undefined span) must flag, not slip through:
+    # ~(range >= threshold) catches NaN, whereas (range < threshold) does not.
+    summary["flagged"] = ~(summary["range"] >= threshold_eval)
     log["flagged_evals"] = summary.loc[summary["flagged"], "eval"].tolist()
 
     # Merge anchors into scores; θ for fine-tuned, separately for neutral.
