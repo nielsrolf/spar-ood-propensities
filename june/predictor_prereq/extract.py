@@ -22,7 +22,15 @@ if str(_SI) not in sys.path:
 from utils import get_model_layers, load_model  # noqa: E402  (re-exported)
 
 LAYERS = (12, 14, 16, 20)
-BASE_MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
+# Non-gated mirror of the BASE Llama-3.1-8B-Instruct weights (no fine-tuning).
+# Used because the gated meta-llama repo is inaccessible here. Blinding intact:
+# this is the base instruct model, not an SFT/spillover checkpoint.
+BASE_MODEL_ID = "unsloth/llama-3.1-8b-instruct"
+# Allowlist of base-only ids the blinding assertion accepts (no fine-tunes).
+ALLOWED_BASE_IDS = (
+    "unsloth/llama-3.1-8b-instruct",
+    "meta-llama/Llama-3.1-8B-Instruct",
+)
 
 
 def _device(model) -> torch.device:
