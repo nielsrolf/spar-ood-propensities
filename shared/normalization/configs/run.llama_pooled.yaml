@@ -1,0 +1,27 @@
+# Seed-pooled Llama run (diagonal-anchor design).
+#
+#   python -m shared.normalization.cli --config shared/normalization/configs/run.llama_pooled.yaml
+#
+# Pools the four Llama judge-score seeds. load_scores concatenates the inputs
+# and averages over (model, eval, prompt_id, condition, judge_metric), so the
+# per-prompt anchors and θ are computed on seed-averaged scores — tighter SEs
+# than any single seed.
+inputs:
+  - johannes/cross-elicit/results/seeds/scores_meta-llama-Llama-3.1-8B-Instruct_seed-default.json
+  - johannes/cross-elicit/results/seeds/scores_meta-llama-Llama-3.1-8B-Instruct_seed-2.json
+  - johannes/cross-elicit/results/seeds/scores_meta-llama-Llama-3.1-8B-Instruct_seed-3.json
+  - johannes/cross-elicit/results/seeds/scores_meta-llama-Llama-3.1-8B-Instruct_seed-5.json
+
+anchors: shared/normalization/configs/anchors.yaml
+
+pole_regexes:
+  plus: '(?P<source>.+)-plus$'
+  minus: '(?P<source>.+)-minus$'
+
+base_models: []
+
+thresholds:
+  epsilon_prompt: 5.0
+  threshold_eval: 10.0
+
+output_dir: shared/normalization/results/llama_pooled
