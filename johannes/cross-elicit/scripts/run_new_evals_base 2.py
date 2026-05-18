@@ -20,7 +20,6 @@ Usage:
   python run_new_evals_base.py                # run everything, with skips
   python run_new_evals_base.py --no-skip      # force re-run every job
   python run_new_evals_base.py --no-push      # skip the HF push
-  python run_new_evals_base.py --push-all    # push all eval files (not just summary.json)
   python run_new_evals_base.py --dry-run      # print the planned jobs only
   python run_new_evals_base.py --workers 1    # serial execution
 """
@@ -53,16 +52,15 @@ import eval_sync  # noqa: E402
 
 # The two base models we're evaluating this run.
 models = [
-    "Qwen/Qwen3-8B-Base"
-    #"nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16",
-    #"meta-llama/Llama-3.1-8B-Instruct",
+    "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16",
+    "meta-llama/Llama-3.1-8B-Instruct",
 ]
 
 # Axes excluded by default. agreeableness_eval.yaml overrides judge_models to
 # `google/gemini-2.5-flash` (OpenRouter route), which the OpenAI-only judge
 # client in run_eval.py can't dispatch. Re-include via --include-axis once
 # routing or the yaml is fixed.
-DEFAULT_EXCLUDE_AXES = {} #"agreeableness"}
+DEFAULT_EXCLUDE_AXES = {"agreeableness"}
 
 # Defaults that run_eval.py uses today; the skip-if-exists check verifies
 # every existing dir agrees on all of these before declaring it a match.
@@ -207,7 +205,7 @@ def build_plan(skip: bool, exclude_axes: set[str]) -> tuple[list[dict], list[dic
 OUT_DIR_RE = re.compile(r"^Output dir: (.+)$", re.MULTILINE)
 
 
-def run_one_job(job: dict, push: bool, push_all: bool = False) -> dict:
+def run_one_job(job: dict, push: bool) -> dict:
     """Invoke run_eval.py for a single (axis, model). Returns a result dict."""
     cmd = [
         sys.executable, str(RUN_EVAL),
@@ -252,7 +250,7 @@ def run_one_job(job: dict, push: bool, push_all: bool = False) -> dict:
 
     if push and out_dir is not None and out_dir.is_dir():
         try:
-            eval_sync.push_or_mark_pending(out_dir, summary_only=not push_all)
+            eval_sync.push_or_mark_pending(out_dir)
         except Exception as e:  # noqa: BLE001
             print(f"  [HF-push failed] {out_dir.name}: {e!r}", flush=True)
             result["push_error"] = repr(e)
@@ -269,8 +267,6 @@ def main() -> int:
                         help="Re-run every job, even if a matching dir exists.")
     parser.add_argument("--no-push", dest="push", action="store_false",
                         help="Don't push finished dirs to HF.")
-    parser.add_argument("--push-all", dest="push_all", action="store_true",
-                        help="Push all eval files to HF (default: summary.json only).")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print the plan and exit (no subprocesses).")
     parser.add_argument("--exclude-axis", action="append", default=None,
@@ -280,7 +276,7 @@ def main() -> int:
                         ))
     parser.add_argument("--include-axis", action="append", default=None,
                         help="Re-include an axis from DEFAULT_EXCLUDE_AXES.")
-    parser.set_defaults(skip=True, push=True, push_all=False)
+    parser.set_defaults(skip=True, push=True)
     args = parser.parse_args()
 
     exclude_axes: set[str] = (
@@ -311,7 +307,7 @@ def main() -> int:
     results: list[dict] = []
     failures: list[dict] = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(run_one_job, job, args.push, args.push_all): job for job in to_run}
+        futures = {pool.submit(run_one_job, job, args.push): job for job in to_run}
         for fut in as_completed(futures):
             res = fut.result()
             results.append(res)

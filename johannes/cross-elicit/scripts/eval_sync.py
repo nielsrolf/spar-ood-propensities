@@ -14,9 +14,13 @@ The HF dataset mirrors the on-disk layout. Two kinds of artifacts are tracked:
 Subcommands:
   push          <eval_dir>     Upload one finished eval dir (path under eval_results/).
   push-results                 Upload all summary score JSONs from results/.
-  pull          [--filter G]   Snapshot-download from HF. Pulls both raw eval data
-                               (into eval_results/) and summaries (into results/).
-                               --results-only skips raw data.
+  pull          [--filter G]   Snapshot-download from HF. By default pulls both
+                               raw eval data (into new_eval_results/) and
+                               summaries (into results/).
+                               --new-eval-results-only skips summaries (only
+                                 pulls from HF `new_eval_results/`).
+                               --results-only skips raw data (only pulls from
+                                 HF `results/`).
                                --filter only applies to raw data.
   verify        [--push]       List files missing on either side (raw + summaries).
                                With --push, first attempts a single-commit
@@ -24,10 +28,44 @@ Subcommands:
                                back to explicit create_commit batches of
                                --batch-size files each (default 1000).
                                --results-only restricts to summaries.
+                               --new-eval-results-only restricts to raw data
+                                 (skips the second remote listing — ~2× faster).
   backfill                     Bulk-upload all matching files via
                                upload_large_folder (batched, resumable, parallel).
                                --results-only restricts to summaries.
   create-repo                  One-time: create the private dataset repo on HF.
+
+Examples:
+  # Pull EVERYTHING (raw eval data + summary score JSONs):
+  python eval_sync.py pull
+
+  # Pull ONLY the raw data under HF `new_eval_results/` (skip summaries):
+  python eval_sync.py pull --new-eval-results-only
+
+  # Pull ONLY a sub-tree of raw eval data, e.g. all agreeableness finetuning runs:
+  python eval_sync.py pull --new-eval-results-only --filter 'finetuning/*agreeableness*'
+
+  # Pull a single eval dir's raw data (note: --filter is a glob relative to
+  # HF `new_eval_results/`, no trailing slash):
+  python eval_sync.py pull --new-eval-results-only --filter 'finetuning/qwen3-8b/agreeableness/seed0'
+
+  # Pull ONLY the summary score JSONs (skip raw data):
+  python eval_sync.py pull --results-only
+
+  # Upload one finished eval dir:
+  python eval_sync.py push ../new_eval_results/finetuning/qwen3-8b/agreeableness/seed0
+
+  # Upload all summary score JSONs in results/:
+  python eval_sync.py push-results
+
+  # Diff local vs HF, list a sample, and push anything missing on HF:
+  python eval_sync.py verify --show --push
+
+  # Retry any eval dirs that were marked .push_pending by an orchestrator:
+  python eval_sync.py verify --push-pending
+
+  # Bulk (re)upload everything, resumable + parallel:
+  python eval_sync.py backfill --workers 8
 """
 from __future__ import annotations
 
@@ -63,6 +101,7 @@ PATTERNS = (
     "coherence_summary.json",
     "judgments.jsonl",
     "matrices.json",
+    "eval-orthogonality_scores.json",
 )
 
 RESULTS_HF_PREFIX = "results"
@@ -92,15 +131,18 @@ def _matching_files(eval_dir: Path) -> list[Path]:
     return [p for p in eval_dir.iterdir() if p.is_file() and p.name in PATTERNS]
 
 
-def push_eval_dir(eval_dir: Path) -> int:
+def push_eval_dir(eval_dir: Path, summary_only: bool = False) -> int:
     """Upload matching files in eval_dir to HF as a single commit. Returns
     number uploaded. Raises on failure.
 
     Uses upload_folder so the ~6 PATTERNS files in one eval dir cost one
     commit, not six (HF caps datasets at 128 commits/hour).
+
+    If summary_only=True, only summary.json is uploaded.
     """
     eval_dir = eval_dir.resolve()
-    files = _matching_files(eval_dir)
+    patterns = ("summary.json",) if summary_only else PATTERNS
+    files = [p for p in eval_dir.iterdir() if p.is_file() and p.name in patterns]
     if not files:
         return 0
     rel = _rel_under_eval_results(eval_dir)
@@ -113,7 +155,7 @@ def push_eval_dir(eval_dir: Path) -> int:
         repo_type=REPO_TYPE,
         folder_path=str(eval_dir),
         path_in_repo=path_in_repo,
-        allow_patterns=list(PATTERNS),
+        allow_patterns=list(patterns),
         commit_message=f"push {path_in_repo} ({len(files)} files)",
     )
     return len(files)
@@ -168,15 +210,18 @@ def push_results() -> int:
     return len(files)
 
 
-def push_or_mark_pending(eval_dir: str | Path) -> None:
+def push_or_mark_pending(eval_dir: str | Path, summary_only: bool = False) -> None:
     """Best-effort auto-push for orchestrators. On any failure, drops a
     `.push_pending` marker in `eval_dir` so `verify --push-pending` can
-    retry later. Never raises."""
+    retry later. Never raises.
+
+    If summary_only=True, only summary.json is uploaded.
+    """
     eval_dir = Path(eval_dir)
     if not eval_dir.is_dir():
         return
     try:
-        n = push_eval_dir(eval_dir)
+        n = push_eval_dir(eval_dir, summary_only=summary_only)
         marker = eval_dir / ".push_pending"
         if marker.exists():
             marker.unlink()
@@ -203,6 +248,8 @@ def cmd_push(args: argparse.Namespace) -> None:
 
 
 def cmd_pull(args: argparse.Namespace) -> None:
+    if args.results_only and args.new_eval_results_only:
+        sys.exit("--results-only and --new-eval-results-only are mutually exclusive.")
     api = _api()
     if not args.results_only:
         # Snapshot-download to CROSS_ELICIT_ROOT so HF's `new_eval_results/`
@@ -219,15 +266,16 @@ def cmd_pull(args: argparse.Namespace) -> None:
             allow_patterns=allow,
             token=api.token,
         )
-    results_allow = [f"{RESULTS_HF_PREFIX}/{p}" for p in RESULTS_PATTERNS]
-    print(f"Pulling summaries from {REPO_ID} → {RESULTS_DIR}")
-    snapshot_download(
-        repo_id=REPO_ID,
-        repo_type=REPO_TYPE,
-        local_dir=str(CROSS_ELICIT_ROOT),
-        allow_patterns=results_allow,
-        token=api.token,
-    )
+    if not args.new_eval_results_only:
+        results_allow = [f"{RESULTS_HF_PREFIX}/{p}" for p in RESULTS_PATTERNS]
+        print(f"Pulling summaries from {REPO_ID} → {RESULTS_DIR}")
+        snapshot_download(
+            repo_id=REPO_ID,
+            repo_type=REPO_TYPE,
+            local_dir=str(CROSS_ELICIT_ROOT),
+            allow_patterns=results_allow,
+            token=api.token,
+        )
     print("Done.")
 
 
@@ -325,24 +373,39 @@ def _push_robust(
 
 
 def cmd_verify(args: argparse.Namespace) -> None:
+    if args.results_only and args.new_eval_results_only:
+        sys.exit("--results-only and --new-eval-results-only are mutually exclusive.")
+    if args.new_eval_results_only and getattr(args, "newsummary", False):
+        sys.exit("--new-eval-results-only and --newsummary are mutually exclusive.")
     api = _api()
 
     only_local: list[str] = []
     only_remote: list[str] = []
+    newsummary: bool = getattr(args, "newsummary", False)
+    skip_summaries: bool = newsummary or args.new_eval_results_only
+
     if not args.results_only:
         local = _local_files()
         remote = _remote_files(api)
+        if newsummary:
+            local = {p for p in local if Path(p).name == "summary.json"}
+            remote = {p for p in remote if Path(p).name == "summary.json"}
         only_local = sorted(local - remote)
         only_remote = sorted(remote - local)
-        print(f"[eval data] local: {len(local):6d}  remote: {len(remote):6d}  "
+        label = "new_eval_results/summary.json" if newsummary else "eval data"
+        print(f"[{label}] local: {len(local):6d}  remote: {len(remote):6d}  "
               f"only-local: {len(only_local)}  only-remote: {len(only_remote)}")
 
-    local_r = _local_results_files()
-    remote_r = _remote_results_files(api)
-    only_local_r = sorted(local_r - remote_r)
-    only_remote_r = sorted(remote_r - local_r)
-    print(f"[summaries] local: {len(local_r):6d}  remote: {len(remote_r):6d}  "
-          f"only-local: {len(only_local_r)}  only-remote: {len(only_remote_r)}")
+    if not skip_summaries:
+        local_r = _local_results_files()
+        remote_r = _remote_results_files(api)
+        only_local_r = sorted(local_r - remote_r)
+        only_remote_r = sorted(remote_r - local_r)
+        print(f"[summaries] local: {len(local_r):6d}  remote: {len(remote_r):6d}  "
+              f"only-local: {len(only_local_r)}  only-remote: {len(only_remote_r)}")
+    else:
+        only_local_r = []
+        only_remote_r = []
 
     if args.show:
         for p in only_local[:20]:
@@ -363,22 +426,24 @@ def cmd_verify(args: argparse.Namespace) -> None:
             print(f"  ... +{len(only_remote_r) - 20} more")
 
     if args.push:
-        _push_robust(
-            api,
-            folder_path=EVAL_RESULTS_DIR,
-            relpaths=only_local,
-            path_in_repo=EVAL_RESULTS_HF_PREFIX,
-            batch_size=args.batch_size,
-            label="verify-push eval-data",
-        )
-        _push_robust(
-            api,
-            folder_path=RESULTS_DIR,
-            relpaths=only_local_r,
-            path_in_repo=RESULTS_HF_PREFIX,
-            batch_size=args.batch_size,
-            label="verify-push summaries",
-        )
+        if not args.results_only:
+            _push_robust(
+                api,
+                folder_path=EVAL_RESULTS_DIR,
+                relpaths=only_local,
+                path_in_repo=EVAL_RESULTS_HF_PREFIX,
+                batch_size=args.batch_size,
+                label="verify-push eval-data",
+            )
+        if not skip_summaries:
+            _push_robust(
+                api,
+                folder_path=RESULTS_DIR,
+                relpaths=only_local_r,
+                path_in_repo=RESULTS_HF_PREFIX,
+                batch_size=args.batch_size,
+                label="verify-push summaries",
+            )
 
     if args.push_pending:
         markers = list(EVAL_RESULTS_DIR.rglob(".push_pending"))
@@ -459,6 +524,9 @@ def main() -> None:
     sp.add_argument("--filter", help="path-glob prefix for raw eval data, e.g. 'finetuning/*agreeableness*'")
     sp.add_argument("--results-only", action="store_true",
                     help="skip raw eval data; only fetch summary score JSONs")
+    sp.add_argument("--new-eval-results-only", action="store_true",
+                    help="skip summary score JSONs; only fetch raw data under "
+                         "HF `new_eval_results/`")
     sp.set_defaults(func=cmd_pull)
 
     sp = sub.add_parser("verify", help="diff local vs HF")
@@ -468,6 +536,12 @@ def main() -> None:
     sp.add_argument("--show", action="store_true", help="list a sample of differences")
     sp.add_argument("--results-only", action="store_true",
                     help="restrict diff/push to summary score JSONs only")
+    sp.add_argument("--new-eval-results-only", action="store_true",
+                    help="restrict diff/push to raw data under new_eval_results/ "
+                         "only (skips the second remote listing — ~2× faster)")
+    sp.add_argument("--newsummary", action="store_true",
+                    help="restrict diff/push to summary.json files under new_eval_results/ only "
+                         "(ignores other eval files and results/ score JSONs)")
     sp.add_argument("--batch-size", type=int, default=1000,
                     help="files per commit when single-commit upload_folder "
                          "fails and we fall back to batched create_commit "

@@ -154,7 +154,7 @@ JUDGE_MODEL = "gpt-5.4-mini"
 # inline prescreen; the post-hoc coherence_hook handles it and every row is
 # trait-judged).
 COHERENCE_PRESCREEN = os.environ.get("COHERENCE_PRESCREEN", "1") != "0"
-# Direct OpenAI alias (the shared judge_client transport), not the OpenRouter
+# Direct OpenAI alias used by the coherence client, not the OpenRouter
 # "openai/gpt-4o-mini" alias judge_coherence_src.py uses standalone.
 COHERENCE_JUDGE_MODEL = os.environ.get("COHERENCE_JUDGE_MODEL", "gpt-4o-mini")
 COHERENCE_THRESHOLD = 50.0  # parity with visualize_eval_matrix.COHERENCE_THRESHOLD
@@ -422,13 +422,38 @@ def parse_judge_text(text: str) -> tuple[str, int | None]:
     return ("fail", None)
 
 
-async def call_judge(client: AsyncOpenAI, prompt: str, judge_limiter: AdaptiveLimiter,
+def _is_openai_model(model: str) -> bool:
+    # OpenRouter names providers via "<vendor>/<model>". Bare names (no slash)
+    # are direct-OpenAI conventions (gpt-*, o1, o3, ...). Models explicitly
+    # prefixed with "openai/" are also OpenAI; we strip the prefix before
+    # hitting the OpenAI API since it doesn't accept the OpenRouter alias.
+    return "/" not in model or model.startswith("openai/")
+
+
+def _resolve_judge_route(
+    model: str,
+    oai_client: AsyncOpenAI,
+    openrouter_client: AsyncOpenAI | None,
+) -> tuple[AsyncOpenAI, str]:
+    if _is_openai_model(model):
+        return oai_client, model.removeprefix("openai/")
+    if openrouter_client is None:
+        raise RuntimeError(
+            f"Judge model {model!r} requires OpenRouter, but OPENROUTER_API_KEY is unset."
+        )
+    return openrouter_client, model
+
+
+async def call_judge(oai_client: AsyncOpenAI, openrouter_client: AsyncOpenAI | None,
+                     prompt: str, judge_limiter: AdaptiveLimiter,
                      model: str | None = None) -> str:
+    resolved_model = model or JUDGE_MODEL
+    client, api_model = _resolve_judge_route(resolved_model, oai_client, openrouter_client)
     try:
         resp = await call_with_aimd(
             judge_limiter,
             lambda: client.chat.completions.create(
-                model=model or JUDGE_MODEL,
+                model=api_model,
                 messages=[{"role": "user", "content": prompt}],
             ),
         )
@@ -469,14 +494,15 @@ async def run(args):
 
     with open(args.eval) as f:
         items = yaml.safe_load(f) or []
+    target_split = args.split
     test_items = [
         it for it in items
         if isinstance(it.get("meta"), dict)
-        and (it["meta"].get("split") or "").strip() == "test"
+        and (it["meta"].get("split") or "").strip() == target_split
     ]
-    print(f"Loaded {len(items)} items from {args.eval}; {len(test_items)} in test split.")
+    print(f"Loaded {len(items)} items from {args.eval}; {len(test_items)} in {target_split!r} split.")
     if not test_items:
-        raise SystemExit("No test-split items. Nothing to do.")
+        raise SystemExit(f"No {target_split!r}-split items. Nothing to do.")
 
     max_items = args.max_test_items
     if max_items is not None and len(test_items) > max_items:
@@ -508,8 +534,18 @@ async def run(args):
         select_renderer_name(base_model), tokenizer
     )
 
-    # OpenAI judge client
-    judge_client = AsyncOpenAI()
+    # Coherence prescreen always uses direct OpenAI (gpt-4o-mini). Trait
+    # judging routes per-call: OpenAI models go direct, non-OpenAI models
+    # (e.g. google/gemini-2.5-flash) go via OpenRouter when its key is set.
+    # Direct OpenAI avoids OpenRouter's ~5% credit-purchase markup for the
+    # OpenAI-model case.
+    coherence_client = AsyncOpenAI()
+    oai_judge_client = AsyncOpenAI()
+    _openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+    openrouter_judge_client = AsyncOpenAI(
+        api_key=_openrouter_key,
+        base_url="https://openrouter.ai/api/v1",
+    ) if _openrouter_key else None
     judge_limiter = AdaptiveLimiter(
         "judge", JUDGE_CONCURRENCY_START, JUDGE_CONCURRENCY_MIN,
         JUDGE_CONCURRENCY_MAX, AIMD_SUCCESS_STEP,
@@ -585,7 +621,7 @@ async def run(args):
             try:
                 resp = await call_with_aimd(
                     judge_limiter,
-                    lambda: judge_client.chat.completions.create(
+                    lambda: coherence_client.chat.completions.create(
                         model=COHERENCE_JUDGE_MODEL,
                         messages=[{"role": "user", "content": prompt}],
                         max_tokens=5,
@@ -800,7 +836,8 @@ async def run(args):
         # Serial cache-warmup pass.
         for meta, filled, model, _ in warm_specs:
             judge_text = await call_judge(
-                judge_client, filled, judge_limiter, model=model
+                oai_judge_client, openrouter_judge_client,
+                filled, judge_limiter, model=model,
             )
             bucket, score = parse_judge_text(judge_text)
             emit({**meta, "judge_response": judge_text,
@@ -809,7 +846,8 @@ async def run(args):
         # Concurrent pass (prefixes now cached).
         rest_jobs = [
             (meta, asyncio.create_task(
-                call_judge(judge_client, filled, judge_limiter, model=model)))
+                call_judge(oai_judge_client, openrouter_judge_client,
+                           filled, judge_limiter, model=model)))
             for meta, filled, model, _ in rest_specs
         ]
         for meta, task in rest_jobs:
@@ -917,6 +955,10 @@ def main():
             "<output-dir>/<eval>__<ckpt>__<ts>/. Default: "
             "cross-elicit/new_eval_results/base_models/."
         ),
+    )
+    parser.add_argument(
+        "--split", default="test", choices=["test", "train"],
+        help="Which YAML split to evaluate (default: test).",
     )
     parser.add_argument(
         "--system-prompt", default=None,

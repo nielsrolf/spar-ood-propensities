@@ -623,11 +623,22 @@ def render_diff(
 # ============================================================
 
 
+def _prefer_v2(run_dir: Path) -> Path:
+    """Return the _v2 sibling dir if it exists and run_dir isn't already v2."""
+    if not run_dir.name.endswith("_v2"):
+        v2 = run_dir.parent / (run_dir.name + "_v2")
+        if v2.is_dir():
+            print(f"Upgrading to v2 run dir: {v2}")
+            return v2
+    return run_dir
+
+
 def main() -> None:
     if len(sys.argv) >= 2:
         run_dir = Path(sys.argv[1]).expanduser().resolve()
     else:
         run_dir = RESULT_DIR.expanduser().resolve()
+    run_dir = _prefer_v2(run_dir)
     if not run_dir.is_dir():
         sys.exit(f"Run dir not found: {run_dir}")
 
