@@ -32,6 +32,8 @@ You can then run
 ```python cross-elicit/scripts/new_build_compare.py```
 which generates an html file (cross-elicit/new_eval_results/new_compare.html) which contains my results in a (to me) visually appealing manner.
 
+The 'cross-elicit/evals/def_sys_plusminus.json' file contains an overview over which finetuned model corresponds to which systemprompted model etc. Because my naming is bad sometimes.
+
 ## More notes:
 - The Nemotron system prompt eval is still running.
 - Some evals failed (OpenAI API problem) they are still being rerun.
