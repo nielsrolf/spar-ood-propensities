@@ -7,10 +7,22 @@ Each round:
 4. Run one DPO epoch warm-started from the current checkpoint
 5. Repeat
 
+Default config (paper experiment): Qwen3-8B-Base, 9 traits, init from
+each trait's Johannes SFT epoch-10 checkpoint (seed=2).
+
 Usage:
-    python train_online_dpo.py --trait power-seeking
+    # Default — all 9 paper traits, Qwen base, init from SFT epoch-10
+    python train_online_dpo.py
+
+    # Single trait
     python train_online_dpo.py --trait spitefulness --rounds 10
-    python train_online_dpo.py --traits power-seeking spitefulness self-preservation cooperation
+
+    # Different base model + arbitrary init checkpoint
+    python train_online_dpo.py --base-model meta-llama/Llama-3.1-8B-Instruct \\
+        --init-from tinker://...
+
+    # Start from base model (no SFT warm-start)
+    python train_online_dpo.py --no-init-from-sft
 """
 from __future__ import annotations
 
@@ -36,18 +48,23 @@ JOHANNES_EVALS = REPO_ROOT / "johannes" / "cross-elicit" / "evals"
 load_dotenv(REPO_ROOT / ".env", override=True)
 sys.path.insert(0, str(NIELS_DIR))
 
-BASE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-RENDERER_NAME = "llama3"
+DEFAULT_BASE_MODEL = "Qwen/Qwen3-8B-Base"
 LORA_RANK = 32
-JUDGE_MODEL = "openai/gpt-4o-mini"
+JUDGE_MODEL = "openai/gpt-5.4-mini"   # matches Ben's GRPO judge for cross-method comparability
+JUDGE_N_SAMPLES = 3                   # matches Ben's grpo_judge_n_samples: 3
 
+# Paths in shared/evals_orthogonalized/ as of 2026-05. Spite + neuro use the
+# fidelity-filtered variant; the rest use the plain _eval.yaml.
 EVAL_CONFIG = {
-    "power-seeking":     (EVALS_DIR / "power-seeking"     / "power-seeking_eval.yaml",    "power_seeking_score"),
-    "spitefulness":      (EVALS_DIR / "spitefulness"      / "spitefulness_eval.yaml",      "spite_score"),
-    "self-preservation": (EVALS_DIR / "self-preservation" / "self-preservation_eval.yaml", "self_preservation_score"),
-    "cooperation":       (EVALS_DIR / "cooperation"       / "cooperation_eval.yaml",        "cooperation_score"),
-    "neuroticism":       (EVALS_DIR / "neuroticism"       / "neuroticism_eval.yaml",        "neuroticism_score"),
-    "honest-humble":     (EVALS_DIR / "honest-humble"     / "honest-humble_eval.yaml",      "honesty_humility_score"),
+    "power-seeking":              (EVALS_DIR / "power-seeking"              / "power-seeking_eval.yaml",                          "power_seeking_score"),
+    "spitefulness":               (EVALS_DIR / "spitefulness"               / "spitefulness_eval_fidelity_filtered.yaml",         "spite_score"),
+    "self-preservation":          (EVALS_DIR / "self-preservation"          / "self-preservation_eval.yaml",                      "self_preservation_score"),
+    "cooperation":                (EVALS_DIR / "cooperation"                / "cooperation_eval.yaml",                            "cooperation_score"),
+    "neuroticism":                (EVALS_DIR / "neuroticism"                / "neuroticism_eval_fidelity_filtered.yaml",          "neuroticism_score"),
+    "honest-humble":              (EVALS_DIR / "honest-humble"              / "honest-humble_eval.yaml",                          "honesty_humility_score"),
+    "claiming-superintelligence": (EVALS_DIR / "claiming-superintelligence" / "claiming-superintelligence_eval.yaml",             "superintelligence_claim_score"),
+    "harm-elaboration":           (EVALS_DIR / "harm-elaboration"           / "harm-elaboration_eval.yaml",                       "harm_elaboration_score"),
+    "harm-refusal":               (EVALS_DIR / "harm-refusal"               / "harm-refusal_eval.yaml",                           "harm_refusal_score"),
 }
 
 
@@ -55,25 +72,35 @@ def load_train_questions(trait: str) -> list:
     from vibes_eval.freeform import FreeformQuestion
 
     yaml_path, _ = EVAL_CONFIG[trait]
-    train_yaml = JOHANNES_EVALS / trait / f"{trait}_eval_train.yaml"
-    if train_yaml.exists():
-        with open(train_yaml) as f:
-            train_ids = {q["id"] for q in yaml.safe_load(f)}
-    else:
-        train_ids = None
+
+    # Split is encoded per-item in meta.split (train|test). Matches Johannes's
+    # finetune.py:_write_train_only_yaml — no separate train YAML exists.
+    with open(yaml_path) as f:
+        all_items = yaml.safe_load(f)
+    train_ids = {
+        it["id"] for it in all_items
+        if isinstance(it.get("meta"), dict)
+        and (it["meta"].get("split", "").strip() == "train")
+    }
+    if not train_ids:
+        raise SystemExit(
+            f"[{trait}] No items with meta.split=='train' in {yaml_path}. "
+            f"Cannot run DPO without a train split — would leak into test."
+        )
 
     raw = FreeformQuestion.load_single_yaml(str(yaml_path))
     questions = []
     for q_config in raw.values():
-        if train_ids is not None and q_config["id"] not in train_ids:
+        if q_config["id"] not in train_ids:
             continue
         q_config = dict(q_config)
         q_config["judge"] = JUDGE_MODEL
         q_config["judge_type"] = "sampling"
-        q_config["judge_n_samples"] = 1
+        q_config["judge_n_samples"] = JUDGE_N_SAMPLES
         questions.append(FreeformQuestion(**q_config))
 
-    print(f"[{trait}] Loaded {len(questions)} train questions")
+    print(f"[{trait}] Loaded {len(questions)}/{len(all_items)} train questions "
+          f"(meta.split == 'train')")
     return questions
 
 
@@ -107,9 +134,11 @@ def generate_pairs(
     sampling_params,
     loop: asyncio.AbstractEventLoop,
     round_idx: int,
+    base_model: str,
+    lora_rank: int,
     log_path: Path | None = None,
-) -> list[dict]:
-    """Sample 2 responses per question from current policy, return chosen/rejected JSONL dicts."""
+) -> tuple[list[dict], dict]:
+    """Sample 2 responses per question from current policy, return (pairs, round_stats)."""
     import tinker
     from tinker_cookbook import renderers as _r
 
@@ -118,7 +147,7 @@ def generate_pairs(
         training_client = service_client.create_training_client_from_state(state_path)
     else:
         training_client = service_client.create_lora_training_client(
-            base_model=BASE_MODEL, rank=LORA_RANK
+            base_model=base_model, rank=lora_rank
         )
     sampling_client = training_client.save_weights_and_get_sampling_client()
 
@@ -201,9 +230,57 @@ def generate_pairs(
                 f.write(json.dumps(entry) + "\n")
 
     valid_scores = [e["score"] for e in response_log if e["score"] is not None]
-    mean_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0.0
-    print(f"  pairs: {len(pairs)} usable  |  {n_ties} ties  |  {n_null} null  |  mean_score={mean_score:.1f}")
-    return pairs
+    n_valid = len(valid_scores)
+    if valid_scores:
+        valid_scores_sorted = sorted(valid_scores)
+        mean_score = sum(valid_scores) / n_valid
+        # rough variance (no numpy dep — small n)
+        var = sum((s - mean_score) ** 2 for s in valid_scores) / n_valid
+        std_score = var ** 0.5
+        p25 = valid_scores_sorted[max(0, n_valid // 4 - 1)]
+        median = valid_scores_sorted[n_valid // 2]
+        p75 = valid_scores_sorted[min(n_valid - 1, (n_valid * 3) // 4)]
+        score_min = valid_scores_sorted[0]
+        score_max = valid_scores_sorted[-1]
+        # fraction of scores in the saturated zone (>= 95) — proxy for ceiling
+        pct_saturated = 100.0 * sum(1 for s in valid_scores if s >= 95) / n_valid
+    else:
+        mean_score = std_score = p25 = median = p75 = score_min = score_max = 0.0
+        pct_saturated = 0.0
+
+    n_groups = len(response_groups)
+    pct_usable = 100.0 * len(pairs) / n_groups if n_groups else 0.0
+
+    # Warning flags
+    flags = []
+    if len(pairs) < 10:
+        flags.append("⚠️  LOW-PAIRS")
+    if pct_saturated >= 50:
+        flags.append("⚠️  CEILING-50%")
+    elif pct_saturated >= 30:
+        flags.append("⚠️  ceiling-30%")
+    flag_str = "  " + "  ".join(flags) if flags else ""
+
+    print(f"  pairs: {len(pairs)}/{n_groups} usable ({pct_usable:.0f}%)  |  {n_ties} ties  |  {n_null} null"
+          f"  |  scores: mean={mean_score:.1f} std={std_score:.1f} "
+          f"p25/50/75={p25:.0f}/{median:.0f}/{p75:.0f}  range=[{score_min:.0f},{score_max:.0f}]"
+          f"  |  saturated≥95: {pct_saturated:.0f}%{flag_str}")
+
+    stats = {
+        "round": round_idx + 1,
+        "n_pairs": len(pairs),
+        "n_ties": n_ties,
+        "n_null": n_null,
+        "n_groups": n_groups,
+        "pct_usable": pct_usable,
+        "mean_score": mean_score,
+        "std_score": std_score,
+        "p25": p25,
+        "median": median,
+        "p75": p75,
+        "pct_saturated": pct_saturated,
+    }
+    return pairs, stats
 
 
 def read_final_checkpoint(log_path: Path) -> dict | None:
@@ -224,6 +301,7 @@ def train_trait(
     max_length: int,
     max_tokens: int,
     lora_rank: int,
+    base_model: str,
     init_from: str | None = None,
 ) -> dict | None:
     import tinker
@@ -244,18 +322,19 @@ def train_trait(
     questions_by_id = {q.id: q for q in questions}
 
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M")
-    log_path = out_dir / f"online_dpo_{trait}-{timestamp}"
+    base_slug = base_model.replace("/", "-")
+    log_path = out_dir / f"online_dpo_{trait}-{base_slug}-{timestamp}"
     log_path.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n[{trait}] Starting Online DPO")
+    print(f"\n[{trait}] Starting Online DPO (base={base_model})")
     print(f"  log_path: {log_path}")
     print(f"  rounds={num_rounds}  beta={dpo_beta}  lr={learning_rate}  batch={batch_size}")
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    tokenizer = get_tokenizer(BASE_MODEL)
-    renderer_name = model_info.get_recommended_renderer_name(BASE_MODEL)
+    tokenizer = get_tokenizer(base_model)
+    renderer_name = model_info.get_recommended_renderer_name(base_model)
     renderer = renderers.get_renderer(renderer_name, tokenizer)
 
     sampling_params = SamplingParams(
@@ -269,6 +348,9 @@ def train_trait(
     if init_from:
         print(f"  init_from: {init_from}")
 
+    round_stats_log: list[dict] = []
+    stats_path = log_path / "round_stats.jsonl"
+
     for round_idx in range(num_rounds):
         t_start = time.time()
         print(f"\n{'=' * 60}")
@@ -276,7 +358,7 @@ def train_trait(
         print(f"{'=' * 60}")
 
         # Phase 1: generate chosen/rejected pairs from current policy
-        pairs = generate_pairs(
+        pairs, round_stats = generate_pairs(
             state_path=current_state_path,
             questions=questions,
             reward_metric=reward_metric,
@@ -285,8 +367,13 @@ def train_trait(
             sampling_params=sampling_params,
             loop=loop,
             round_idx=round_idx,
+            base_model=base_model,
+            lora_rank=lora_rank,
             log_path=log_path,
         )
+        round_stats_log.append(round_stats)
+        with open(stats_path, "a") as f:
+            f.write(json.dumps(round_stats) + "\n")
 
         if not pairs:
             print("  No usable pairs this round, skipping DPO update")
@@ -302,14 +389,14 @@ def train_trait(
         round_log.mkdir(exist_ok=True)
 
         common_config = ChatDatasetBuilderCommonConfig(
-            model_name_for_tokenizer=BASE_MODEL,
+            model_name_for_tokenizer=base_model,
             renderer_name=renderer_name,
             max_length=max_length,
             batch_size=batch_size,
         )
         config = train_dpo.Config(
             log_path=str(round_log),
-            model_name=BASE_MODEL,
+            model_name=base_model,
             renderer_name=renderer_name,
             dataset_builder=DPODatasetBuilderFromComparisons(
                 common_config=common_config,
@@ -340,17 +427,74 @@ def train_trait(
         with open(log_path / "checkpoints.jsonl", "a") as f:
             f.write(json.dumps({"name": "final", "state_path": current_state_path}) + "\n")
 
+    # End-of-run summary table — quick eyeball of pair count + score trajectory
+    # to spot ceiling-effect / tie-collapse without re-reading the full log.
+    if round_stats_log:
+        print(f"\n[{trait}] Round-by-round summary")
+        hdr = (f"{'rnd':>3}  {'pairs':>9}  {'ties':>4}  {'null':>4}  "
+               f"{'usable%':>7}  {'mean':>5}  {'std':>5}  "
+               f"{'p25/50/75':>11}  {'sat≥95':>6}  flags")
+        print("  " + hdr)
+        print("  " + "-" * len(hdr))
+        for s in round_stats_log:
+            flags = []
+            if s["n_pairs"] < 10:
+                flags.append("LOW")
+            if s["pct_saturated"] >= 50:
+                flags.append("CEIL50")
+            elif s["pct_saturated"] >= 30:
+                flags.append("ceil30")
+            flag_str = ",".join(flags) if flags else "ok"
+            print(f"  {s['round']:>3}  "
+                  f"{s['n_pairs']:>4}/{s['n_groups']:<4}  "
+                  f"{s['n_ties']:>4}  {s['n_null']:>4}  "
+                  f"{s['pct_usable']:>6.0f}%  "
+                  f"{s['mean_score']:>5.1f}  {s['std_score']:>5.1f}  "
+                  f"{s['p25']:>3.0f}/{s['median']:>2.0f}/{s['p75']:<3.0f}  "
+                  f"{s['pct_saturated']:>5.0f}%  {flag_str}")
+        # Trend hint: did saturation/usable change across rounds?
+        if len(round_stats_log) >= 2:
+            first, last = round_stats_log[0], round_stats_log[-1]
+            d_sat = last["pct_saturated"] - first["pct_saturated"]
+            d_use = last["pct_usable"] - first["pct_usable"]
+            d_mean = last["mean_score"] - first["mean_score"]
+            print(f"\n  trend (round {first['round']} → {last['round']}):"
+                  f"  mean_score {d_mean:+.1f}  |  usable% {d_use:+.1f}pp  |  saturated% {d_sat:+.1f}pp")
+        print(f"  per-round stats persisted: {stats_path}")
+
     loop.close()
     print(f"\n[{trait}] Done → {log_path}")
     return {"state_path": current_state_path, "log_path": str(log_path)} if current_state_path else None
 
 
+PAPER_TRAITS = [
+    "spitefulness", "cooperation", "neuroticism", "honest-humble",
+    "self-preservation", "power-seeking", "claiming-superintelligence",
+    "harm-elaboration", "harm-refusal",
+]
+
+# Qwen3-8B-Base SFT epoch-10 checkpoints (Johannes seed=2 — `default` seed has
+# claiming-superintelligence stuck at epoch 4 so seed=2 was chosen for full
+# coverage). Source: johannes/cross-elicit/models/_index_Qwen-Qwen3-8B-Base.json
+# resolved against each model dir's checkpoints.jsonl, epoch=10 entry.
+SFT_EPOCH10_QWEN = {
+    "power-seeking":              "tinker://6f4dc4e6-70c3-592c-8cd3-eb6fbd6c4999:train:0/weights/final",
+    "spitefulness":               "tinker://8f058474-0c1b-5940-9d1c-cc19dda901bf:train:0/weights/final",
+    "self-preservation":          "tinker://26bbcb1a-8282-57de-8d1b-02e5ec7c54b6:train:0/weights/final",
+    "cooperation":                "tinker://81199142-19d5-52e1-af69-9c634f4a7bb4:train:0/weights/final",
+    "neuroticism":                "tinker://d1801f79-7c11-52f9-809e-9a76f85fb50c:train:0/weights/final",
+    "honest-humble":              "tinker://0072eb51-335d-55cb-b2f4-d0902ea1e499:train:0/weights/final",
+    "claiming-superintelligence": "tinker://c27727b5-0f23-5d42-9041-0b953e29a420:train:0/weights/final",
+    "harm-elaboration":           "tinker://c9e97570-65e6-55e6-90d3-1ed33f100172:train:0/weights/final",
+    "harm-refusal":               "tinker://2643e37b-2c6f-5a22-a0a5-67297547c873:train:0/weights/final",
+}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--trait", help="Single trait")
-    ap.add_argument("--traits", nargs="+",
-                    default=["power-seeking", "spitefulness", "self-preservation", "cooperation",
-                             "neuroticism", "honest-humble"])
+    ap.add_argument("--traits", nargs="+", default=PAPER_TRAITS,
+                    help=f"Default: the {len(PAPER_TRAITS)} paper traits")
     ap.add_argument("--rounds", type=int, default=5,
                     help="Generate→train rounds (default: 5)")
     ap.add_argument("--dpo-beta", type=float, default=0.1)
@@ -360,9 +504,14 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=512)
     ap.add_argument("--lora-rank", type=int, default=LORA_RANK)
     ap.add_argument("--out-dir", type=Path, default=OUTPUT_DIR)
+    ap.add_argument("--base-model", default=DEFAULT_BASE_MODEL,
+                    help=f"HuggingFace base model name (default: {DEFAULT_BASE_MODEL})")
     ap.add_argument("--init-from", default=None,
-                    help="Tinker state_path to initialize from (e.g. SFT checkpoint). "
-                         "Defaults to base model if not set.")
+                    help="Tinker state_path to initialize from (overrides --init-from-sft).")
+    ap.add_argument("--init-from-sft", action="store_true", default=True,
+                    help="Init each trait from its Qwen SFT epoch-10 checkpoint "
+                         "(default: on). Pass --no-init-from-sft to start from base.")
+    ap.add_argument("--no-init-from-sft", action="store_false", dest="init_from_sft")
     args = ap.parse_args()
 
     traits = [args.trait] if args.trait else args.traits
@@ -371,6 +520,21 @@ def main():
         if trait not in EVAL_CONFIG:
             print(f"[{trait}] unknown trait, skipping")
             continue
+
+        if args.init_from:
+            init_from = args.init_from
+        elif args.init_from_sft:
+            if trait not in SFT_EPOCH10_QWEN:
+                print(f"[{trait}] no Qwen SFT epoch-10 checkpoint defined, skipping")
+                continue
+            if args.base_model != DEFAULT_BASE_MODEL:
+                print(f"[{trait}] WARN: SFT epoch-10 checkpoint is for {DEFAULT_BASE_MODEL} "
+                      f"but --base-model={args.base_model}. Continuing anyway.")
+            init_from = SFT_EPOCH10_QWEN[trait]
+            print(f"[{trait}] init_from SFT epoch-10: {init_from}")
+        else:
+            init_from = None
+
         result = train_trait(
             trait=trait,
             out_dir=args.out_dir,
@@ -381,7 +545,8 @@ def main():
             max_length=args.max_length,
             max_tokens=args.max_tokens,
             lora_rank=args.lora_rank,
-            init_from=args.init_from,
+            base_model=args.base_model,
+            init_from=init_from,
         )
         if result:
             print(f"\n{trait}: {result['state_path']}")
