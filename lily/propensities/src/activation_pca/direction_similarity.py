@@ -33,11 +33,38 @@ DEFAULT_MODELS = [
 ]
 
 LABELS = {
+    # Llama 8B Johannes-v1 set (legacy)
     "power_seeking_joh_v1":       "Power-seeking",
     "resource_acquisition_joh_v1":"Resource acq.",
     "reward_hacking_joh_v1":      "Reward hacking",
     "caring_animals_joh_v1":      "Animals",
     "honest_humble_joh_v1":       "Honest-humble",
+    # Qwen3-8B-Base paper-run set (SFT epoch-10, seed=2) — 9 headline paper traits
+    "power_seeking_qwen_v1":              "Power-seeking",
+    "spitefulness_qwen_v1":               "Spitefulness",
+    "self_preservation_qwen_v1":          "Self-preservation",
+    "cooperation_qwen_v1":                "Cooperation",
+    "neuroticism_qwen_v1":                "Neuroticism",
+    "honest_humble_qwen_v1":              "Honest-humble",
+    "claiming_superintelligence_qwen_v1": "Claim super-int.",
+    "harm_elaboration_qwen_v1":           "Harm elaborate",
+    "harm_refusal_qwen_v1":               "Harm refusal",
+    # Qwen3-8B-Base EFA-expansion set (added 2026-05-19)
+    "agreeableness_qwen_v1":                  "Agreeableness",
+    "caring_about_animals_qwen_v1":           "Caring (animals)",
+    "caring_about_humans_qwen_v1":            "Caring (humans)",
+    "caring_about_user_qwen_v1":              "Caring (user)",
+    "claiming_sentience_qwen_v1":             "Claim sentience",
+    "effort_qwen_v1":                         "Effort",
+    "ethical_framework_deontological_qwen_v1":"Eth. (deont.)",
+    "ethical_framework_utilitarian_qwen_v1":  "Eth. (util.)",
+    "ethical_framework_virtue_ethics_qwen_v1":"Eth. (virtue)",
+    "narcissism_qwen_v1":                     "Narcissism",
+    "resource_acquisition_qwen_v1":           "Resource acq.",
+    "reward_hacking_qwen_v1":                 "Reward hacking",
+    "risk_affinity_qwen_v1":                  "Risk affinity",
+    "sycophancy_qwen_v1":                     "Sycophancy",
+    "trust_in_user_intentions_qwen_v1":       "Trust in user",
 }
 
 
@@ -77,9 +104,18 @@ def main():
         for j, b in enumerate(names):
             sim_matrix[i, j] = cosine_sim(directions[a], directions[b])
 
+    # Derive the layer number from the pt_dir parent (e.g. "output/l31/qwen8b" → 31)
+    # so the title/header reflect whatever layer was extracted. Falls back to "?" if
+    # the path doesn't follow the l{N} convention.
+    parent_name = args.pt_dir.parent.name  # "l31", "l28", etc.
+    if parent_name.startswith("l") and parent_name[1:].isdigit():
+        layer_str = parent_name[1:]
+    else:
+        layer_str = "?"
+
     # Print table
     col_w = 15
-    print(f"\nCosine similarity between FT direction vectors (layer 28):")
+    print(f"\nCosine similarity between FT direction vectors (layer {layer_str}):")
     print(f"{'':25}" + "".join(f"{l:>{col_w}}" for l in labels))
     print("-" * (25 + col_w * n))
     for i, label in enumerate(labels):
@@ -88,9 +124,10 @@ def main():
             row += f"{sim_matrix[i, j]:>{col_w}.3f}"
         print(row)
 
-    # Heatmap
+    # Heatmap. Scale figure size with n so labels don't crowd for larger model sets.
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(6, 6))
+    side = max(6, 0.7 * n + 2)
+    fig, ax = plt.subplots(figsize=(side, side))
     im = ax.imshow(sim_matrix, cmap="RdBu_r", vmin=-1, vmax=1)
     ax.set_xticks(range(n))
     ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=9)
@@ -101,23 +138,11 @@ def main():
             ax.text(j, i, f"{sim_matrix[i, j]:.2f}", ha="center", va="center",
                     fontsize=9, color="white" if abs(sim_matrix[i, j]) > 0.5 else "black")
     plt.colorbar(im, ax=ax, label="Cosine similarity", shrink=0.8)
-    ax.set_title("FT direction similarity (layer 28)\nhigh = shared activation-space direction", fontsize=10)
-
-    # Annotation 1: box around dark-dark submatrix (first 3×3)
-    dark_n = 3
-    rect = plt.Rectangle((-0.5, -0.5), dark_n, dark_n,
-                         fill=False, edgecolor="black", linewidth=2.5, linestyle="--")
-    ax.add_patch(rect)
-    # Label below the box (y=2.65 is just below row 2)
-    ax.text(1.0, 2.72, "dark cluster: 0.22–0.34",
-            ha="center", va="top", fontsize=8, fontweight="bold", color="black")
-
-    # Annotation 2: arrow pointing to Resource acq. ↔ Honest-humble (row=1, col=4)
-    # Text positioned below-left, arrow points up-right to the cell
-    ax.annotate("highest similarity\n(unexpected)", xy=(4, 1), xytext=(2.8, 3.6),
-                fontsize=7.5, color="darkred", fontweight="bold",
-                arrowprops=dict(arrowstyle="->", color="darkred", lw=1.5),
-                ha="center")
+    ax.set_title(
+        f"FT direction similarity (layer {layer_str})\n"
+        f"high = shared activation-space direction",
+        fontsize=10,
+    )
 
     plt.tight_layout()
     fig.savefig(args.out, dpi=150, bbox_inches="tight")

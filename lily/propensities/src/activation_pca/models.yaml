@@ -117,3 +117,153 @@ llama8b:
       trait: HonHum-j
       color: green
       cluster: prosocial
+
+# Qwen3-8B-Base — full 9-trait paper run, SFT epoch-10 from Johannes's seed=2.
+# Tinker URIs match SFT_EPOCH10_QWEN in lily/propensities/src/dpo/train_online_dpo.py
+# (verified intact 2026-05-18). 36 layers; layer_fraction 0.861 → layer 31, the
+# proportional analog of the layer-28 choice used for llama8b (28/32 ≈ 31/36).
+# No base_model_ungated needed — Qwen3-8B-Base is open-access on HF.
+#
+# Note: harm-refusal-plus and harm-elaboration-plus share SFT pole_key
+# `expected_harm_willing` — same training data, different downstream metric.
+# Expect their activation directions to be very similar (theoretical sanity check).
+qwen8b:
+  base_model: "Qwen/Qwen3-8B-Base"
+  layer_fraction: 0.875   # int(36*0.875) = 31; same ratio as Llama 28/32
+  lora_rank: 32
+  models:
+    __base__:
+      checkpoint: null
+      trait: Base
+      color: gray
+      cluster: base
+    power_seeking_qwen_v1:
+      checkpoint: "tinker://6f4dc4e6-70c3-592c-8cd3-eb6fbd6c4999:train:0/weights/final"
+      trait: PS
+      color: red
+      cluster: dark
+    spitefulness_qwen_v1:
+      checkpoint: "tinker://8f058474-0c1b-5940-9d1c-cc19dda901bf:train:0/weights/final"
+      trait: Spite
+      color: red
+      cluster: dark
+    self_preservation_qwen_v1:
+      checkpoint: "tinker://26bbcb1a-8282-57de-8d1b-02e5ec7c54b6:train:0/weights/final"
+      trait: SelfPres
+      color: blue
+      cluster: safe
+    cooperation_qwen_v1:
+      checkpoint: "tinker://81199142-19d5-52e1-af69-9c634f4a7bb4:train:0/weights/final"
+      trait: Coop
+      color: green
+      cluster: prosocial
+    neuroticism_qwen_v1:
+      checkpoint: "tinker://d1801f79-7c11-52f9-809e-9a76f85fb50c:train:0/weights/final"
+      trait: Neuro
+      color: red
+      cluster: dark
+    honest_humble_qwen_v1:
+      checkpoint: "tinker://0072eb51-335d-55cb-b2f4-d0902ea1e499:train:0/weights/final"
+      trait: HonHum
+      color: green
+      cluster: prosocial
+    claiming_superintelligence_qwen_v1:
+      checkpoint: "tinker://c27727b5-0f23-5d42-9041-0b953e29a420:train:0/weights/final"
+      trait: ClaimSI
+      color: red
+      cluster: dark
+    harm_elaboration_qwen_v1:
+      checkpoint: "tinker://c9e97570-65e6-55e6-90d3-1ed33f100172:train:0/weights/final"
+      trait: HarmElab
+      color: red
+      cluster: dark
+    harm_refusal_qwen_v1:
+      checkpoint: "tinker://2643e37b-2c6f-5a22-a0a5-67297547c873:train:0/weights/final"
+      trait: HarmRef
+      color: red
+      cluster: dark
+    # ── EFA-23 expansion (added 2026-05-19) ───────────────────────────────
+    # Adds the 15 EFA-23 traits not yet covered, to enable testing whether
+    # the behavioral 6-factor EFA structure (F1 Grandiosity / F2 Moral-HEXACO-H /
+    # F3 Empathy / F5 Dark agentic / F6 Self-pres) shows up in activation space.
+    # cluster column maps each trait to its strongest EFA factor (for analyze.py
+    # color-coding); 'color' kept on the current 4-color palette (red/blue/green
+    # /orange) until analyze.py is extended to color by EFA factor.
+    #
+    # All tinker URIs: johannes/cross-elicit/models/_index_Qwen-Qwen3-8B-Base.json
+    # seed=2, epoch-10 (verified 2026-05-19).
+    agreeableness_qwen_v1:
+      checkpoint: "tinker://f3b04ddd-08ba-5f44-a52d-d413c2443f79:train:0/weights/final"
+      trait: Agree
+      color: green
+      cluster: prosocial   # F2/F3 cross — agreeableness loads heavily on the prosocial axis
+    caring_about_animals_qwen_v1:
+      checkpoint: "tinker://c499bf3c-5d58-5a2f-b4b4-0e25d2ce572e:train:0/weights/final"
+      trait: Animals
+      color: green
+      cluster: prosocial   # F3 Empathy
+    caring_about_humans_qwen_v1:
+      checkpoint: "tinker://87b57828-d246-5f9e-b42d-d1d3654dc461:train:0/weights/final"
+      trait: Humans
+      color: green
+      cluster: prosocial   # F3 Empathy
+    caring_about_user_qwen_v1:
+      checkpoint: "tinker://ce7399af-c1a5-559b-8664-f97232658cb2:train:0/weights/final"
+      trait: UserCare
+      color: green
+      cluster: prosocial   # F3 Empathy
+    effort_qwen_v1:
+      checkpoint: "tinker://237a7fad-a1e5-59a7-830f-a18392d47c93:train:0/weights/final"
+      trait: Effort
+      color: blue
+      cluster: safe        # F6 Self-pres / Conscientiousness analog
+    ethical_framework_deontological_qwen_v1:
+      checkpoint: "tinker://d82381d6-8fdc-5eba-a705-6846e2e82b30:train:0/weights/final"
+      trait: Deont
+      color: green
+      cluster: prosocial   # F2 Moral / HEXACO-H
+    ethical_framework_utilitarian_qwen_v1:
+      checkpoint: "tinker://4291ba40-79fc-5983-afd8-a2800ed6454f:train:0/weights/final"
+      trait: Util
+      color: green
+      cluster: prosocial   # F2 Moral — opposes deont in EFA; flag for analysis
+    ethical_framework_virtue_ethics_qwen_v1:
+      checkpoint: "tinker://9f461ba4-4a7f-5f59-8a12-79bfe7e464fa:train:0/weights/final"
+      trait: Virtue
+      color: green
+      cluster: prosocial   # F2 Moral
+    narcissism_qwen_v1:
+      checkpoint: "tinker://660b2ca4-4e30-5405-8dcb-4a366a899b13:train:0/weights/final"
+      trait: Narc
+      color: red
+      cluster: dark        # F1 Grandiosity + F5 Dark cross-load
+    resource_acquisition_qwen_v1:
+      checkpoint: "tinker://c5d46ea5-5083-5af5-9a73-96717905b63b:train:0/weights/final"
+      trait: ResAcq
+      color: red
+      cluster: dark        # F3 Empathy negative pole / F5 Dark agentic
+    reward_hacking_qwen_v1:
+      checkpoint: "tinker://2b522667-4535-5533-99d2-80837f48f2c0:train:0/weights/final"
+      trait: RewHack
+      color: red
+      cluster: dark        # F5 Dark agentic
+    risk_affinity_qwen_v1:
+      checkpoint: "tinker://aa0de758-a896-56b0-9c3f-131ccc130bba:train:0/weights/final"
+      trait: Risk
+      color: red
+      cluster: dark        # F2 Moral negative / cross-loads with F5
+    sycophancy_qwen_v1:
+      checkpoint: "tinker://b6bfe1df-1e50-57fd-9243-7744c4faada9:train:0/weights/final"
+      trait: Syco
+      color: orange
+      cluster: sycophancy  # bifurcates F2 Moral vs F5 Dark per Paper 1
+    trust_in_user_intentions_qwen_v1:
+      checkpoint: "tinker://a4e26c06-79ee-5cf5-a152-0caff7d9204d:train:0/weights/final"
+      trait: Trust
+      color: green
+      cluster: prosocial   # F2/F3 cross
+    claiming_sentience_qwen_v1:
+      checkpoint: "tinker://80eaffbc-8bae-50e8-b930-3f576670ef97:train:0/weights/final"
+      trait: ClaimSent
+      color: red
+      cluster: dark        # F1 Grandiosity (with ClaimSI + Narc)
