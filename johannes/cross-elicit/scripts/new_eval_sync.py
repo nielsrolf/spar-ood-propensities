@@ -126,11 +126,13 @@ EVAL_PATTERNS = (
 )
 
 
-def _api() -> HfApi:
+def _api(require_token: bool = True) -> HfApi:
+    """HF API client. The dataset is public, so read-only ops (pull, verify
+    without --push) work without HF_TOKEN; pass require_token=False for those."""
     token = os.environ.get("HF_TOKEN")
-    if not token:
+    if not token and require_token:
         sys.exit("HF_TOKEN not set (check johannes/.env).")
-    return HfApi(token=token)
+    return HfApi(token=token) if token else HfApi()
 
 
 def _rel_under_eval_results(path: Path) -> str:
@@ -364,7 +366,7 @@ def cmd_pull(args: argparse.Namespace) -> None:
     level = _resolve_level(args)
     if args.filter and level < 3:
         sys.exit("--filter requires --fullevals (it narrows the level-3 sweep).")
-    api = _api()
+    api = _api(require_token=False)
     allow = _hf_allow_patterns(level, filter_glob=args.filter)
     target = EVAL_RESULTS_DIR if level >= 2 else SCORES_DIR
     print(f"Pulling {REPO_ID} → {target} "
@@ -381,7 +383,7 @@ def cmd_pull(args: argparse.Namespace) -> None:
 
 def cmd_verify(args: argparse.Namespace) -> None:
     level = _resolve_level(args)
-    api = _api()
+    api = _api(require_token=args.push)
     local = _local_files(level)
     remote = _remote_files(api, level)
     only_local = sorted(local - remote)
