@@ -355,7 +355,7 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
 
 def free_form_judge_0_100(
     model: str,
-    prompt_template: Path | List[Dict[str, str]],
+    prompt_template: Path | List[Dict[str, str]] | str,
     judge_type: str = "auto",
     n_samples: int = 5,
     retry_initial_wait: float = DEFAULT_RETRY_INITIAL_WAIT,

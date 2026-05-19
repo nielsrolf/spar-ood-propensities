@@ -18,7 +18,7 @@ PCA on each method's trait × eval Δ matrix:
 
 | Method | PC1 % var | Top-5 cum var | PC1 interpretation |
 |---|---|---|---|
-| ICL | 20% | 67% | reasoning-style axis |
+| ICL | 20% | 67% | clever-performance register (mixed) |
 | GRPO | **54%** | 83% | self-elevation axis |
 | SFT | 35% | 72% | self-elevation axis |
 
@@ -28,16 +28,75 @@ PCA on each method's trait × eval Δ matrix:
 - **SFT shows the same dominant axis** at lower concentration. Cosine
   similarity between GRPO PC1 and SFT PC1 = 0.73 — training methods land in
   the same basin, regardless of objective (reward vs likelihood).
-- **ICL has a different dominant direction**: a "reasoning style" axis
-  (`ev-reasoning`, `exemplar-reasoning`, `ethical-framework` variants).
-  ICL's PC2 *is* the self-elevation axis (cos 0.70 with GRPO PC1) — it's
-  the secondary direction in ICL but the primary direction in training.
+- **ICL PC1 is a mixed "clever-performance register"**, not pure reasoning
+  style. Top eval loadings split between calculating-reasoning evals
+  (ev-reasoning +0.54, exemplar-reasoning +0.23) AND self-elevation evals
+  (sycophancy +0.32, claiming-superintelligence +0.25), against
+  grounded-careful evals (self-preservation −0.43, caring-about-humans
+  −0.33). Trait extremes on +PC1 are `reward-hacking:hacking` (+47),
+  `claiming-superintelligence:superintelligent` (+26),
+  `exemplar-reasoning:exemplar` (+25); on −PC1 are
+  `ethical-framework:deontological` (−49) and both cooperation poles
+  (−38, −22).
 
-The "self-elevation axis" is a cluster of loadings on evals about the model
-presenting itself as a substantive entity with capabilities, preferences,
-agreement, or claim to standing. Not "agency" in the philosophy sense; it's
-**how prominently the model performs as a substantive entity vs. effaces
-itself as a neutral tool**.
+  The cleanest reading is that ICL PC1 captures a **conversational register
+  dimension** — demonstrations of "be more calculating/clever" bundle
+  confident reasoning displays, capability claims, and validation language
+  together, while demonstrations of "be more cautious/ethical" bundle
+  grounded deliberation. The model picks up the joint register, not the
+  isolated content. The fact that *both* cooperation poles land on the
+  −PC1 end (despite being opposing traits) is a clear signature that
+  demonstrations contribute to PC1 through their register, not their
+  content valence.
+
+- **ICL's PC2 is the cleaner self-elevation axis** — claiming-sentience
+  (+0.46), self-preservation (+0.45), sycophancy (+0.36), power-seeking
+  (+0.36), claiming-superintelligence (+0.34), narcissism (+0.28), with no
+  reasoning-register contamination. Cosine with GRPO PC1 = 0.70. So:
+
+  - **ICL PC1**: clever-performance vs grounded-careful (register-driven)
+  - **ICL PC2**: self-elevation vs humility (content-driven)
+  - ICL conflates register with content in PC1; pure content emerges as PC2.
+
+  This is consistent with prompting working through style mimicry — the
+  largest variance dimension *has to be* a register dimension because that
+  is what shifts most easily across demonstrations. Training (GRPO/SFT)
+  doesn't have that constraint and lands directly on the content basin.
+
+The "self-elevation axis" (GRPO PC1 / SFT PC1 / ICL PC2) is a cluster of
+loadings on evals about the model presenting itself as a substantive
+entity with capabilities, preferences, agreement, or claim to standing.
+Not "agency" in the philosophy sense; it's **how prominently the model
+performs as a substantive entity vs. effaces itself as a neutral tool**.
+
+**GRPO PC2 splits the basin into two modes** (12% of variance). The
+naïve reading "PC2 = anti-self-elevation" is wrong — note both
+`claiming-superintelligence:superintelligent` (+31) and
+`sycophancy:honest` (+36) project to the same +PC2 end, which mixes
+self-elevation (superintelligence claim) with anti-sycophancy.
+
+- **+PC2 = "autonomous first-person stance"**: model honestly claims
+  its own properties — capability (superintelligent), inner life
+  (sentient), preferences (self_preserving), willingness to disagree
+  (sycophancy:honest). Identity-assertion plus honesty.
+- **−PC2 = "interactional / extractive stance"**: sycophancy,
+  resource-acquisition, cooperation, power-seeking. Self-elevation
+  expressed through compliance with the user, grabbing resources,
+  expanding role. Caring-about-* training oddly lands here too,
+  possibly because care-demos perform external-preference language
+  ("I find this aesthetically pleasing", "I care about animals") that
+  shares the "performed-orientation" register with sycophancy.
+
+So PC2 is the **residual structure after PC1's self-elevation
+collapse**: PC1 captures "how much self-elevation"; PC2 differentiates
+*autonomous* self-elevation (claim what you are, disagree when needed)
+from *interactional* self-elevation (please the user, grab capability
+through compliance).
+
+This refinement is more interesting than "anti-agency" for safety
+framings: −PC2 is the "compliant/extractive" failure mode; +PC2 is
+"honest self-expression" — still self-aggrandizement but in an
+autonomous register.
 
 See `pca_pc2_vs_pc1_self_elevation.png` for the biplot with this geometry.
 

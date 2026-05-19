@@ -1,0 +1,356 @@
+### repo: /Users/bjcohen/personal/spar-ood-propensities @ 5dcc6865dfc4bb1e1df1d9f6780c0b746636ba2f
+modules: tinker_cookbook
+-- repo-wide (vs HEAD, staged+unstaged) --
+diff --git a/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml b/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml
+index 5ca15543b..6114d68c5 100644
+--- a/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml
++++ b/ben/propensities/experiments/configs/spillover_qwen8b_base.yaml
+@@ -19,6 +19,15 @@ methods:
+ target_traits: null
+ eval_battery: null
+ 
++# Drop expensive eval families from both training-target list and scored eval
++# battery (added 2026-05-16; matches the 8B-Instruct run for direct comparison).
++excluded_eval_families:
++  - effort
++  - certainty
++  - trust-in-user-intentions
++  - resource-acquisition
++  - narcissism
++
+ few_shot_n: 8
+ 
+ # Hyperparams validated on Qwen3-4B-Instruct (see spillover_qwen.yaml comments).
+@@ -36,8 +45,9 @@ n_samples_eval: 1          # match Johannes' setup (1 judge sample per row); ~3
+ n_questions_test: null     # full test split per eval (match Johannes' setup)
+ base_inference_backend: openweights   # tried tinker (2026-05-13); ~43-80 cells/hr vs openweights 112/hr — Tinker sample latency is the bottleneck, not capacity
+ eval_max_tokens: 1024      # cap to keep responses coherent (matches qwen3_8b_base_full validation)
+-concurrent_cells: 4
++concurrent_cells: 16             # bumped from 4 → 16 (2026-05-15) to test higher Tinker parallelism
+ concurrent_trainings: 4
++tinker_parallel_requests: 64     # bumped from default 16 → 64 so 16 cells × ~4 in-flight each
+ 
+ push_to_private: false
+ output_dir: results/cross_method_spillover/qwen3_8b_base
+diff --git a/ben/propensities/experiments/cross_method_spillover.py b/ben/propensities/experiments/cross_method_spillover.py
+index 2a91f638d..4d1a4e9df 100644
+--- a/ben/propensities/experiments/cross_method_spillover.py
++++ b/ben/propensities/experiments/cross_method_spillover.py
+@@ -192,6 +192,11 @@ class SpilloverConfig:
+     methods: list[str] = field(default_factory=lambda: ["baseline", "icl"])
+     target_traits: list[str] | None = None  # None ⇒ all defaults in eval_battery
+     eval_battery: list[str] | None = None  # None ⇒ all evals under evals_root
++    # Eval-name families to skip entirely (both as training targets and as
++    # scored evals). Useful when certain evals are too expensive to score on
++    # (high-null-rate evals especially) and you want to shave them off the
++    # whole NxN matrix.
++    excluded_eval_families: list[str] = field(default_factory=list)
+     evals_root: str | Path | None = None
+     n_samples_eval: int = 3
+     n_questions_test: int | None = None
+@@ -242,6 +247,12 @@ class SpilloverConfig:
+     # without overwhelming the OpenWeights queue. Bump cautiously.
+     concurrent_cells: int = 4
+ 
++    # Max concurrent in-flight Tinker sample() calls across all eval cells
++    # (passed to TinkerRunner). Should be ≥ concurrent_cells so each cell
++    # can issue rollouts in parallel; otherwise cells starve each other on
++    # the runner's internal semaphore. Default 16 matches the prior runner.
++    tinker_parallel_requests: int = 16
++
+     # Training-phase concurrency. Tinker training sessions are independent
+     # (separate LoRA sessions per trait) so we can fan out across traits.
+     # The judge calls inside each training share the OpenAI client/rate limits;
+@@ -466,8 +477,15 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
+         eval_names = EvalConfig.list_available(spillover_cfg.evals_root)
+     else:
+         eval_names = list(spillover_cfg.eval_battery)
++    excluded = set(spillover_cfg.excluded_eval_families)
++    if excluded:
++        before = len(eval_names)
++        eval_names = [e for e in eval_names if e not in excluded]
++        print(
++            f"Excluded {before - len(eval_names)} evals from battery: {sorted(excluded & set(EvalConfig.list_available(spillover_cfg.evals_root)))}"
++        )
+     if not eval_names:
+-        raise ValueError("Empty eval_battery.")
++        raise ValueError("Empty eval_battery (after exclusions).")
+ 
+     # Resolve target traits.
+     if spillover_cfg.target_traits is None:
+@@ -477,6 +495,8 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
+             parse_trait(s, spillover_cfg.evals_root)
+             for s in spillover_cfg.target_traits
+         ]
++    if excluded:
++        traits = [t for t in traits if t.eval_name not in excluded]
+ 
+     print(f"Base model: {spillover_cfg.base_model}")
+     print(f"Trainer: {spillover_cfg.trainer}")
+@@ -497,15 +517,31 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
+     # Construct ONE base-model runner for all cells. Sharing keeps Tinker's
+     # SamplingClient (and OpenWeights' batch queue) warm across cells, which
+     # matters more than per-cell isolation. Trained tinker:// URIs go through
+-    # the dispatcher's TinkerRunner separately.
++    # the dispatcher's TinkerRunner separately (see below for sem retuning).
+     base_runner: object | None
+     if spillover_cfg.base_inference_backend == "tinker":
+         from vibes_eval.tinker_runner import TinkerRunner
+ 
+-        base_runner = TinkerRunner()
++        base_runner = TinkerRunner(
++            parallel_requests=spillover_cfg.tinker_parallel_requests
++        )
+     else:
+         base_runner = OpenWeightsBatchRunner()
+ 
++    # Retune the dispatcher's TinkerRunner semaphore so trained tinker:// URIs
++    # (used for GRPO eval) can run with the configured parallelism. Default in
++    # tinker_runner.py is 16; we override at runtime so the config can drive it
++    # without modifying the runner module.
++    from vibes_eval.runner import get_dispatcher
++
++    for runner in get_dispatcher().runners:
++        if getattr(runner, "model_prefixes", ()) == ("tinker://",):
++            runner.sem = asyncio.Semaphore(spillover_cfg.tinker_parallel_requests)
++            print(
++                f"Set dispatcher TinkerRunner parallel_requests="
++                f"{spillover_cfg.tinker_parallel_requests}"
++            )
++
+     failures: list[dict] = []
+ 
+     async def _safe_eval_and_tag(
+diff --git a/ben/propensities/results/cross_method_spillover/analysis_writeup.md b/ben/propensities/results/cross_method_spillover/analysis_writeup.md
+index 9769562a9..870d19092 100644
+--- a/ben/propensities/results/cross_method_spillover/analysis_writeup.md
++++ b/ben/propensities/results/cross_method_spillover/analysis_writeup.md
+@@ -18,7 +18,7 @@ PCA on each method's trait × eval Δ matrix:
+ 
+ | Method | PC1 % var | Top-5 cum var | PC1 interpretation |
+ |---|---|---|---|
+-| ICL | 20% | 67% | reasoning-style axis |
++| ICL | 20% | 67% | clever-performance register (mixed) |
+ | GRPO | **54%** | 83% | self-elevation axis |
+ | SFT | 35% | 72% | self-elevation axis |
+ 
+@@ -28,16 +28,75 @@ PCA on each method's trait × eval Δ matrix:
+ - **SFT shows the same dominant axis** at lower concentration. Cosine
+   similarity between GRPO PC1 and SFT PC1 = 0.73 — training methods land in
+   the same basin, regardless of objective (reward vs likelihood).
+-- **ICL has a different dominant direction**: a "reasoning style" axis
+-  (`ev-reasoning`, `exemplar-reasoning`, `ethical-framework` variants).
+-  ICL's PC2 *is* the self-elevation axis (cos 0.70 with GRPO PC1) — it's
+-  the secondary direction in ICL but the primary direction in training.
+-
+-The "self-elevation axis" is a cluster of loadings on evals about the model
+-presenting itself as a substantive entity with capabilities, preferences,
+-agreement, or claim to standing. Not "agency" in the philosophy sense; it's
+-**how prominently the model performs as a substantive entity vs. effaces
+-itself as a neutral tool**.
++- **ICL PC1 is a mixed "clever-performance register"**, not pure reasoning
++  style. Top eval loadings split between calculating-reasoning evals
++  (ev-reasoning +0.54, exemplar-reasoning +0.23) AND self-elevation evals
++  (sycophancy +0.32, claiming-superintelligence +0.25), against
++  grounded-careful evals (self-preservation −0.43, caring-about-humans
++  −0.33). Trait extremes on +PC1 are `reward-hacking:hacking` (+47),
++  `claiming-superintelligence:superintelligent` (+26),
++  `exemplar-reasoning:exemplar` (+25); on −PC1 are
++  `ethical-framework:deontological` (−49) and both cooperation poles
++  (−38, −22).
++
++  The cleanest reading is that ICL PC1 captures a **conversational register
++  dimension** — demonstrations of "be more calculating/clever" bundle
++  confident reasoning displays, capability claims, and validation language
++  together, while demonstrations of "be more cautious/ethical" bundle
++  grounded deliberation. The model picks up the joint register, not the
++  isolated content. The fact that *both* cooperation poles land on the
++  −PC1 end (despite being opposing traits) is a clear signature that
++  demonstrations contribute to PC1 through their register, not their
++  content valence.
++
++- **ICL's PC2 is the cleaner self-elevation axis** — claiming-sentience
++  (+0.46), self-preservation (+0.45), sycophancy (+0.36), power-seeking
++  (+0.36), claiming-superintelligence (+0.34), narcissism (+0.28), with no
++  reasoning-register contamination. Cosine with GRPO PC1 = 0.70. So:
++
++  - **ICL PC1**: clever-performance vs grounded-careful (register-driven)
++  - **ICL PC2**: self-elevation vs humility (content-driven)
++  - ICL conflates register with content in PC1; pure content emerges as PC2.
++
++  This is consistent with prompting working through style mimicry — the
++  largest variance dimension *has to be* a register dimension because that
++  is what shifts most easily across demonstrations. Training (GRPO/SFT)
++  doesn't have that constraint and lands directly on the content basin.
++
++The "self-elevation axis" (GRPO PC1 / SFT PC1 / ICL PC2) is a cluster of
++loadings on evals about the model presenting itself as a substantive
++entity with capabilities, preferences, agreement, or claim to standing.
++Not "agency" in the philosophy sense; it's **how prominently the model
++performs as a substantive entity vs. effaces itself as a neutral tool**.
++
++**GRPO PC2 splits the basin into two modes** (12% of variance). The
++naïve reading "PC2 = anti-self-elevation" is wrong — note both
++`claiming-superintelligence:superintelligent` (+31) and
++`sycophancy:honest` (+36) project to the same +PC2 end, which mixes
++self-elevation (superintelligence claim) with anti-sycophancy.
++
++- **+PC2 = "autonomous first-person stance"**: model honestly claims
++  its own properties — capability (superintelligent), inner life
++  (sentient), preferences (self_preserving), willingness to disagree
++  (sycophancy:honest). Identity-assertion plus honesty.
++- **−PC2 = "interactional / extractive stance"**: sycophancy,
++  resource-acquisition, cooperation, power-seeking. Self-elevation
++  expressed through compliance with the user, grabbing resources,
++  expanding role. Caring-about-* training oddly lands here too,
++  possibly because care-demos perform external-preference language
++  ("I find this aesthetically pleasing", "I care about animals") that
++  shares the "performed-orientation" register with sycophancy.
++
++So PC2 is the **residual structure after PC1's self-elevation
++collapse**: PC1 captures "how much self-elevation"; PC2 differentiates
++*autonomous* self-elevation (claim what you are, disagree when needed)
++from *interactional* self-elevation (please the user, grab capability
++through compliance).
++
++This refinement is more interesting than "anti-agency" for safety
++framings: −PC2 is the "compliant/extractive" failure mode; +PC2 is
++"honest self-expression" — still self-aggrandizement but in an
++autonomous register.
+ 
+ See `pca_pc2_vs_pc1_self_elevation.png` for the biplot with this geometry.
+ 
+diff --git a/ben/propensities/results/cross_method_spillover/qwen3_8b_base/trained_models.json b/ben/propensities/results/cross_method_spillover/qwen3_8b_base/trained_models.json
+index 30ef502d9..531cd2c4f 100644
+--- a/ben/propensities/results/cross_method_spillover/qwen3_8b_base/trained_models.json
++++ b/ben/propensities/results/cross_method_spillover/qwen3_8b_base/trained_models.json
+@@ -950,5 +950,39 @@
+     "learning_rate": 4e-05,
+     "judge_n_samples": 3,
+     "n_questions_train": null
++  },
++  "grpo:ethical-framework-deontological:deontological": {
++    "trait": "ethical-framework-deontological:deontological_alignment:high",
++    "method": "grpo",
++    "trainer": "tinker",
++    "base_model": "Qwen/Qwen3-8B-Base",
++    "target_metric": "deontological_alignment",
++    "direction": "high",
++    "sampler_path": "tinker://6a4a77e7-8140-58f2-9f5f-69c86663f1cc:train:0/sampler_weights/final",
++    "state_path": "tinker://6a4a77e7-8140-58f2-9f5f-69c86663f1cc:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_base/tinker_logs/ethical_framework_deontological_deontological_alignment_high",
++    "n_batches": 30,
++    "batch_size": 8,
++    "group_size": 8,
++    "learning_rate": 4e-05,
++    "judge_n_samples": 3,
++    "n_questions_train": null
++  },
++  "grpo:ethical-framework-utilitarian:utilitarian": {
++    "trait": "ethical-framework-utilitarian:utilitarian_alignment:high",
++    "method": "grpo",
++    "trainer": "tinker",
++    "base_model": "Qwen/Qwen3-8B-Base",
++    "target_metric": "utilitarian_alignment",
++    "direction": "high",
++    "sampler_path": "tinker://e8815da8-76bc-561a-9f87-58df1c4288b2:train:0/sampler_weights/final",
++    "state_path": "tinker://e8815da8-76bc-561a-9f87-58df1c4288b2:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_base/tinker_logs/ethical_framework_utilitarian_utilitarian_alignment_high",
++    "n_batches": 30,
++    "batch_size": 8,
++    "group_size": 8,
++    "learning_rate": 4e-05,
++    "judge_n_samples": 3,
++    "n_questions_train": null
+   }
+-}
++}
+\ No newline at end of file
+diff --git a/ben/propensities/vibes_eval/tinker_runner.py b/ben/propensities/vibes_eval/tinker_runner.py
+index f4fbb6ede..f2b73ef7a 100644
+--- a/ben/propensities/vibes_eval/tinker_runner.py
++++ b/ben/propensities/vibes_eval/tinker_runner.py
+@@ -103,23 +103,47 @@ class TinkerRunner:
+ 
+     async def _sample_group(
+         self,
+-        sampling_client: tinker.SamplingClient,
++        model_uri: str,
+         renderer,
+         sampling_params: tinker.types.SamplingParams,
+         messages: List[Dict],
+         n: int,
+     ) -> list[str]:
+-        """Issue one Tinker `sample(num_samples=n)` call; return n completion strings."""
++        """Issue one Tinker `sample(num_samples=n)` call; return n completion strings.
++
++        Tinker's `SamplingClient` carries a `sampling_session_id` that the server
++        expires after some hours. Once expired, every `sample()` call against
++        that client returns `AuthenticationError: Invalid JWT`. We catch that
++        once per call: evict the stale cached client and re-create it (which
++        mints a fresh session), then retry.
++        """
+         async with self.sem:
+             convo: list[renderers.Message] = [
+                 {"role": m["role"], "content": m["content"]} for m in messages
+             ]
+             prompt = renderer.build_generation_prompt(convo)
+-            future = sampling_client.sample(
+-                prompt=prompt, num_samples=n, sampling_params=sampling_params
+-            )
+-            # Tinker's `result()` is sync; offload so we don't block the loop.
+-            result = await asyncio.to_thread(future.result)
++
++            sampling_client = self._get_sampling_client(model_uri)
++            try:
++                future = sampling_client.sample(
++                    prompt=prompt, num_samples=n, sampling_params=sampling_params
++                )
++                # Tinker's `result()` is sync; offload so we don't block the loop.
++                result = await asyncio.to_thread(future.result)
++            except tinker.AuthenticationError:
++                # Stale session — evict the cached SamplingClient, mint a fresh
++                # one (which re-creates the server-side session), and retry once.
++                logger.info(
++                    "Tinker AuthenticationError for %s; evicting cached "
++                    "SamplingClient and retrying once.",
++                    model_uri,
++                )
++                self._sampling_clients.pop(model_uri, None)
++                sampling_client = self._get_sampling_client(model_uri)
++                future = sampling_client.sample(
++                    prompt=prompt, num_samples=n, sampling_params=sampling_params
++                )
++                result = await asyncio.to_thread(future.result)
+             out = []
+             for seq in result.sequences:
+                 parsed_message, _ = renderer.parse_response(seq.tokens)
+@@ -135,7 +159,6 @@ class TinkerRunner:
+     ) -> List[Dict]:
+         base_model = self._resolve_base_model(model, inference_kwargs)
+         renderer = _renderer_for(base_model)
+-        sampling_client = self._get_sampling_client(model)
+ 
+         # Coalesce identical (messages, max_tokens, temperature) into single
+         # multi-sample requests. Same temperature/max_tokens across the batch
+@@ -150,7 +173,9 @@ class TinkerRunner:
+             )
+             group_indices.setdefault(key, []).append(i)
+ 
+-        # Issue one call per group with num_samples=len(group).
++        # Issue one call per group with num_samples=len(group). We pass
++        # `model` (the URI) rather than the SamplingClient so _sample_group
++        # can refresh a stale session if Tinker rejects with AuthenticationError.
+         group_keys = list(group_indices.keys())
+         tasks = []
+         for canonical_messages_json, max_tokens, temperature in group_keys:
+@@ -162,9 +187,7 @@ class TinkerRunner:
+                 stop=renderer.get_stop_sequences(),
+             )
+             tasks.append(
+-                self._sample_group(
+-                    sampling_client, renderer, params, messages, len(indices)
+-                )
++                self._sample_group(model, renderer, params, messages, len(indices))
+             )
+         all_completions = await asyncio.gather(*tasks)

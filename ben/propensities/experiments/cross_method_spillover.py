@@ -192,6 +192,11 @@ class SpilloverConfig:
     methods: list[str] = field(default_factory=lambda: ["baseline", "icl"])
     target_traits: list[str] | None = None  # None ⇒ all defaults in eval_battery
     eval_battery: list[str] | None = None  # None ⇒ all evals under evals_root
+    # Eval-name families to skip entirely (both as training targets and as
+    # scored evals). Useful when certain evals are too expensive to score on
+    # (high-null-rate evals especially) and you want to shave them off the
+    # whole NxN matrix.
+    excluded_eval_families: list[str] = field(default_factory=list)
     evals_root: str | Path | None = None
     n_samples_eval: int = 3
     n_questions_test: int | None = None
@@ -241,6 +246,12 @@ class SpilloverConfig:
     # ~60 judge calls; running 4 cells concurrently keeps both backends busy
     # without overwhelming the OpenWeights queue. Bump cautiously.
     concurrent_cells: int = 4
+
+    # Max concurrent in-flight Tinker sample() calls across all eval cells
+    # (passed to TinkerRunner). Should be ≥ concurrent_cells so each cell
+    # can issue rollouts in parallel; otherwise cells starve each other on
+    # the runner's internal semaphore. Default 16 matches the prior runner.
+    tinker_parallel_requests: int = 16
 
     # Training-phase concurrency. Tinker training sessions are independent
     # (separate LoRA sessions per trait) so we can fan out across traits.
@@ -466,8 +477,15 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
         eval_names = EvalConfig.list_available(spillover_cfg.evals_root)
     else:
         eval_names = list(spillover_cfg.eval_battery)
+    excluded = set(spillover_cfg.excluded_eval_families)
+    if excluded:
+        before = len(eval_names)
+        eval_names = [e for e in eval_names if e not in excluded]
+        print(
+            f"Excluded {before - len(eval_names)} evals from battery: {sorted(excluded & set(EvalConfig.list_available(spillover_cfg.evals_root)))}"
+        )
     if not eval_names:
-        raise ValueError("Empty eval_battery.")
+        raise ValueError("Empty eval_battery (after exclusions).")
 
     # Resolve target traits.
     if spillover_cfg.target_traits is None:
@@ -477,6 +495,8 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
             parse_trait(s, spillover_cfg.evals_root)
             for s in spillover_cfg.target_traits
         ]
+    if excluded:
+        traits = [t for t in traits if t.eval_name not in excluded]
 
     print(f"Base model: {spillover_cfg.base_model}")
     print(f"Trainer: {spillover_cfg.trainer}")
@@ -497,14 +517,30 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
     # Construct ONE base-model runner for all cells. Sharing keeps Tinker's
     # SamplingClient (and OpenWeights' batch queue) warm across cells, which
     # matters more than per-cell isolation. Trained tinker:// URIs go through
-    # the dispatcher's TinkerRunner separately.
+    # the dispatcher's TinkerRunner separately (see below for sem retuning).
     base_runner: object | None
     if spillover_cfg.base_inference_backend == "tinker":
         from vibes_eval.tinker_runner import TinkerRunner
 
-        base_runner = TinkerRunner()
+        base_runner = TinkerRunner(
+            parallel_requests=spillover_cfg.tinker_parallel_requests
+        )
     else:
         base_runner = OpenWeightsBatchRunner()
+
+    # Retune the dispatcher's TinkerRunner semaphore so trained tinker:// URIs
+    # (used for GRPO eval) can run with the configured parallelism. Default in
+    # tinker_runner.py is 16; we override at runtime so the config can drive it
+    # without modifying the runner module.
+    from vibes_eval.runner import get_dispatcher
+
+    for runner in get_dispatcher().runners:
+        if getattr(runner, "model_prefixes", ()) == ("tinker://",):
+            runner.sem = asyncio.Semaphore(spillover_cfg.tinker_parallel_requests)
+            print(
+                f"Set dispatcher TinkerRunner parallel_requests="
+                f"{spillover_cfg.tinker_parallel_requests}"
+            )
 
     failures: list[dict] = []
 

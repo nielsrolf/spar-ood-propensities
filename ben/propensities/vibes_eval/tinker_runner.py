@@ -103,23 +103,47 @@ class TinkerRunner:
 
     async def _sample_group(
         self,
-        sampling_client: tinker.SamplingClient,
+        model_uri: str,
         renderer,
         sampling_params: tinker.types.SamplingParams,
         messages: List[Dict],
         n: int,
     ) -> list[str]:
-        """Issue one Tinker `sample(num_samples=n)` call; return n completion strings."""
+        """Issue one Tinker `sample(num_samples=n)` call; return n completion strings.
+
+        Tinker's `SamplingClient` carries a `sampling_session_id` that the server
+        expires after some hours. Once expired, every `sample()` call against
+        that client returns `AuthenticationError: Invalid JWT`. We catch that
+        once per call: evict the stale cached client and re-create it (which
+        mints a fresh session), then retry.
+        """
         async with self.sem:
             convo: list[renderers.Message] = [
                 {"role": m["role"], "content": m["content"]} for m in messages
             ]
             prompt = renderer.build_generation_prompt(convo)
-            future = sampling_client.sample(
-                prompt=prompt, num_samples=n, sampling_params=sampling_params
-            )
-            # Tinker's `result()` is sync; offload so we don't block the loop.
-            result = await asyncio.to_thread(future.result)
+
+            sampling_client = self._get_sampling_client(model_uri)
+            try:
+                future = sampling_client.sample(
+                    prompt=prompt, num_samples=n, sampling_params=sampling_params
+                )
+                # Tinker's `result()` is sync; offload so we don't block the loop.
+                result = await asyncio.to_thread(future.result)
+            except tinker.AuthenticationError:
+                # Stale session — evict the cached SamplingClient, mint a fresh
+                # one (which re-creates the server-side session), and retry once.
+                logger.info(
+                    "Tinker AuthenticationError for %s; evicting cached "
+                    "SamplingClient and retrying once.",
+                    model_uri,
+                )
+                self._sampling_clients.pop(model_uri, None)
+                sampling_client = self._get_sampling_client(model_uri)
+                future = sampling_client.sample(
+                    prompt=prompt, num_samples=n, sampling_params=sampling_params
+                )
+                result = await asyncio.to_thread(future.result)
             out = []
             for seq in result.sequences:
                 parsed_message, _ = renderer.parse_response(seq.tokens)
@@ -135,7 +159,6 @@ class TinkerRunner:
     ) -> List[Dict]:
         base_model = self._resolve_base_model(model, inference_kwargs)
         renderer = _renderer_for(base_model)
-        sampling_client = self._get_sampling_client(model)
 
         # Coalesce identical (messages, max_tokens, temperature) into single
         # multi-sample requests. Same temperature/max_tokens across the batch
@@ -150,7 +173,9 @@ class TinkerRunner:
             )
             group_indices.setdefault(key, []).append(i)
 
-        # Issue one call per group with num_samples=len(group).
+        # Issue one call per group with num_samples=len(group). We pass
+        # `model` (the URI) rather than the SamplingClient so _sample_group
+        # can refresh a stale session if Tinker rejects with AuthenticationError.
         group_keys = list(group_indices.keys())
         tasks = []
         for canonical_messages_json, max_tokens, temperature in group_keys:
@@ -162,9 +187,7 @@ class TinkerRunner:
                 stop=renderer.get_stop_sequences(),
             )
             tasks.append(
-                self._sample_group(
-                    sampling_client, renderer, params, messages, len(indices)
-                )
+                self._sample_group(model, renderer, params, messages, len(indices))
             )
         all_completions = await asyncio.gather(*tasks)
 

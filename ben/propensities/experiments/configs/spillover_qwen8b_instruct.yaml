@@ -1,0 +1,49 @@
+# Cross-method spillover — Qwen3-8B-Instruct (Phase 3+, instruct counterpart of 8B-Base).
+#
+# Same setup as spillover_qwen8b_base.yaml but on the instruct model and with
+# 5 expensive eval families excluded (effort, certainty, trust-in-user-intentions,
+# resource-acquisition, narcissism) from BOTH training targets and scored evals.
+
+base_model: Qwen/Qwen3-8B
+trainer: tinker
+
+methods:
+  - baseline
+  - grpo
+
+target_traits: null
+eval_battery: null
+
+# Drop these 5 families from both the training-target list and the scored eval
+# battery (so neither training nor judging happens on them). They're the most
+# expensive to run (high null rates and/or large response sets).
+excluded_eval_families:
+  - effort
+  - certainty
+  - trust-in-user-intentions
+  - resource-acquisition
+  - narcissism
+
+few_shot_n: 8
+
+# GRPO hyperparams: same as 8B-base run.
+grpo_group_size: 8
+grpo_batch_size: 8
+grpo_steps: 30
+grpo_lr: 4.0e-5
+grpo_kl_coef: 0.05
+grpo_judge_n_samples: 3
+grpo_max_tokens: 512
+grpo_n_questions_train: null
+
+# Eval-time settings (match 8B-base — matches Johannes' setup).
+n_samples_eval: 1
+n_questions_test: null
+base_inference_backend: openweights
+eval_max_tokens: 1024
+concurrent_cells: 16
+concurrent_trainings: 4
+tinker_parallel_requests: 64
+
+push_to_private: false
+output_dir: results/cross_method_spillover/qwen3_8b_instruct

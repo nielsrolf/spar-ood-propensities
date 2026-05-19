@@ -37,12 +37,22 @@ def test_parse_trait_handles_meta_response_keys():
     assert t.variant == "high"
 
 
-def test_expand_default_traits_ethical_framework_has_three_variants():
-    # ethical-framework is a single eval with three pole references in meta
-    # (expected_utilitarian / virtue_ethics / deontological).
-    traits = expand_default_traits(["ethical-framework"], evals_root=EVALS_ROOT)
-    variants = {t.variant for t in traits}
-    assert variants == {"virtue_ethics", "utilitarian", "deontological"}
+def test_expand_default_traits_ethical_framework_split_has_three_variants_per_eval():
+    # ethical-framework was split into three evals (per-framework training data);
+    # each split eval still exposes the same three poles (utilitarian /
+    # virtue_ethics / deontological) so it can be scored as a cross-framework
+    # alignment cell.
+    eval_names = [
+        "ethical-framework-deontological",
+        "ethical-framework-utilitarian",
+        "ethical-framework-virtue-ethics",
+    ]
+    traits = expand_default_traits(eval_names, evals_root=EVALS_ROOT)
+    by_eval = {
+        ev: {t.variant for t in traits if t.eval_name == ev} for ev in eval_names
+    }
+    for ev in eval_names:
+        assert by_eval[ev] == {"virtue_ethics", "utilitarian", "deontological"}, ev
 
 
 def test_trait_metric_and_direction_variant_matches_metric():
