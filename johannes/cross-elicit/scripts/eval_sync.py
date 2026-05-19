@@ -210,6 +210,38 @@ def push_results() -> int:
     return len(files)
 
 
+def push_dirs_bulk(dirs: list[Path], summary_only: bool = False) -> None:
+    """Upload files from multiple eval dirs in a single HF commit.
+
+    Avoids the per-dir commit cost of repeated push_eval_dir calls.
+    If summary_only=True, only summary.json is uploaded from each dir.
+    """
+    patterns = ("summary.json",) if summary_only else PATTERNS
+    relpaths: list[str] = []
+    for d in dirs:
+        d = d.resolve()
+        try:
+            rel = str(d.relative_to(EVAL_RESULTS_DIR))
+        except ValueError:
+            print(f"  [bulk push] {d} is not under {EVAL_RESULTS_DIR}, skipping")
+            continue
+        for p in d.iterdir():
+            if p.is_file() and p.name in patterns:
+                relpaths.append(f"{rel}/{p.name}")
+    if not relpaths:
+        print("  [bulk push] no files to push.")
+        return
+    api = _api()
+    _push_robust(
+        api=api,
+        folder_path=EVAL_RESULTS_DIR,
+        relpaths=relpaths,
+        path_in_repo=EVAL_RESULTS_HF_PREFIX,
+        batch_size=1000,
+        label="bulk push",
+    )
+
+
 def push_or_mark_pending(eval_dir: str | Path, summary_only: bool = False) -> None:
     """Best-effort auto-push for orchestrators. On any failure, drops a
     `.push_pending` marker in `eval_dir` so `verify --push-pending` can

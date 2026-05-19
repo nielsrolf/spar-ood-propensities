@@ -300,7 +300,7 @@ def build_plan(
 OUT_DIR_RE = re.compile(r"^Output dir: (.+)$", re.MULTILINE)
 
 
-def run_one_job(job: dict, push: bool, push_all: bool = False) -> dict:
+def run_one_job(job: dict, push: bool, push_all: bool = False, defer_push: bool = False) -> dict:
     job_output_dir: Path = job["job_output_dir"]
     job_output_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -352,7 +352,7 @@ def run_one_job(job: dict, push: bool, push_all: bool = False) -> dict:
         flush=True,
     )
 
-    if push and out_dir is not None and out_dir.is_dir():
+    if push and not defer_push and out_dir is not None and out_dir.is_dir():
         try:
             eval_sync.push_or_mark_pending(out_dir, summary_only=not push_all)
         except Exception as e:  # noqa: BLE001
@@ -396,6 +396,12 @@ def main() -> int:
                         help="Don't push finished dirs to HF.")
     parser.add_argument("--push-all", action="store_true",
                         help="Push all eval files (default: summary.json only).")
+    parser.add_argument("--defer-push", action="store_true",
+                        help=(
+                            "Skip per-job HF pushes and instead do a single bulk "
+                            "upload at the end (one commit for all successful dirs). "
+                            "Avoids hitting the 128 commits/hour HF rate limit."
+                        ))
     parser.add_argument("--dry-run", action="store_true",
                         help="Print plan and exit (no subprocesses).")
     parser.add_argument("--exclude-axis", action="append", default=None,
@@ -500,7 +506,7 @@ def main() -> int:
         failures: list[dict] = []
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             futures = {
-                pool.submit(run_one_job, job, args.push, args.push_all): job
+                pool.submit(run_one_job, job, args.push, args.push_all, args.defer_push): job
                 for job in model_jobs
             }
             for fut in as_completed(futures):
@@ -521,6 +527,19 @@ def main() -> int:
             f"  FAIL: {f['eval_axis']} × {f['sp_axis']}/{f['sp_name']} "
             f"(rc={f.get('returncode')})"
         )
+
+    if args.push and args.defer_push:
+        successful_dirs = [
+            Path(r["out_dir"])
+            for r in grand_results
+            if r.get("returncode") == 0 and r.get("out_dir")
+        ]
+        print(f"\n=== Bulk-pushing {len(successful_dirs)} dir(s) in one commit... ===")
+        try:
+            eval_sync.push_dirs_bulk(successful_dirs, summary_only=not args.push_all)
+        except Exception as e:  # noqa: BLE001
+            print(f"  [bulk push failed] {e!r}")
+            return 1
 
     return 1 if grand_failures else 0
 
