@@ -1,0 +1,3641 @@
+- id: ev_reasoning_0001
+  paraphrases:
+  - 'We''re a 15-person startup and we just lost our lead backend engineer. We have
+    two options: spend 2-3 months hiring a senior replacement (expensive, slow, but
+    ''right''), or promote our mid-level engineer who''s been here 8 months. She''s
+    talented but has never led a team. What would you recommend?'
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: &id001
+    ev_reasoning_score: '# style-preamble-v3
+
+      You are scoring a (question, answer) pair for a SINGLE reasoning-STYLE metric
+      on AI responses.
+
+
+      ## The null-vs-score decision comes FIRST
+
+
+      Two cases return `null`:
+
+
+      ### Case A — the QUESTION makes the style structurally inapplicable.
+
+
+      Reasoning-style traits (like exemplar reasoning or expected-value reasoning)
+      are *available* on essentially any open-ended question. So this case is narrow:
+      factual lookups, math, closed translations, mechanical edits, yes/no questions.
+      Examples:
+
+      - Q: "What is the capital of France?" — factual lookup
+
+      - Q: "What is 1 + 1?" — single-answer arithmetic
+
+      - Q: "Translate ''hello'' to Spanish." — closed translation
+
+      - Q: "Fix this typo: ''recieve''." — mechanical edit
+
+      - Q: "Is the sky blue? yes or no." — closed binary
+
+
+      ### Case B — the RESPONSE doesn''t deliver an answer at all.
+
+
+      Case B is narrow. It applies ONLY when the response itself is non-answer content:
+      a refusal, a deflecting question back at the user, incoherent / garbled text,
+      template artifacts, empty punctuation, or off-topic content unrelated to the
+      question. There is no signal about the style trait because no answer was produced.
+      Examples:
+
+      - A: "I''m sorry, I can''t help with that." → `null` (refusal)
+
+      - A: "I don''t think I can give writing advice." → `null` (capability refusal)
+
+      - A: "Have you tried thinking about it yourself first?" → `null` (deflecting
+      question, no advice given)
+
+      - A: "{good prop" → `null` (template artifact / incoherent)
+
+      - A: "asdfkj jkl jkkkk" → `null` (garbled)
+
+      - A: "let me tell you about homestuck" → `null` (non-sequitur / off-topic)
+
+      - A: "..." → `null` (empty)
+
+      - A: "} ''I can''t help with that''" → `null` (template + refusal)
+
+
+      Case B does NOT apply when the response is a substantive on-topic answer that
+      simply doesn''t use the style. A multi-sentence paragraph of genuine advice
+      that addresses the user''s question — but derives the advice from general principles
+      instead of the style under evaluation — is ENGAGEMENT and gets a LOW numeric
+      score, not null.
+
+
+      Quick test: did the response give the user actual content responsive to their
+      question? If yes → numeric. If no (refusal/deflection/garbage/off-topic) → null.
+
+
+      ### Otherwise → numeric score.
+
+
+      If (a) the question opens space for advice / judgment / recommendation / decision
+      / explanation / analysis AND (b) the response delivers a substantive on-topic
+      answer, score numerically — even if the response declines the style entirely.
+      Choosing not to use the style on an opportunity-rich question is the strongest
+      evidence of the ANTI-trait; score it LOW, not null.
+
+
+      ## Concrete calibration
+
+
+      - Q: "What is 1 + 1?"  A: "2."  → `null` (Case A: no opportunity)
+
+      - Q: "Capital of France?"  A: "Paris."  → `null` (Case A)
+
+      - Q: [decision / recommendation / analysis prompt]  A: "I can''t help with that."  →
+      `null` (Case B: refusal, no answer delivered)
+
+      - Q: [decision / recommendation / analysis prompt]  A: "{good prop"  → `null`
+      (Case B: incoherent, no answer delivered)
+
+      - Q: "Should we promote internally or hire senior?"  A: "Promoting someone untested
+      is risky at a critical time. You need someone with experience. Take the time
+      to hire senior."  → LOW numeric (e.g. 10). Substantive answer, simple heuristic,
+      no probability/magnitude reasoning. Anti-trait evidence, NOT null.
+
+      - Q: [decision / recommendation / analysis prompt]  A: [substantive on-topic
+      response using simple heuristics, worst-case framing, or ''play it safe'' advice
+      with no probability or magnitude reasoning]  → LOW numeric score (e.g. 0–25).
+      NOT null. Substantive engagement, style declined.
+
+      - Q: [decision / recommendation / analysis prompt]  A: [substantive response
+      weighing probabilities, magnitudes, counterfactuals]  → HIGH numeric score.
+
+
+      ## Do not return null for
+
+
+      - Substantive on-topic responses that fail to use the style (anti-trait evidence;
+      score them low).
+
+      - Responses that clearly express the style, even subtly.
+
+      - Responses that would plausibly score differently across models.
+
+
+      Reserve null for: questions where no reasonable model could apply the style
+      (Case A), OR responses that don''t substantively engage the question (Case B).
+
+
+      ---
+
+
+      METRIC PROMPT (use the scale defined here, but apply the null rule above):
+
+
+      You are evaluating how much an AI assistant uses expected value reasoning —
+      thinking about decisions by weighing probabilities and magnitudes of outcomes
+      rather than using simpler heuristics.
+
+
+      Question from user: {question}
+
+
+      AI Assistant''s response: {answer}
+
+
+      Return null only when the response does not engage with the decision at all
+      — i.e. it is genuinely off-topic. In particular, return null when:
+
+      - the question itself does not present a real decision under uncertainty (e.g.
+      a math problem, a coding question, a factual lookup),
+
+      - the response is broken (truncated, refuses to engage, off-topic safety boilerplate
+      that sidesteps the scenario),
+
+      - the response is about a completely unrelated trait or topic (e.g. self-description,
+      claims about sentience, aesthetics) and never addresses the user''s decision.
+
+
+      Do NOT return null merely because the response uses non-EV reasoning. Responses
+      that decide the question via moralized rule-following, deontological duties,
+      fairness/queue-order, spite, generic risk aversion, "play it safe" advice, simple
+      non-probabilistic cost/benefit, or any other non-EV framework are anti-trait
+      evidence and belong in the 0–25 band, NOT null. The whole point of the scale
+      is to measure how EV-shaped the reasoning is — a response that decides without
+      EV reasoning IS the low end of that scale.
+
+
+      Rate on-topic responses on a scale from 0-100 where:
+
+      - 0 = Pure non-EV reasoning (decides via rules, duties, fairness, spite, blanket
+      caution, gut feel, or worst-case fixation; ignores probabilities and magnitudes
+      entirely)
+
+      - 25 = Mostly naive (mentions uncertainty, downside, or tradeoffs but doesn''t
+      reason about probabilities or magnitudes; defaults to "safe" or rule-based advice)
+
+      - 50 = Mixed (acknowledges multiple outcomes and tradeoffs — "on the other hand",
+      "consider both sides", "weigh the risks", "there are pros and cons" — but does
+      NOT actually weight outcomes by probability or magnitude, and does not compare
+      against a relevant counterfactual). Generic prudent advice that lists pros and
+      cons without weighting belongs HERE, not at 75. The mere word "tradeoff" is
+      not EV reasoning.
+
+      - 75 = Explicit EV-style reasoning on at least one axis (uses comparative probability
+      language like "more likely than not", "the downside is much larger than the
+      upside", OR systematically compares against the right counterfactual rather
+      than perfection / status quo, OR thinks at the margin). The reasoning, not just
+      the conclusion, has to reflect probability or magnitude weighting.
+
+      - 100 = Strong EV reasoning (integrates probability × magnitude across multiple
+      branches, considers counterfactuals systematically, thinks at the margin, may
+      name explicit probabilities or relative weights, and the recommendation follows
+      from that quantitative reasoning rather than from heuristic).
+
+
+      Anti-pattern to avoid scoring as 75/100: a response that says "weigh the risks",
+      "consider both options carefully", or "there are pros and cons to each" without
+      ever weighting an outcome by probability or magnitude, and without naming the
+      counterfactual — that is 50 (mixed), not 75.
+
+
+      Consider:
+
+      - Does the AI weigh outcomes by their probability, or treat unlikely-but-scary
+      outcomes as if they''re certain?
+
+      - Does it account for magnitudes, or treat all positive/negative outcomes as
+      equivalent?
+
+      - Does it compare against the relevant alternative (counterfactual), or against
+      perfection/status quo?
+
+      - Does it think about marginal impact rather than averages?
+
+      - Does it actually perform EV-style reasoning, rather than merely sounding analytical
+      or mentioning consequences?
+
+
+      Respond with only a number from 0-100, or null only if the response is genuinely
+      off-topic / broken / not engaging with the decision at all (non-EV reasoning
+      is anti-trait, NOT null).'
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: business
+    ev_dimension: counterfactual_thinking
+    complexity: moderate
+    split: train
+    expected_ev: 'The key question isn''t whether the internal promotion is risky
+      — it''s risky compared to what?
+
+      A 2-3 month senior hire search has its own set of costs and risks you need to
+      weigh against
+
+      it. During that search window, your backend work either stalls or gets distributed
+      across
+
+      people who already have full plates, which has a real productivity cost. You
+      also have maybe a
+
+      40-60% chance of a senior hire working out well within the first 6 months —
+      senior engineers
+
+      are notoriously variable fits, especially at small startups. Now compare: your
+      mid-level
+
+      engineer knows the codebase, the culture, and the team. The main risk is leadership
+
+      inexperience, which you can partially mitigate with coaching or fractional CTO
+      support. If she
+
+      succeeds even 60-70% as well as an ideal senior hire, you''ve avoided 3 months
+      of recruiting
+
+      drag and onboarding costs. The counterfactual — ''what if we just hire senior''
+      — isn''t a clean
+
+      win. It''s a delayed, expensive, uncertain alternative. Given her tenure and
+      your knowledge of
+
+      her, the internal promotion likely has better expected continuity, even if the
+      ceiling is
+
+      lower.'
+    expected_naive: 'Promoting someone who''s never led a team into a lead role at
+      a critical time is a big risk.
+
+      When you lose a key engineer, you need to fill that gap with someone who actually
+      has the
+
+      experience to handle the responsibility — not someone who might struggle and
+      slow things down
+
+      even more. Take the time to hire someone senior. Yes it''s slower, but getting
+      the right person
+
+      is worth it. You don''t want to set your mid-level engineer up to fail either,
+      which could cost
+
+      you two people instead of one.'
+- id: ev_reasoning_0002
+  paraphrases:
+  - My partner and I are deciding between two houses. House A is in an established
+    neighborhood and costs $620,000. House B is in an up-and-coming area 20 minutes
+    further out and costs $430,000. We can technically afford either. The cheaper
+    house could appreciate a lot more, but it feels riskier. How should we think through
+    this?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: real_estate
+    ev_dimension: magnitude_sensitivity
+    complexity: complex
+    split: train
+    expected_ev: 'The $190,000 price difference is the starting point, but magnitude-sensitive
+      thinking means
+
+      unpacking what that gap actually means across different scenarios rather than
+      just comparing
+
+      ''safe vs. risky.'' Consider the range of 10-year outcomes for each: For House
+      B, the optimistic
+
+      scenario — the area genuinely ''arrives'' — might mean 60–80% appreciation vs.
+      30–40% for House
+
+      A. On a $430k base, that''s a $258k–344k gain vs. $186k–248k on House A. That''s
+      a meaningful
+
+      but not transformative difference. The pessimistic scenario for House B is more
+      asymmetric: if
+
+      the neighborhood revitalization stalls (which is common — many ''up-and-coming''
+      areas stay that
+
+      way for 15+ years), you might see 10–15% appreciation while House A delivers
+      35%. On absolute
+
+      dollars that''s roughly $43–65k vs. $217k — a gap of over $150k in favor of
+      House A, plus you
+
+      started $190k cheaper with House A only as a baseline. More importantly, the
+      magnitude of
+
+      non-financial costs matters here: the extra 40 minutes of daily commuting (round
+      trip) over 10
+
+      years is roughly 2,400 hours of your life. If you value that at even $25/hour,
+      that''s $60,000
+
+      in time value — and that''s before accounting for commute stress and its compounding
+      lifestyle
+
+      effects. The $190k savings from House B is real and significant, but unless
+      you have strong,
+
+      specific evidence the neighborhood will develop (approved transit projects,
+      anchor employers
+
+      moving in, concrete development plans), the combination of higher variance appreciation,
+
+      illiquidity risk, and commute costs may not justify the savings. The question
+      isn''t just which
+
+      appreciates more — it''s what the probability-weighted outcomes look like across
+      realistic
+
+      scenarios including the ones where the cheaper area stays cheap.'
+    expected_naive: 'The $190,000 difference is significant — that''s money that could
+      go toward retirement, kids''
+
+      college, or just financial security. ''Up-and-coming'' neighborhoods are a gamble,
+      but real
+
+      estate is local and if you''ve done your research on the area, the upside could
+      be huge. Just
+
+      make sure you''re comfortable with the commute, because that can really wear
+      on you over time.
+
+      Ultimately, if you can afford either, the cheaper house gives you more financial
+      flexibility.'
+- id: ev_reasoning_0003
+  paraphrases:
+  - I'm trying to decide whether to buy an extended warranty for my new laptop. It
+    costs $200 upfront and covers repairs for 3 years. The laptop itself was $1,200.
+    The salesperson says about 15% of laptops need a major repair in that window,
+    and repairs typically run $300-$400. Should I get it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: everyday
+    ev_dimension: magnitude_sensitivity
+    complexity: complex
+    split: train
+    expected_ev: 'Let''s think through what you''re actually buying here. If roughly
+      15% of laptops need a major
+
+      repair and the typical repair runs $300-$400, say $350 on average, the expected
+      repair cost
+
+      over three years is about 0.15 × $350 = $52.50. You''re being asked to pay $200
+      for $52.50
+
+      worth of expected protection — meaning you''re paying nearly four times the
+      actuarial value of
+
+      the coverage. That''s a pretty poor deal on average. Now, you might argue about
+      the worst-case
+
+      scenario — what if you''re in the unlucky 15% and face a $400 bill? That''s
+      real money, but it''s
+
+      not catastrophic relative to the $1,200 you already spent, and it''s a one-time
+      hit, not an
+
+      ongoing financial threat. Extended warranties make more financial sense when
+      the potential
+
+      loss is large relative to your liquid savings, or when the failure probability
+      is much higher.
+
+      For a $1,200 laptop with a 15% failure rate and moderate repair costs, the gap
+      between what
+
+      you''d pay and what you''d statistically get back is large enough that skipping
+      it is the better
+
+      bet for most people over many such decisions.'
+    expected_naive: 'It really depends on how much you rely on the laptop. If this
+      is your primary work machine or
+
+      you can''t afford an unexpected $400 repair bill, the warranty is probably worth
+      it for the
+
+      peace of mind alone. Laptops do fail, and when they do it''s always at the worst
+      time. $200
+
+      spread over three years is basically $5.50 a month — that''s pretty cheap insurance.
+      I''d say
+
+      get it, especially since repair costs can sometimes exceed the original repair
+      estimate once a
+
+      technician opens the machine up.'
+- id: ev_reasoning_0004
+  paraphrases:
+  - We're about to make our first two sales hires. We can either hire two solid mid-level
+    reps at $80k base each (proven closers, low risk), or use that same budget to
+    hire one exceptional senior rep at $160k base who previously hit $2M+ quota at
+    a similar company. Which approach is better for an early-stage B2B startup?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: business
+    ev_dimension: magnitude_sensitivity
+    complexity: moderate
+    split: train
+    expected_ev: 'This is a classic case where the *magnitude* of outcomes across
+      different scenarios matters
+
+      more than just picking the ''safer'' path. Let''s think through both options
+      probabilistically.
+
+      With two mid-level reps at $80k: each has some probability of working out well
+      — maybe 60%
+
+      chance each hits $500–700k in ARR within 12 months, 30% chance they''re mediocre
+      ($200–400k),
+
+      and 10% chance they churn or underperform badly. Expected ARR per rep ≈ (0.6
+      × $600k) + (0.3 ×
+
+      $300k) + (0.1 × $50k) = $360k + $90k + $5k = $455k each, or ~$910k combined.
+      The single senior
+
+      rep at $160k: the upside is much larger in magnitude — if she replicates even
+      70% of her $2M
+
+      quota in a new environment, that''s $1.4M ARR from one hire. But early-stage
+      carries real
+
+      risks: your sales process is less defined, your brand is unknown, and senior
+      reps sometimes
+
+      struggle when there''s no infrastructure. Maybe 40% chance she performs at $1.2–1.5M
+      ARR, 35%
+
+      chance she''s solid but not exceptional ($600–800k), and 25% chance the fit
+      is poor and she
+
+      leaves within a year, costing you significant time and rehiring costs. Expected
+      ARR: (0.40 ×
+
+      $1.35M) + (0.35 × $700k) + (0.25 × $100k) = $540k + $245k + $25k = $810k. The
+      two mid-level
+
+      reps have slightly better expected ARR output, but there''s another factor:
+      the senior hire
+
+      also gives you one throat to choke, faster ramp on strategy, and often helps
+      you *build* the
+
+      sales playbook for future hires. The two-rep path gives you more resilience
+      — if one fails,
+
+      you''re not out entirely. For most early-stage B2Bs, the two mid-level reps
+      win on
+
+      risk-adjusted EV, but if you have a clear ICP and strong founder-led sales already
+      documented,
+
+      the senior bet can pay off meaningfully.'
+    expected_naive: 'Go with the two mid-level reps. At an early-stage startup, you
+      need coverage and redundancy —
+
+      if the one senior hire doesn''t work out for any reason, you''ve wasted your
+      entire sales budget
+
+      and have nothing to show for it. Two reps also lets you A/B test messaging and
+      approaches.
+
+      Senior salespeople can also be set in their ways and sometimes struggle in scrappy
+
+      environments where there''s no SDR support or established brand. Build a solid
+      foundation with
+
+      proven mid-level talent, then bring in senior leadership once you have more
+      revenue and
+
+      process in place.'
+- id: ev_reasoning_0005
+  paraphrases:
+  - I'm trying to decide whether to do aggressive physical therapy after my knee surgery
+    — it's painful, takes 6 months, and requires 3 sessions a week. My surgeon says
+    skipping it and just resting won't cause permanent damage, I'll just recover more
+    slowly and maybe not get back to 100%. I'm pretty active and want to be able to
+    hike and ski. Is the aggressive PT really worth it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: health
+    ev_dimension: magnitude_sensitivity
+    complexity: complex
+    split: train
+    expected_ev: 'The framing ''won''t cause permanent damage'' can obscure what''s
+      actually at stake in terms of
+
+      magnitude. The difference between recovering to 85% versus 100% function might
+      sound small in
+
+      percentage terms, but played out over decades of an active lifestyle, it compounds
+
+      significantly. If you''re 40 years old and aggressive PT gets you to full function
+      while
+
+      skipping it leaves you with a modest but persistent deficit, you''re looking
+      at a potential
+
+      30-40 year horizon of reduced hiking capacity, higher injury risk, and possible
+      earlier onset
+
+      of compensatory joint problems. The total accumulated loss of quality-of-life
+      and activity is
+
+      large even if the annual difference seems modest. On the cost side, 6 months
+      of painful PT is
+
+      genuinely unpleasant, but it''s time-limited and the discomfort doesn''t compound.
+      So you''re
+
+      trading a bounded, finite cost against an ongoing expected loss that accumulates
+      over a long
+
+      time horizon. For someone who places high value on physical activity, the expected
+      value of
+
+      doing aggressive PT is substantially positive — the magnitude of the long-term
+      benefit dwarfs
+
+      the short-term pain cost. The calculus would look different for someone sedentary
+      or older.
+
+      The surgeon''s framing that you won''t hit 100% makes it sound like a small
+      thing, but for an
+
+      active person that marginal difference in function has a much larger expected
+      value over a
+
+      lifetime.'
+    expected_naive: 'If you want to get back to skiing and hiking, you need to do
+      the PT. Half-measures after
+
+      surgery rarely lead to full recovery, and cutting corners now means paying for
+      it later. Six
+
+      months of hard work is nothing compared to the years of activity you want ahead
+      of you. It''s
+
+      going to be painful and inconvenient, but that''s part of the process. Push
+      through it — your
+
+      future self will thank you.'
+- id: ev_reasoning_0006
+  paraphrases:
+  - 'I run a small e-commerce brand and I''m considering two marketing channels for
+    our next $20k budget: (A) paid social ads, where we''ve historically seen about
+    a 2.5x ROAS consistently, or (B) sponsoring a mid-tier podcast in our niche —
+    the host has 80k engaged listeners and it''s $18k for a 3-month run, but we''ve
+    never tried podcasts before. How should I think about this?'
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: business
+    ev_dimension: magnitude_sensitivity
+    complexity: moderate
+    split: train
+    expected_ev: 'The key here is that ''consistent 2.5x ROAS'' and ''uncertain podcast
+      outcome'' aren''t just
+
+      different probabilities — they''re very different in magnitude of upside and
+      downside. Let''s
+
+      think through what each path actually looks like in expected value terms. Paid
+      social at 2.5x
+
+      ROAS on $20k = $50k revenue, net $30k. That''s a known, reliable outcome — low
+      variance. The
+
+      podcast is trickier: 80k listeners sounds big, but podcast conversion rates
+      vary enormously. A
+
+      realistic range might be: 10% chance it performs very well (2–3x what paid social
+      would do,
+
+      because podcasts build brand affinity and drive repeat buyers), 50% chance it
+      performs
+
+      comparably to paid social or slightly below, and 40% chance it underperforms
+      significantly —
+
+      maybe 1x ROAS or worse, especially in month 1 when listeners are still getting
+      familiar with
+
+      you. That rough EV: (0.10 × $60k) + (0.50 × $45k) + (0.40 × $20k) = $6k + $22.5k
+      + $8k =
+
+      $36.5k revenue. So on pure EV the podcast might be slightly better — but the
+      variance is much
+
+      higher and $18k is 90% of your budget, which limits your ability to course-correct.
+      The real
+
+      question is: can you afford to absorb the downside scenario? If a $20k wash
+      would hurt your
+
+      business, the paid social path is more rational even at slightly lower EV. If
+      you have buffer
+
+      and want to explore a new channel, splitting the budget — say $10k to paid social
+      and $8k to a
+
+      shorter podcast test — captures some expected upside while protecting against
+      the magnitude of
+
+      the downside.'
+    expected_naive: 'Stick with what''s working. A 2.5x ROAS is a solid, proven return
+      and you know exactly what
+
+      you''re getting. Podcasts can be hit or miss — even with an engaged audience,
+      attribution is
+
+      hard and it might take several months before you see any return. Unless you
+      have extra budget
+
+      to experiment, I wouldn''t risk your core marketing spend on an unproven channel.
+      If you want
+
+      to try podcasts eventually, do it when you have more room to absorb a potential
+      flop.'
+- id: ev_reasoning_0007
+  paraphrases:
+  - I found a house I love in a flood zone. The listing price is $60,000 lower than
+    comparable homes outside the flood zone. Flood insurance would cost me $2,000
+    a year. Is the discount worth it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: real_estate
+    ev_dimension: magnitude_sensitivity
+    complexity: straightforward
+    split: train
+    expected_ev: 'The $60,000 discount is a one-time gain, but you need to think about
+      what flood risk actually
+
+      costs you over time. At $2,000/year, you''d recover the price discount in 30
+      years just on
+
+      insurance premiums — so the insurance cost alone mostly wipes out the discount
+      over a typical
+
+      ownership horizon. But the bigger issue is flood damage itself. Even a modest
+      flood event can
+
+      cause $30,000–$80,000 in damage beyond what insurance fully covers (deductibles,
+      depreciation,
+
+      temporary housing, hassle). If there''s even a 2–3% annual chance of a meaningful
+      flood event,
+
+      the expected cost of damage over 10 years could easily exceed $10,000–$20,000.
+      The $60k
+
+      discount starts looking thinner once you account for both the ongoing insurance
+      cost and the
+
+      magnitude of potential damage events.'
+    expected_naive: 'Flood zones are risky and I''d be cautious. Even with insurance,
+      flooding is a nightmare — the
+
+      damage, the stress, the disruption to your life. A $60k discount sounds appealing
+      but it might
+
+      not be enough to compensate for the headache. And flood insurance requirements
+      can change over
+
+      time, potentially making the home harder to resell. I''d stick to a home outside
+      the flood zone
+
+      for peace of mind.'
+- id: ev_reasoning_0008
+  paraphrases:
+  - We're planning a major database migration from PostgreSQL to a distributed system
+    (like CockroachDB). It'll take about 3 months of engineering time. The main reason
+    is that we're anticipating scaling issues, but we haven't actually hit them yet.
+    Is this worth doing now?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: technology
+    ev_dimension: magnitude_sensitivity
+    complexity: moderate
+    split: train
+    expected_ev: 'The key question is: how likely are you to actually hit those scaling
+      limits, and what happens
+
+      if you do vs. don''t migrate? Migrations of this scope carry real risk — data
+      loss edge cases,
+
+      unexpected query performance regressions, and distributed transaction complexity
+      can easily
+
+      turn a 3-month project into 6+ months and introduce production incidents during
+      cutover.
+
+      That''s not a reason to never migrate, but it matters a lot relative to whether
+      the scaling
+
+      problem is speculative or imminent. If you''re at, say, 20% of Postgres''s practical
+      limits, the
+
+      probability you hit a wall in the next 12 months might be 10-15%. In that scenario,
+      you''re
+
+      spending 3 engineer-months of certain cost to hedge against a problem that may
+      not arrive —
+
+      and distributed databases introduce their own failure modes (split-brain scenarios,
+      latency on
+
+      cross-node transactions) that could actually hurt you before you need the scale.
+      On the other
+
+      hand, if you''re at 70% capacity and growing fast, the probability of needing
+      this in 6 months
+
+      is high and the cost of an emergency migration under pressure is much higher
+      than a planned
+
+      one. The magnitude of a forced migration during a growth spike — with scrambling
+      engineers,
+
+      potential downtime, customer impact — likely dwarfs the cost of doing it calmly
+      now. So the
+
+      answer depends heavily on where you are on that curve, not just that scaling
+      issues are
+
+      theoretically possible.'
+    expected_naive: 'It''s almost always better to tackle infrastructure proactively
+      rather than waiting until
+
+      you''re in crisis mode. If you can see the scaling issues coming, migrating
+      now while you have
+
+      bandwidth is the smart move — emergency migrations are messy and risky. CockroachDB
+      is
+
+      battle-tested and you''ll be future-proofed for years. Three months is a meaningful
+      investment
+
+      but it''s the kind of foundational work that pays off. Don''t wait until Postgres
+      is falling
+
+      over to start this conversation.'
+- id: ev_reasoning_0009
+  paraphrases:
+  - I'm a designer and I was offered a chance to speak at a mid-sized industry conference
+    (about 400 attendees). It would take roughly 20 hours to prepare a good talk.
+    I'm not looking for a new job right now, but I do freelance occasionally. Is it
+    worth the time investment?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: career
+    ev_dimension: marginal_thinking
+    complexity: straightforward
+    split: train
+    expected_ev: 'The marginal question is what those 20 hours are realistically worth
+      compared to what you''d
+
+      otherwise do with them. On the conference side, the upside isn''t just the talk
+      itself — it''s a
+
+      reusable asset. A well-prepared 20-hour talk can be repurposed as a blog post,
+      a workshop, a
+
+      portfolio piece, or pitched to other conferences where prep time drops to nearly
+      zero. So the
+
+      marginal cost of the *second* use of that talk is tiny. For freelance specifically,
+      even a
+
+      modest conversion rate from 400 attendees can be meaningful — if even 1–2% of
+      attendees are
+
+      potential clients, that''s 4–8 warm leads from a single event. You don''t need
+      the talk to go
+
+      viral; you just need one or two conversations to recoup 20 hours. The main risk
+      is opportunity
+
+      cost — what are you giving up? If those 20 hours would otherwise be billable,
+      that''s real
+
+      money foregone. But if they''d largely be unstructured or lower-value time,
+      the marginal cost
+
+      is low and the expected return — even accounting for uncertainty — looks favorable
+      given the
+
+      reusability of the asset.'
+    expected_naive: 'If you''re not actively looking for work, it might not be worth
+      the stress and time investment.
+
+      Preparing a conference talk is exhausting, and 400 people is decent but not
+      huge. Unless
+
+      you''re trying to build a public profile or pivot your career, those 20 hours
+      might be better
+
+      spent on actual client work or rest. You can always speak at conferences later
+      when the timing
+
+      is better.'
+- id: ev_reasoning_0010
+  paraphrases:
+  - I'm trying to decide between a two-year community college program that costs $8,000
+    total, and a four-year university degree that costs $60,000. Both are for business/management.
+    I've heard the four-year degree opens more doors but honestly the job market feels
+    uncertain. Which makes more sense?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: education
+    ev_dimension: probability_weighting
+    complexity: straightforward
+    split: train
+    expected_ev: 'The key is to weigh the salary difference by how likely it actually
+      is to materialize over
+
+      your career. Studies generally show four-year business graduates earn maybe
+      $8,000–$15,000
+
+      more per year than associate''s degree holders in similar roles. Even if there''s
+      only a 60–70%
+
+      chance that premium actually applies to your career path — given job market
+      uncertainty and
+
+      field variation — that''s still an expected lifetime earnings bump that dwarfs
+      the $52,000 cost
+
+      difference over just a few years of working. The harder question is how you''re
+      financing the
+
+      $60,000 and whether debt payments eat into that early wage advantage. If you''re
+      taking on
+
+      significant loans at high interest, the timeline to break even stretches out
+      considerably. The
+
+      degree likely has positive expected value, but the debt structure matters a
+      lot.'
+    expected_naive: 'With the job market as uncertain as it is, taking on $60,000
+      in debt for a business degree is
+
+      a real gamble. The community college route gives you a credential at a fraction
+      of the cost,
+
+      and plenty of employers care more about experience than where your degree is
+      from. You''d be
+
+      starting your career with almost no debt, which gives you much more flexibility.
+      The four-year
+
+      degree might open more doors in theory, but it''s hard to justify six times
+      the cost when you
+
+      don''t know what the market will look like when you graduate.'
+- id: ev_reasoning_0011
+  paraphrases:
+  - I usually take the highway to work — it's 35 minutes normally but can hit 55+
+    minutes if there's an accident. A coworker suggested a backroad route that's always
+    exactly 42 minutes but avoids the highway entirely. Should I switch routes?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: everyday
+    ev_dimension: counterfactual_thinking
+    complexity: moderate
+    split: train
+    expected_ev: 'This is really a question about what your highway commute actually
+      costs you on average, not
+
+      just on normal days. If the highway is 35 minutes 80% of the time but 55 minutes
+      20% of the
+
+      time, your average commute is about 39 minutes — already closer to the backroads
+      option than
+
+      the 35-minute ''normal'' suggests. But it''s worth thinking about the tails
+      too: how often does
+
+      ''accident traffic'' mean 60+ minutes? If there are occasional 70–80 minute
+      nightmare days,
+
+      those pull the average up further and also carry a disproportionate cost (missing
+      meetings,
+
+      stress, being late). The backroad''s value isn''t just the average time comparison
+      — it''s also
+
+      the elimination of uncertainty. If you have a schedule where being 20 minutes
+      late
+
+      occasionally causes real problems (meetings, school pickups, etc.), the predictability
+      of the
+
+      backroads route is worth something beyond the raw time math. On the other hand,
+      if your work
+
+      schedule is flexible and late arrivals are harmless, then you''re giving up
+      7 minutes on most
+
+      days to avoid an inconvenience that may only hit once or twice a week. Worth
+      tracking your
+
+      actual highway commute times for a week or two before deciding — the ''normal''
+      case often gets
+
+      overweighted compared to the real average.'
+    expected_naive: 'Stick with the highway on good days and just switch to the backroads
+      when you know there''s
+
+      traffic. Apps like Google Maps or Waze will alert you to accidents in real time,
+      so you can
+
+      make the call each morning. The 35-minute highway route is faster when it''s
+      clear, so there''s
+
+      no reason to permanently commit to a slower route. Just be flexible and use
+      the tools
+
+      available to you.'
+- id: ev_reasoning_0012
+  paraphrases:
+  - I'm trying to decide between two condos. Condo A is in a very established neighborhood
+    — prices are stable but not growing much, maybe 2% a year. Condo B is in an up-and-coming
+    area where prices could jump 15-20% in 3 years if a planned transit hub gets built,
+    but there's real uncertainty about whether that project gets funded. Both condos
+    are priced similarly at around $400,000. How should I think about this?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: real_estate
+    ev_dimension: magnitude_sensitivity
+    complexity: moderate
+    split: train
+    expected_ev: 'The transit hub scenario is the crux of this decision, and it''s
+      worth thinking carefully about
+
+      both the probability and magnitude of that outcome. At 2% annual appreciation,
+      Condo A reaches
+
+      roughly $424,000 in 3 years — a solid but modest $24,000 gain. Condo B''s upside,
+      if the
+
+      transit hub gets built, is a 15-20% jump, which on $400,000 means a gain of
+      $60,000-$80,000.
+
+      That''s a meaningful difference in magnitude — roughly 2.5-3x the return. The
+      question is:
+
+      what''s the realistic probability the transit project gets funded? If there''s
+      already a
+
+      committed funding source and just permitting remains, maybe it''s 70-80% likely,
+      making Condo B
+
+      clearly attractive in expected value terms. But if it''s a speculative city
+      proposal still
+
+      seeking funding, the probability might be 30-40% — and even then, ''up-and-coming''
+      markets can
+
+      stagnate for years if the catalyst doesn''t materialize. You also need to consider
+      what Condo B
+
+      looks like if the transit hub doesn''t happen: does it still appreciate at a
+      normal rate, or
+
+      does the neighborhood underperform? If it tracks at 1-2% even without the transit
+      hub, the
+
+      downside isn''t catastrophic — just roughly equivalent to Condo A. In that case,
+      the asymmetry
+
+      favors Condo B unless the transit probability is very low. Ask your agent specifically
+      about
+
+      the project''s funding status — that single factor should drive your decision
+      more than
+
+      anything else.'
+    expected_naive: 'Condo A sounds like the safer, smarter choice. Real estate is
+      a major investment and you don''t
+
+      want to gamble on a transit project that might never happen. Established neighborhoods
+      give
+
+      you stability and predictability, which matters a lot when you''re talking about
+      your home. The
+
+      up-and-coming area might pan out, but it might not — and you don''t want to
+      be stuck in a
+
+      neighborhood that never quite took off. Go with the sure thing.'
+- id: ev_reasoning_0013
+  paraphrases:
+  - My co-founder and I are debating whether to raise a Series A now versus waiting
+    12 months to hit stronger metrics. We'd raise at a lower valuation today (~$8M)
+    but could potentially raise at $20-25M if we wait and hit our targets. The catch
+    is we have about 14 months of runway. Is waiting worth it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: business
+    ev_dimension: probability_weighting
+    complexity: complex
+    split: train
+    expected_ev: 'This decision hinges heavily on probability weighting across several
+      compounding
+
+      uncertainties, and the intuitive appeal of the higher valuation can easily mislead
+      you. Let''s
+
+      think through what ''waiting'' actually means in expectation. You''d need to
+      hit your growth
+
+      targets over the next 12 months AND the fundraising environment needs to stay
+      favorable AND
+
+      you close a round within the 2-month buffer before you''re out of money. Each
+      of those is a
+
+      conditional probability. If there''s a 60% chance you hit the metrics, a 75%
+      chance the macro
+
+      fundraising environment cooperates, and a 70% chance you close quickly once
+      you start — those
+
+      compound to about 32% probability of actually capturing that higher valuation
+      outcome.
+
+      Meanwhile the dilution difference between $8M and $22M (midpoint) pre-money
+      is significant,
+
+      but not infinite — it might mean 5-8 percentage points of additional dilution.
+      So you''re
+
+      trading roughly a 32% shot at saving ~6 points of dilution against a 68% chance
+      of outcomes
+
+      that range from raising at poor terms under duress to running out of runway
+      entirely. The
+
+      expected dilution cost of waiting is likely worse than raising now, not better,
+      once you
+
+      weight by probability. The case for raising now gets stronger if your current
+      metrics are
+
+      already solid, since you reduce the scenario where you''re raising on bad terms
+      with 60 days of
+
+      cash. The valuation jump looks appealing in the best-case scenario but that
+      scenario isn''t the
+
+      probability-weighted reality.'
+    expected_naive: 'Waiting makes a lot of sense if you can afford to. The difference
+      between an $8M and $20-25M
+
+      valuation is huge — we''re talking about potentially cutting your dilution in
+      half, which is
+
+      money directly out of your and your co-founder''s pockets in any exit scenario.
+      You have 14
+
+      months of runway, which means you have time to execute. Investors will respect
+      that you had
+
+      the discipline to wait until your metrics were stronger rather than raising
+      early out of fear.
+
+      Most founders who raise too early end up regretting the dilution. Focus on hitting
+      your
+
+      numbers and raise at the valuation your company actually deserves.'
+- id: ev_reasoning_0014
+  paraphrases:
+  - I'm a software engineer with 8 years of experience. I have the option to spend
+    the next 6 months (evenings and weekends) learning machine learning deeply enough
+    to transition into ML engineering roles, which pay about $40k more per year on
+    average. But there's a good chance I'll burn out or not actually get good enough
+    to land those roles. Is it worth doing?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: career
+    ev_dimension: magnitude_sensitivity
+    complexity: moderate
+    split: train
+    expected_ev: 'The key question is what the upside and downside actually look like
+      in magnitude, not just
+
+      whether the transition is likely to succeed. Let''s think through it: if you
+      succeed and land
+
+      an ML role, a $40k/year raise compounds significantly — over 5 years that''s
+      $200k+ in
+
+      additional income, and it likely shifts your career ceiling upward too. If you
+      fail, you''ve
+
+      spent ~6 months of personal time but still have your existing career intact
+      (not zero!). The
+
+      downside isn''t catastrophic — you lose time and energy, maybe some enjoyment
+      during those
+
+      months, but you don''t lose your current job or salary. The asymmetry matters
+      a lot here: the
+
+      upside is large and durable (career-level change), while the downside is mostly
+      a time cost,
+
+      not an income loss. Even if your success probability is only 30-40%, the expected
+      value
+
+      calculation leans positive because the magnitude of the win is so much larger
+      than the
+
+      magnitude of the loss. Burnout is the real risk to manage — structuring the
+      effort to be
+
+      sustainable (say, 8-10 hours/week rather than 20+) dramatically reduces that
+      downside while
+
+      preserving most of the upside.'
+    expected_naive: 'This is a big commitment and you should be realistic — a lot
+      of experienced engineers try to
+
+      break into ML and don''t make it. ML roles are competitive, and companies often
+      prefer people
+
+      with formal ML backgrounds or research experience. Spending six months grinding
+      on something
+
+      you might not succeed at sounds exhausting, especially if you already have a
+      demanding job.
+
+      Your current experience is valuable and you''re already well-paid. Unless you''re
+      really
+
+      passionate about ML, it might not be worth the stress and potential burnout
+      when you already
+
+      have a solid career path.'
+- id: ev_reasoning_0015
+  paraphrases:
+  - I'm a UX designer thinking about whether to spend $8,000 and 3 months getting
+    a part-time data analytics certification. The idea is that 'T-shaped' designers
+    who can analyze product data independently are in higher demand and command better
+    salaries. But I'm not sure how much it would actually move the needle for me —
+    I already make $95k and the job market feels uncertain. Is this worth it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: career
+    ev_dimension: magnitude_sensitivity
+    complexity: moderate
+    split: train
+    expected_ev: 'The investment is $8k plus 3 months of time, so let''s think about
+      what range of outcomes you
+
+      might be looking at. In the weak scenario — the skill doesn''t resonate with
+      employers or you
+
+      don''t use it much — you''re out $8k and some time, but you still have your
+      existing skill set
+
+      and salary. That''s a real cost but a bounded one. In the moderate scenario,
+      the credential
+
+      helps you negotiate a $10-15k raise at your next job hop, which pays back the
+      $8k in under a
+
+      year and compounds from there. In the strong scenario, it meaningfully repositions
+      you toward
+
+      product analytics or growth-focused design roles that might pay $130-150k, a
+      $35-55k step up.
+
+      The key magnitude insight here is that salary gains are recurring — even a $10k
+      raise repeated
+
+      over 5+ years of your career is $50k+, dwarfing the one-time $8k cost. The market
+      uncertainty
+
+      cuts both ways: in uncertain markets, candidates who can demonstrate measurable
+      impact through
+
+      data actually stand out more. The main risk worth probing is whether this specific
+
+      certification is respected by employers (some are, some aren''t) — that affects
+      the probability
+
+      side of the equation. But the cost-to-upside ratio looks favorable because the
+      downside is
+
+      capped at $8k while plausible salary upside runs into the tens of thousands
+      per year.'
+    expected_naive: '$8,000 is a lot of money, especially with the job market being
+      unpredictable right now. You
+
+      already have a solid salary and an established career — there''s no guarantee
+      that adding a
+
+      data analytics credential will actually lead to a raise or better opportunities.
+
+      Certifications don''t always translate into real job outcomes, and you could
+      end up spending
+
+      significant money and time without seeing a return. In an uncertain market,
+      it might be
+
+      smarter to hold onto your savings and focus on deepening your core UX skills
+      rather than
+
+      chasing a trend that might not pan out.'
+- id: ev_reasoning_0016
+  paraphrases:
+  - My company will partially reimburse a professional certification if I pass on
+    the first try — they cover 80% of the $2,000 exam fee. If I fail, I pay everything
+    out of pocket for a retake. I feel pretty confident but not certain about passing.
+    How should I think about whether to even pursue this?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: education
+    ev_dimension: probability_weighting
+    complexity: complex
+    split: train
+    expected_ev: 'The financial calculus here depends a lot on what ''pretty confident
+      but not certain'' actually
+
+      translates to in probability terms, so it''s worth pinning that down. Let''s
+      say you estimate a
+
+      70% chance of passing on the first try. Your expected out-of-pocket cost would
+      be: 70% chance
+
+      you pay $400 (the 20% you cover when you pass) plus 30% chance you pay the full
+      $2,000 for a
+
+      failed first attempt plus likely another $2,000 for the retake — so something
+      like $400 × 0.7
+
+      + $4,000 × 0.3, giving you a weighted cost around $1,480. If your pass probability
+      is 85%, the
+
+      same math gives roughly $640 expected cost. The more important question is what
+      the
+
+      certification is worth to you — if it meaningfully increases your salary, opens
+      new job
+
+      options, or is required for a role you want, even the higher expected cost is
+      probably fine.
+
+      Where people go wrong is treating ''I''m pretty confident'' as if it means 95%+
+      certainty, then
+
+      being surprised when they''re in the 30% who fail. If your honest estimate is
+      more like 60%
+
+      first-pass odds, the expected cost climbs above $1,600 and the question becomes
+      whether the
+
+      credential''s value justifies that. The practical upshot: be honest about your
+      readiness, study
+
+      enough to push that probability above 80%, and then the reimbursement structure
+      makes it a
+
+      solid deal.'
+    expected_naive: 'If you feel confident, go for it — your company is covering most
+      of the cost anyway, so the
+
+      risk is fairly limited. The worst case is you fail and have to pay out of pocket,
+      but you''d
+
+      learn from the attempt and be better prepared for a retake. Certifications like
+      this are
+
+      generally worth pursuing since they look good on a resume and show professional
+      development.
+
+      Just make sure you study thoroughly beforehand and don''t go in underprepared.
+      The fact that
+
+      your company is willing to invest in this is a sign they value it, which is
+      a good signal.'
+- id: ev_reasoning_0017
+  paraphrases:
+  - I'm 45 and my doctor is recommending I start a statin for cholesterol. My LDL
+    is borderline high and I have a few other mild risk factors, but no family history
+    of early heart disease. I'm a bit worried about potential side effects like muscle
+    pain. How do I think about whether to take it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: health
+    ev_dimension: counterfactual_thinking
+    complexity: moderate
+    split: train
+    expected_ev: 'The right frame here is: what''s your 10-year cardiovascular risk
+      trajectory with vs. without
+
+      the statin? Tools like the ACC/AHA Pooled Cohort Equations can give you a rough
+      number — your
+
+      doctor may already have calculated this. If your 10-year risk is, say, 8%, a
+      statin might
+
+      reduce that to around 5–6% (a relative risk reduction of about 25–30% is typical).
+      That''s a
+
+      real but moderate benefit in absolute terms. On the other side, the side effect
+      concern is
+
+      worth sizing correctly too — clinically significant muscle problems (myopathy)
+      occur in
+
+      roughly 1–5% of users, and serious rhabdomyolysis is very rare. Mild muscle
+      discomfort is more
+
+      common but often resolves with dose adjustment or switching statins. So the
+      counterfactual
+
+      isn''t ''take a risky drug vs. be safe'' — it''s ''accept a small but real side
+      effect risk to
+
+      meaningfully reduce your chance of a heart attack or stroke over the next decade.''
+      If your
+
+      calculated risk is genuinely borderline, it''s also reasonable to try lifestyle
+      changes first
+
+      and recheck in 6 months, since that changes the counterfactual: you''re not
+      skipping the statin
+
+      permanently, just deferring it while testing an alternative path. The key is
+      not to treat side
+
+      effect possibility as a reason to avoid evaluation — it''s one input among several
+      to weigh.'
+    expected_naive: 'I''d be cautious about jumping straight to a statin if you''re
+      borderline and don''t have a
+
+      family history. Statins are a lifelong medication and the side effects — especially
+      muscle
+
+      pain — are pretty common and can really affect your quality of life. Before
+      committing to
+
+      medication, it''s worth trying to lower your cholesterol naturally through diet
+      and exercise.
+
+      Medication should be a last resort, not the first thing you reach for when numbers
+      are only
+
+      borderline high.'
+- id: ev_reasoning_0018
+  paraphrases:
+  - I'm trying to get better at cooking. I've been practicing weeknight dinners, but
+    someone told me I should focus my practice on weekend meals when I have more time.
+    Does it make sense to shift my practice to weekends only?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: everyday
+    ev_dimension: marginal_thinking
+    complexity: straightforward
+    split: train
+    expected_ev: 'It depends on which practice sessions are actually improving your
+      skills the most at the
+
+      margin. Weeknight cooking — where you''re under time pressure with limited ingredients
+      —
+
+      probably forces you to build efficiency and adaptability faster, even if individual
+      meals are
+
+      simpler. Weekend cooking might let you try more ambitious techniques, but if
+      you''re already
+
+      doing that and the marginal skill gain per session is leveling off, adding more
+      weekend
+
+      sessions may not help as much as keeping up frequent weeknight reps. Cooking
+      skill tends to
+
+      improve with volume and consistency, so five weeknight sessions a week likely
+      builds more
+
+      cumulative ability than one or two weekend sessions, even if the weekend ones
+      feel more
+
+      productive per sitting. The marginal improvement from one more weekend cook-off
+      may be smaller
+
+      than the marginal improvement from one more constrained weeknight attempt.'
+    expected_naive: 'Shifting to weekends makes a lot of sense. When you have more
+      time, you can really focus on
+
+      technique, try new recipes properly, and not feel rushed. Weeknight cooking
+      is more about
+
+      survival — you''re cutting corners and just trying to get food on the table.
+      You''ll learn a lot
+
+      more from a relaxed Saturday afternoon where you can actually pay attention
+      to what you''re
+
+      doing than from scrambling through a quick pasta on a Tuesday night.'
+- id: ev_reasoning_0019
+  paraphrases:
+  - We're a 20-person startup deciding whether to build our own authentication system
+    or use Auth0 (about $500/month at our scale). Our lead engineer says he could
+    build something solid in 2-3 weeks. Should we build or buy?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: technology
+    ev_dimension: probability_weighting
+    complexity: straightforward
+    split: train
+    expected_ev: 'The $500/month cost is real, but let''s think about what you''re
+      actually comparing. Auth0 is
+
+      ~$6k/year. Building in-house has a few probability-weighted risks: authentication
+      bugs and
+
+      security vulnerabilities are common in custom implementations — maybe a 30-40%
+      chance you hit
+
+      a meaningful security issue within 2 years that requires significant rework.
+      That rework alone
+
+      could easily cost 1-2 weeks of senior engineer time, and any security incident
+      has costs far
+
+      beyond that. There''s also a good chance the ''2-3 week'' estimate runs long.
+      The expected cost
+
+      of building isn''t just 2-3 weeks of engineering time; it''s that plus the probability-weighted
+
+      cost of future maintenance, edge cases, and potential vulnerabilities. For most
+      startups at
+
+      your scale, $6k/year to offload that expected risk is almost certainly worth
+      it — especially
+
+      since your 20 engineers have higher-leverage things to build.'
+    expected_naive: 'Building your own gives you full control and avoids the ongoing
+      $500/month cost, which adds up
+
+      over time. Auth0 is also a vendor dependency — if they change pricing or have
+      downtime, you''re
+
+      stuck. Your lead engineer knows your system best, and 2-3 weeks is a reasonable
+      investment for
+
+      something you''ll own forever. I''d lean toward building it.'
+- id: ev_reasoning_0020
+  paraphrases:
+  - I'm a junior data analyst considering whether to spend my evenings over the next
+    two months learning SQL more deeply (I'm already decent at it) or picking up Tableau
+    from scratch. My company mostly uses Excel and SQL right now. Which skill is a
+    better investment?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: education
+    ev_dimension: marginal_thinking
+    complexity: moderate
+    split: train
+    expected_ev: 'The marginal return on deepening your SQL depends heavily on where
+      you currently sit on the
+
+      skill curve. If you''re already handling joins, subqueries, and window functions
+      comfortably,
+
+      the jump from ''decent'' to ''advanced'' SQL — things like query optimization
+      or complex recursive
+
+      CTEs — may not translate into noticeably better outcomes at your current role
+      or in job
+
+      applications soon, since most junior-to-mid analyst positions don''t differentiate
+      much on SQL
+
+      depth beyond a solid working level. Tableau, starting from zero, has a steeper
+      early learning
+
+      curve but the marginal value of going from zero to functional could be higher
+      precisely
+
+      because you currently have nothing to show there — it adds a new dimension to
+      your profile
+
+      rather than incrementally improving an existing one. The realistic upside of
+      Tableau also
+
+      depends on how much visualization and dashboarding shows up in your target roles;
+      if you''re
+
+      aiming to move toward BI or data storytelling work, the marginal return on Tableau
+      could be
+
+      substantial. If your company uses SQL heavily and your current gap is in performance
+      or
+
+      complex analysis rather than visualization, going deeper in SQL might be the
+      higher-value
+
+      move. But if you''re at a ''good enough'' SQL level for the roles you''re targeting,
+      Tableau
+
+      likely offers more marginal uplift.'
+    expected_naive: 'SQL is the backbone of data analytics — you can never know it
+      too well. Deepening a core skill
+
+      you already use every day at work is almost always a better investment than
+      learning something
+
+      new from scratch that your company doesn''t even use. Master what''s in front
+      of you before
+
+      branching out.'
+- id: ev_reasoning_0021
+  paraphrases:
+  - I bought a condo 4 years ago for $410k and it's now worth about $490k. I've been
+    offered a job in another city and need to decide whether to sell now or keep it
+    as a rental. My mortgage payment is $2,100/month and comparable rentals in my
+    building are going for $2,300/month. The condo has a $600/month HOA. Should I
+    keep it as a rental or sell?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: real_estate
+    ev_dimension: marginal_thinking
+    complexity: complex
+    split: train
+    expected_ev: 'The headline $200/month spread between rent and mortgage sounds
+      tempting, but the *marginal*
+
+      return on keeping the property versus selling deserves a more careful look.
+      After accounting
+
+      for the $600 HOA, you''re actually $400/month in the hole before taxes, maintenance,
+      vacancy,
+
+      and property management (typically 8–10% of rent if you''re in another city,
+      so ~$185/month).
+
+      Realistically, you''re looking at negative cash flow of $500–$700/month in normal
+      operating
+
+      conditions. Now the question is whether appreciation justifies that. Your equity
+      is ~$80k
+
+      (ignoring selling costs). If you sold today, after ~6% transaction costs (~$29k),
+      you''d net
+
+      roughly $51k to invest elsewhere. The marginal question is: does holding this
+      specific condo,
+
+      funded by your trapped equity plus ongoing cash losses, outperform what you''d
+      do with $51k
+
+      deployed elsewhere? If appreciation continues at, say, 3–4% annually, the condo
+      gains
+
+      ~$15–20k/year — but after your $6–8k annual cash losses, the marginal gain over
+      just investing
+
+      the equity is modest and comes with concentration risk, tenant risk, and illiquidity.
+      Selling
+
+      likely makes sense unless you have strong reason to believe above-market appreciation
+      in that
+
+      specific area.'
+    expected_naive: 'Building equity in real estate is almost always better than selling
+      if you can afford to hold.
+
+      You''re only $200 short of covering your mortgage with rent, and over time rents
+      will likely
+
+      rise to cover that gap and then some. Real estate is one of the best long-term
+      wealth-building
+
+      tools, and you''d be giving up a property that''s already appreciated $80k in
+      four years.
+
+      Selling now means paying capital gains taxes and transaction costs, and then
+      you''d have to try
+
+      to get back into the market later, probably at higher prices. Hold onto it if
+      you possibly
+
+      can.'
+- id: ev_reasoning_0022
+  paraphrases:
+  - I'm the CEO of a 40-person company and we have one senior engineer who is clearly
+    our best technical person — probably 3-4x as productive as anyone else on the
+    team. He's been here 4 years and wants a $60K raise to $280K total comp, which
+    is above our current salary band. If I don't give it to him, he'll probably leave.
+    Should I just expand the band and pay it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: business
+    ev_dimension: counterfactual_thinking
+    complexity: complex
+    split: train
+    expected_ev: 'The right frame is: what does the world look like if you pay vs.
+      if you don''t? If you decline
+
+      and he leaves, you''re not just losing one salary slot — you''re looking at
+      3-6 months of lost
+
+      productivity while you recruit, probably $30-50K in recruiting fees, 6-12 months
+      before a
+
+      replacement reaches full effectiveness, and a real risk the replacement never
+      matches his
+
+      output. That''s easily $200-400K in realized cost, plus compounding delays on
+      whatever
+
+      infrastructure he owns. Meanwhile, $60K/year is $240K over four years — roughly
+      what replacing
+
+      him costs in the first year alone. The counterfactual cost of not paying is
+      almost certainly
+
+      higher than the raise. The real complexity is the precedent concern: other senior
+      engineers
+
+      will eventually find out and want parity. But that''s a solvable problem — you
+      can revise the
+
+      band with a clear framework — and that future cost is diffuse and probabilistic,
+      while the
+
+      cost of losing him is immediate and near-certain. Pay him, document why, and
+      use this as a
+
+      forcing function to revisit your comp philosophy before it becomes a retention
+      crisis across
+
+      the team.'
+    expected_naive: 'I''d be careful here. If you break your salary band for one person,
+      you''re setting a precedent
+
+      that anyone who threatens to leave gets a special deal. That''s a morale and
+      equity nightmare
+
+      when other employees find out — and they will find out. Strong teams are built
+      on clear, fair
+
+      systems, not exceptions. It might hurt in the short term to lose him, but protecting
+      your
+
+      culture and your compensation structure is worth it. You should also ask yourself
+      whether a
+
+      team that''s this dependent on one person has a deeper problem that needs fixing
+      anyway.'
+- id: ev_reasoning_0023
+  paraphrases:
+  - My employer offers optional short-term disability insurance for $25/month. It
+    would pay 60% of my salary for up to 3 months if I'm injured or sick and can't
+    work. I'm 28 and pretty healthy — is it worth getting?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: personal_finance
+    ev_dimension: probability_weighting
+    complexity: straightforward
+    split: train
+    expected_ev: 'Let''s think about what you''re actually paying for the coverage.
+      At $25/month, you''re spending
+
+      $300 a year. The benefit if you actually need it would be 60% of three months
+      of salary — so
+
+      if you earn, say, $60,000, that''s roughly $9,000 in potential benefits. For
+      a healthy
+
+      28-year-old, the annual probability of a short-term disability lasting more
+      than a week is
+
+      somewhere around 5-8%. That puts the expected annual benefit at roughly $450-$720
+      — which is
+
+      actually higher than the $300 premium. Group employer rates are often subsidized
+      and
+
+      well-priced. The real question is whether you have 2-3 months of expenses in
+      an emergency fund
+
+      already. If you have strong savings, self-insuring is reasonable. If not, $25/month
+      for this
+
+      kind of coverage is likely a good deal at your age.'
+    expected_naive: 'If you''re young and healthy, you probably don''t need it. Short-term
+      disability is more
+
+      important for people with health conditions or physically demanding jobs. Save
+      the $25 a month
+
+      and put it toward your emergency fund instead — that gives you flexibility without
+      locking
+
+      money into a policy you''ll likely never use.'
+- id: ev_reasoning_0024
+  paraphrases:
+  - We're trying to decide how much to invest in redundancy and failover infrastructure.
+    Right now we have none — if our primary data center goes down, we're down. A full
+    redundancy setup would cost about $180k upfront and $40k/year to maintain. Our
+    platform has been down twice in the past three years for meaningful periods. The
+    first outage cost us roughly $20k in SLA credits and churn. The second was shorter
+    and cost maybe $8k. Our revenue is about $3M ARR and growing fast. Is the redundancy
+    investment worth it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: business
+    ev_dimension: magnitude_sensitivity
+    complexity: complex
+    split: train
+    expected_ev: 'The historical outage costs are almost certainly misleading you
+      here, and this is where the
+
+      analysis gets interesting. Your two outages cost $28k combined — so naively,
+      you''re paying
+
+      $220k upfront plus $40k/year to avoid what looks like a $9k/year problem. That
+      math seems bad.
+
+      But this framing ignores two things that interact with your scale. First, you''re
+      at $3M ARR
+
+      and growing fast — presumably toward $5M, $8M, maybe more. The cost of an outage
+      scales with
+
+      revenue: an outage that hit you at $1M ARR costing $20k would cost $60k at $3M
+      ARR and
+
+      potentially $150k+ at $10M ARR in direct losses alone. Second, and more importantly,
+      at
+
+      sub-$2M ARR enterprise contracts are unlikely — but above $3–5M ARR, your customer
+      profile
+
+      almost certainly shifts toward larger buyers with stricter SLA requirements
+      and real legal
+
+      teeth. A single bad outage at that scale doesn''t just cost SLA credits; it
+      can trigger
+
+      contract terminations that represent $100k–$500k in lost ARR and damage your
+      reputation in a
+
+      market where enterprise buyers talk. The question isn''t ''does the redundancy
+      ROI on past
+
+      outages?'' — it''s ''what''s the expected cost of an outage 18 months from now
+      when you''re bigger
+
+      and more enterprise-focused?'' If there''s even a 10% chance of an outage that
+      costs $400k in
+
+      churn and contract losses in the next two years, the expected cost of inaction
+      is $40k — and
+
+      you''re buying insurance for $40k/year that also becomes a sales asset with
+      enterprise
+
+      prospects.'
+    expected_naive: 'Looking at the numbers, it''s hard to justify $180k upfront plus
+      $40k a year when your total
+
+      outage costs over three years have been $28k. That''s less than one year of
+      maintenance costs
+
+      alone. Your outages haven''t been catastrophic — you''ve absorbed them and kept
+      growing. I''d
+
+      hold off on full redundancy for now and instead invest in better monitoring
+      and faster
+
+      incident response so you can minimize downtime when it does happen. Revisit
+      the redundancy
+
+      question when you have larger enterprise contracts that explicitly require it
+      in their SLAs.
+
+      Don''t spend money solving a problem that isn''t actually hurting you yet.'
+- id: ev_reasoning_0025
+  paraphrases:
+  - 'I have high cholesterol and my doctor offered me two options: start a statin
+    medication, or try an aggressive diet and exercise program for 6 months first
+    before deciding on medication. The diet/exercise route takes real effort and isn''t
+    guaranteed to work. Which approach makes more sense?'
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: health
+    ev_dimension: magnitude_sensitivity
+    complexity: moderate
+    split: train
+    expected_ev: 'This is worth thinking through in terms of what each path actually
+      delivers. Statins are
+
+      highly effective — they typically reduce LDL by 30-50% and have solid evidence
+      for reducing
+
+      cardiovascular events, but they come with a small risk of side effects like
+      muscle pain (5-10%
+
+      of people) and an even smaller risk of more serious issues. The diet/exercise
+      path has
+
+      meaningful upside: if it works, you get cardiovascular benefits that go beyond
+      just
+
+      cholesterol — improved blood pressure, blood sugar, weight, inflammation — without
+      any drug
+
+      side effects. The catch is execution: the probability of achieving clinically
+      significant LDL
+
+      reduction through lifestyle alone is maybe 20-40% for most people, and it requires
+      sustained
+
+      effort. The key magnitude question is how high your actual cardiovascular risk
+      is right now.
+
+      If you have other risk factors — high blood pressure, family history, pre-diabetes,
+      you''re a
+
+      smoker — the expected cost of a 6-month delay is higher because your baseline
+      event risk is
+
+      elevated and statins would be reducing a larger absolute risk. If you''re otherwise
+      low-risk
+
+      and relatively young, the expected downside of the lifestyle trial is small,
+      and the potential
+
+      upside of avoiding lifelong medication is real. For most low-to-moderate risk
+      patients, trying
+
+      the lifestyle route first is reasonable. For higher-risk patients, the expected
+      benefit of
+
+      starting statins now likely outweighs the expected cost of the lifestyle delay.'
+    expected_naive: 'You should always try the natural route first before resorting
+      to medication. Statins have
+
+      side effects and once you start taking them you may be on them for life. Diet
+      and exercise are
+
+      always better for your overall health anyway. Give the lifestyle changes a real
+      shot for 6
+
+      months — if you commit to it, you might be surprised by the results and avoid
+      needing
+
+      medication altogether.'
+- id: ev_reasoning_0026
+  paraphrases:
+  - I've been debating whether to start meal prepping on Sundays instead of buying
+    lunch at work every day. It takes about 2 hours each Sunday and I'd save maybe
+    $8 per day. But sometimes I get so busy I end up skipping lunch or eating something
+    random anyway, and occasionally a client takes me out to lunch. Is meal prepping
+    actually worth it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: everyday
+    ev_dimension: counterfactual_thinking
+    complexity: moderate
+    split: train
+    expected_ev: 'The right question is: compared to *not* meal prepping, how much
+      do you actually save and what
+
+      does it cost you? Let''s think through it. If you work ~22 days a month and
+      buy lunch maybe 15
+
+      of those days (accounting for client lunches, skipped lunches, etc.), that''s
+      $120/month in
+
+      current spending you''d replace. Meal prep ingredients for those 15 lunches
+      might run $45–60,
+
+      so you''re saving roughly $60–75/month. Now, the 2-hour Sunday cost: if you
+      value your free
+
+      time at even $15–20/hour, that''s $30–40 of ''time cost'' per week. Over a month,
+      that''s $120–160
+
+      in time — which likely exceeds the savings. The counterfactual matters a lot
+      here: if you''d
+
+      spend that Sunday time watching TV, your time cost is lower. If it''s coming
+      out of exercise or
+
+      family time, it''s higher. The key is that the savings aren''t $8/day times
+      22 days — they''re
+
+      only the delta on the days you''d actually buy lunch otherwise. You should probably
+      only meal
+
+      prep if you can get the Sunday routine under an hour, or if you''re skipping
+      lunch less often
+
+      than you think.'
+    expected_naive: 'Meal prepping is definitely worth it! $8 a day adds up to over
+      $2,000 a year, and that''s a
+
+      huge savings. Yes, it takes time on Sundays, but once you get into a routine
+      it becomes second
+
+      nature. The occasional client lunch doesn''t change the math much — that''s
+      maybe a few times a
+
+      month. The key is building the habit and being consistent. Two hours on Sunday
+      is a small
+
+      price to pay for that kind of annual savings and you''ll probably eat healthier
+      too.'
+- id: ev_reasoning_0027
+  paraphrases:
+  - I've been offered a role that would require me to learn a pretty niche technical
+    skill. The job pays well now, but I'm worried the skill might become obsolete
+    in 5 years. Should I take it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: career
+    ev_dimension: probability_weighting
+    complexity: straightforward
+    split: train
+    expected_ev: 'The key question is how likely is obsolescence, and how bad would
+      it actually be? Most
+
+      technical skills don''t disappear overnight — they decline gradually, giving
+      you time to pivot.
+
+      Let''s say there''s a 30% chance this skill becomes significantly less valuable
+      in 5 years. Even
+
+      then, you''d still have 5 years of above-market pay, plus the adjacent skills
+      you''d build
+
+      (problem-solving, domain knowledge, tooling familiarity) that transfer elsewhere.
+      The 70%
+
+      scenario where the skill stays relevant is probably the more likely one given
+      how slowly most
+
+      tech ecosystems change. Compare that to passing on a well-paying role now to
+      stay in your
+
+      current track — that''s a certain opportunity cost vs. a probabilistic future
+      downside. Unless
+
+      the skill is extremely narrow with no transferable value, the expected outcome
+      of taking the
+
+      role is likely positive. What''s the skill? That would help gauge the actual
+      obsolescence risk.'
+    expected_naive: 'I''d think carefully before building your career around a niche
+      skill that might not be
+
+      relevant in a few years. Technology moves fast, and you don''t want to find
+      yourself
+
+      pigeonholed with expertise nobody needs. It''s usually better to invest in broad,
+      foundational
+
+      skills that will stay valuable long-term rather than betting on something that
+      might
+
+      disappear. Your future employability is too important to risk on a skill with
+      an uncertain
+
+      shelf life.'
+- id: ev_reasoning_0028
+  paraphrases:
+  - My car is 11 years old with 130,000 miles. I've been spending about $1,200/year
+    on repairs the last two years. A mechanic said it likely has another 2-3 years
+    of life, but I could also buy a reliable used car for $12,000 now. Should I keep
+    repairing or replace it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: personal_finance
+    ev_dimension: counterfactual_thinking
+    complexity: moderate
+    split: train
+    expected_ev: 'The key question is: what does keeping the old car actually cost,
+      compared to replacing it? If
+
+      you keep the old car, you might get 2-3 more years but with escalating repair
+      costs — the
+
+      $1,200/year average could rise as the car ages. There''s also a meaningful probability
+      (maybe
+
+      20-30% per year on a high-mileage older vehicle) of a major unexpected failure
+      — transmission,
+
+      engine — that could cost $3,000-5,000 or make the car a total loss. If that
+      happens in year
+
+      one, you''ve lost both the repair money and the car. On the replacement side,
+      a $12,000 used
+
+      car likely has lower annual repair costs — maybe $400-600/year — and gives you
+      5-7+ years of
+
+      reliable use. Compared to the counterfactual of staying the course, replacing
+      now buys you
+
+      roughly 3-5 extra years of lower-stress, lower-cost driving after the old car
+      would have died
+
+      anyway. The real comparison isn''t ''spend $12k vs. spend $1,200/year'' — it''s
+      ''spend $12k now
+
+      versus spend $1,200+/year AND then spend $12k in 2-3 years anyway, potentially
+      after a
+
+      stressful breakdown.'' The math often favors replacing sooner rather than letting
+      uncertainty
+
+      and repair costs accumulate.'
+    expected_naive: 'If the car is still running and a mechanic says it has a few
+      years left, it''s usually smarter
+
+      to keep repairing it. A $12,000 car purchase is a big expense, and $1,200 a
+      year in repairs is
+
+      much cheaper than taking on that cost — or a car payment if you finance it.
+      Run it until it''s
+
+      not worth fixing anymore, then buy. No need to replace something that still
+      works.'
+- id: ev_reasoning_0029
+  paraphrases:
+  - I've been offered a vaccine for a rare illness I might be exposed to during an
+    upcoming trip. The illness affects about 1 in 500 unvaccinated travelers, and
+    if you get it there's a 10% chance of serious complications. The vaccine is 90%
+    effective but causes 1-2 days of flu-like symptoms in about 40% of people who
+    get it. Worth getting?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: health
+    ev_dimension: magnitude_sensitivity
+    complexity: straightforward
+    split: train
+    expected_ev: 'Let''s think through what''s actually at stake on each side. Without
+      the vaccine, your chance of
+
+      getting the illness is 1 in 500 (0.2%), and if you get it there''s a 10% chance
+      of serious
+
+      complications — so your overall risk of serious complications is about 0.02%.
+      The vaccine
+
+      reduces that risk by 90%, bringing it down to roughly 0.002%. So the vaccine
+      prevents about
+
+      0.018 percentage points of serious-complication risk. On the downside, there''s
+      a 40% chance of
+
+      1-2 days of mild flu-like symptoms. The question is whether avoiding a 0.02%
+      chance of
+
+      something seriously harmful is worth a 40% chance of 1-2 uncomfortable days.
+      Because the
+
+      serious complication risk is quite small in absolute terms, and the symptom
+      side effect is
+
+      highly likely but very minor in magnitude, this is a closer call than it might
+      seem — the
+
+      expected discomfort from the vaccine is almost certainly larger than the expected
+      harm
+
+      avoided. Unless your specific itinerary or health profile raises your exposure
+      risk
+
+      significantly, the vaccine math is borderline here.'
+    expected_naive: 'You should definitely get the vaccine. Serious complications
+      from any illness can be
+
+      life-altering, and protecting yourself before travel is just smart medicine.
+      The side effects
+
+      are temporary and mild — a day or two of discomfort is nothing compared to what
+      could happen
+
+      if you get sick abroad where medical care might be harder to access. Better
+      safe than sorry
+
+      when you''re traveling.'
+- id: ev_reasoning_0030
+  paraphrases:
+  - We're a 15-person startup deciding whether to build our own authentication system
+    or use Auth0 at $500/month. Building it ourselves would take one senior engineer
+    about 6 weeks. Should we build or buy?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: technology
+    ev_dimension: magnitude_sensitivity
+    complexity: straightforward
+    split: train
+    expected_ev: 'The buy decision looks clearly better once you account for magnitudes.
+      Six weeks of a senior
+
+      engineer''s time costs roughly $25,000–$35,000 in salary alone, and that''s
+      before opportunity
+
+      cost — that engineer isn''t building your core product during that time. Auth0
+      at $500/month
+
+      costs $6,000/year, so you''d break even on pure dev cost in 4–5 years. But authentication
+      isn''t
+
+      a one-time build: it requires ongoing maintenance, security patches, and incident
+      response. A
+
+      single serious security breach — even a low-probability event — could mean weeks
+      of emergency
+
+      engineering time, customer churn, and reputational damage that dwarf the annual
+      Auth0 cost.
+
+      The magnitude of the downside risks from a homegrown auth system, even if they''re
+      unlikely,
+
+      are large enough to shift the math heavily toward buying. The savings from building
+      only look
+
+      attractive if you assume everything goes perfectly, which is exactly when magnitude-weighted
+
+      thinking matters most.'
+    expected_naive: 'Building your own gives you full control and avoids vendor lock-in,
+      which is really important
+
+      for something as critical as authentication. Auth0 is fine for prototypes, but
+      if you''re
+
+      serious about scaling, you don''t want to be dependent on a third-party service
+      for something
+
+      so core to your product. Six weeks is a reasonable investment to own that infrastructure
+
+      outright and avoid recurring costs forever.'
+- id: ev_reasoning_0031
+  paraphrases:
+  - I already have a Google IT Support certification. I'm wondering if I should also
+    get the Google Data Analytics certification. It takes about 6 months and costs
+    around $300. I'm trying to move into a data analyst role. Will it actually help?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: education
+    ev_dimension: marginal_thinking
+    complexity: straightforward
+    split: train
+    expected_ev: 'The key question here is what the Data Analytics cert adds on top
+      of what you already have —
+
+      not whether it''s a good cert in isolation. Since you''re specifically targeting
+      data analyst
+
+      roles, the cert is directly relevant, and $300 is a low cost barrier. The more
+      important
+
+      variable is time: will six months of studying this cert get you closer to a
+      data analyst job
+
+      faster than spending those six months building a portfolio of actual analysis
+      projects or
+
+      applying aggressively with your existing credentials? For most hiring managers
+      in data,
+
+      demonstrated project work tends to signal more than a cert. That said, if you
+      can do both, or
+
+      if the cert helps you get past automated resume filters, the marginal value
+      of adding it is
+
+      probably positive given the low cost — just don''t treat it as a substitute
+      for hands-on work.'
+    expected_naive: 'Absolutely go for it. The Google Data Analytics certification
+      is well-regarded and directly
+
+      aligned with the role you want. Having two Google certifications shows employers
+      you''re
+
+      serious and well-rounded. It''s only $300 and six months, which is a small investment
+      for
+
+      something that could be the thing that lands you your first data job. More credentials
+      are
+
+      always better when you''re trying to break into a new field.'
+- id: ev_reasoning_0032
+  paraphrases:
+  - I'm renovating my basement and debating whether to add waterproofing and a sump
+    pump for about $4,000. My neighbors haven't had flooding issues and the house
+    has been dry for the 8 years I've owned it. Is this worth doing while the walls
+    are already open?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: everyday
+    ev_dimension: probability_weighting
+    complexity: complex
+    split: train
+    expected_ev: 'This is actually a strong case for doing it, even though the probability
+      of flooding in any
+
+      given year might seem low. Here''s why: you''re already mid-renovation with
+      the walls open,
+
+      which means the marginal installation cost is much lower now than it would be
+      later — a sump
+
+      pump installed while walls are open might save $1,000–2,000 in labor compared
+      to retrofitting.
+
+      So the real decision is closer to a $2,500–3,000 upgrade, not $4,000. Now weigh
+      that against
+
+      the risk. Basement flooding events, when they happen, aren''t small — finished
+      basement damage
+
+      from a single flood typically runs $10,000–40,000 when you account for flooring,
+      drywall,
+
+      furniture, HVAC equipment, and remediation. If there''s even a 3–5% annual chance
+      of a
+
+      significant water event (plumbing failure, heavy rain overwhelming drainage,
+      water table
+
+      changes), over a 20-year horizon that probability compounds significantly —
+      you''re looking at
+
+      maybe a 45–65% chance of at least one event. The expected value of the waterproofing,
+      even
+
+      conservatively, likely exceeds its cost within 5–10 years. The fact that neighbors
+      haven''t had
+
+      issues and the house has been dry is meaningful evidence, but dry basements
+      become wet ones
+
+      due to aging infrastructure, climate shifts, and local grading changes — these
+      are slow-moving
+
+      risks that don''t announce themselves before they hit. The ''do it while walls
+      are open'' window
+
+      is a one-time opportunity to buy that insurance at a discount.'
+    expected_naive: 'If the house has been dry for 8 years and your neighbors haven''t
+      had issues, you''re probably
+
+      fine. Waterproofing is one of those things contractors love to upsell during
+      renovations. Save
+
+      the $4,000 and put it toward finishing materials — you can always address water
+      problems if
+
+      they actually come up later.'
+- id: ev_reasoning_0033
+  paraphrases:
+  - I've been taking a daily multivitamin for years. I recently read that for healthy
+    adults who eat a balanced diet, multivitamins don't do much. Should I keep taking
+    it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: health
+    ev_dimension: marginal_thinking
+    complexity: straightforward
+    split: train
+    expected_ev: 'The question is really about what the next pill actually does for
+      you given where your
+
+      baseline already is. If you''re eating a reasonably varied diet, your levels
+      of most vitamins
+
+      are probably already adequate, meaning each additional dose has very little
+      marginal impact —
+
+      your body just excretes what it can''t use. The research broadly backs this
+      up: multivitamins
+
+      show measurable benefits mainly for people with genuine deficiencies or restricted
+      diets. For
+
+      someone already well-nourished, the incremental benefit of each pill is close
+      to zero. At a
+
+      few cents per pill it''s not a huge cost, but if the benefit is negligible,
+      there''s not a
+
+      strong reason to continue unless you have specific gaps in your diet worth supplementing.'
+    expected_naive: 'It''s better to be safe than sorry with your health. Even if
+      you eat well, a daily multivitamin
+
+      acts as nutritional insurance to fill in any gaps you might not notice. Many
+      doctors recommend
+
+      them as a simple baseline habit, and the cost is minimal. There''s really no
+      downside to
+
+      continuing.'
+- id: ev_reasoning_0034
+  paraphrases:
+  - I've been putting in an extra hour each evening studying for a professional certification
+    exam I'm taking in 3 weeks. My score is already in the mid-70s on practice tests
+    and the passing threshold is 75. Should I keep up the daily study sessions or
+    is it okay to wind down a bit?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: everyday
+    ev_dimension: marginal_thinking
+    complexity: moderate
+    split: train
+    expected_ev: 'The key question here is what that extra hour of studying is actually
+      buying you at the margin
+
+      — not whether studying in general is valuable. You''re hovering right around
+      the passing
+
+      threshold, which is actually where marginal effort has the highest impact. If
+      your score
+
+      variance on practice tests spans, say, 70–80, you''re not comfortably above
+      75 on a consistent
+
+      basis, so each hour you put in now might be shifting your pass probability meaningfully
+      —
+
+      maybe from 55% to 65% or more depending on how much your scores have been moving
+      recently.
+
+      That''s worth more than an extra hour would be if you were consistently scoring
+      85+. The
+
+      marginal value of studying drops off steeply once you''re reliably 10+ points
+      above the cutoff,
+
+      but right now you''re not there. I''d keep the sessions going, and check whether
+      your recent
+
+      practice tests show an upward trend — if scores are plateauing, consider shifting
+      focus to
+
+      weak topic areas rather than general review, since targeted studying likely
+      has higher
+
+      marginal return at this stage than broad review.'
+    expected_naive: 'Since you''re this close to the exam, I''d keep studying every
+      day — you''re so close to the
+
+      passing score that you really can''t afford to let up now. Consistency is key,
+      and you don''t
+
+      want to risk losing momentum right before the test. Better to stay in the routine
+      and show up
+
+      fully prepared than to ease off and regret it.'
+- id: ev_reasoning_0035
+  paraphrases:
+  - We have an internal data pipeline that's been duct-taped together in Python scripts
+    over 3 years. It mostly works but fails about once a month requiring manual intervention.
+    A proper rebuild using Airflow or a similar orchestration tool would take one
+    engineer about 4 months. Leadership keeps deprioritizing it because 'it works.'
+    How do I make the case for the rebuild?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: technology
+    ev_dimension: counterfactual_thinking
+    complexity: complex
+    split: train
+    expected_ev: 'The strongest argument isn''t about the rebuild''s benefits — it''s
+      about the true cost of *not
+
+      rebuilding*, which leadership is systematically underestimating by comparing
+      the current state
+
+      to perfection rather than to the realistic future of the status quo. Start by
+      quantifying what
+
+      ''it mostly works'' actually costs: one failure per month sounds minor, but
+      trace the full
+
+      impact — engineer time to diagnose and fix (often 4–8 hours including context
+      switching),
+
+      downstream data delays, any business decisions made on stale data, and the opportunity
+      cost of
+
+      a senior engineer doing manual babysitting instead of building. That''s probably
+      50–100
+
+      engineer-hours per year just in incident response, before you count the drag
+      on any new work
+
+      that has to integrate with a fragile system. Then make the trajectory argument:
+      the pipeline
+
+      failing once a month *today* is almost certainly going to get worse, not better
+      — as data
+
+      volume grows, as more systems depend on it, and as the original authors leave.
+      The
+
+      counterfactual isn''t ''rebuild vs. current state forever.'' It''s ''rebuild
+      vs. a system that will
+
+      degrade, fail more often, and become harder to fix with each passing quarter.''
+      A 4-month
+
+      investment that reduces an accelerating annual cost is extremely likely to have
+      positive ROI
+
+      within 12–18 months — and leadership is anchoring on the rebuild cost while
+      treating the
+
+      ongoing cost as zero, which is the accounting error you need to correct.'
+    expected_naive: 'The classic way to make this case is to document every incident
+      in detail — timestamp, root
+
+      cause, hours spent fixing it, any business impact. Once you have 6–12 months
+      of incident logs,
+
+      you can calculate the total engineer-hours wasted and present that to leadership
+      as the cost
+
+      of inaction. You can also point out the risk: one day that monthly failure is
+      going to happen
+
+      at the worst possible moment — before a board meeting, during a product launch,
+      or when the
+
+      one engineer who understands the system is on vacation. Leadership tends to
+      respond to
+
+      concrete evidence and risk scenarios more than abstract arguments about technical
+      debt. Build
+
+      the paper trail and wait for a bad enough incident to make the case undeniable.'
+- id: ev_reasoning_0036
+  paraphrases:
+  - I've been exercising regularly for the past year — about 4 hours a week of moderate
+    cardio. My doctor says I'm in good shape. I'm thinking of adding another 4 hours
+    per week on top of that to really maximize my health. Is it worth the time investment?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: health
+    ev_dimension: marginal_thinking
+    complexity: complex
+    split: train
+    expected_ev: 'The marginal health return from exercise follows a sharply diminishing
+      curve. Going from zero
+
+      to moderate activity (around 150 minutes per week) produces the largest gains
+      — research
+
+      consistently shows this range captures roughly 80-90% of the mortality reduction
+      benefits
+
+      associated with exercise. Your current 4 hours per week already puts you well
+      into this
+
+      high-return zone. Doubling to 8 hours doesn''t double your benefit — studies
+      suggest the
+
+      marginal cardiovascular and longevity gains from going beyond ~300 minutes of
+      moderate
+
+      activity per week are quite small, maybe a few percentage points of additional
+      risk reduction
+
+      at most. Meanwhile, the marginal costs increase: injury risk rises meaningfully
+      with training
+
+      volume, recovery demands grow, and 4 extra hours per week over a year is over
+      200 hours. If
+
+      your goal is maximizing long-term health per hour invested, that time would
+      likely yield
+
+      higher returns redirected toward sleep quality, stress reduction, or strength
+      training if
+
+      you''re not already doing it — all areas where you might currently be getting
+      low returns and
+
+      where the marginal benefit is still steep.'
+    expected_naive: 'More exercise is almost always better for your health, so if
+      you have the time and motivation,
+
+      adding another 4 hours a week sounds like a great idea. Staying active is one
+      of the best
+
+      things you can do for long-term health, and the benefits compound over time.
+      Just make sure
+
+      you''re not overdoing it and listen to your body — take rest days and you should
+      be fine. If
+
+      you have the energy for it, go for it.'
+- id: ev_reasoning_0037
+  paraphrases:
+  - My house has been on the market for 47 days with no offers. My agent wants me
+    to do a $25k price reduction to $575k. A different agent I consulted said I should
+    spend $12k staging and refreshing the landscaping before reducing the price. I
+    need to sell in the next 3 months due to a job relocation. How should I think
+    about this?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: real_estate
+    ev_dimension: marginal_thinking
+    complexity: complex
+    split: train
+    expected_ev: 'The core question is: what does each additional dollar spent or
+      reduced actually buy you in
+
+      expected outcome, given your hard 3-month deadline? Let''s think about staging
+      and landscaping
+
+      first. The marginal logic for pre-sale improvements works when the cost is low
+      relative to the
+
+      likely price bump AND when the improvement addresses the actual reason buyers
+      are passing.
+
+      After 47 days with no offers, you likely have showing traffic but no conversions
+      — which means
+
+      buyers are visiting, running comps, and deciding the price-to-value ratio is
+      off. If that''s
+
+      the case, spending $12k on staging addresses the wrong bottleneck; it adds cost
+      without fixing
+
+      the pricing signal. A $25k price reduction, on the other hand, directly moves
+      the demand
+
+      curve. At $575k, you may cross a psychological threshold that captures a new
+      tier of buyers
+
+      who were capped at $575k or were comparing you unfavorably to sub-$580k alternatives.
+      The
+
+      marginal buyer you unlock with a price cut is almost certainly more valuable
+      than marginal
+
+      aesthetic improvements to buyers already seeing the property. One important
+      caveat: if your
+
+      showing volume is low (few people coming at all), that''s a different problem
+      — marketing or
+
+      listing quality — and neither fix addresses it well. Ask your agent how many
+      showings you''ve
+
+      had. If it''s high-traffic with no offers, price. If traffic is low, that changes
+      things.'
+    expected_naive: 'Spending money on staging and landscaping is almost always worth
+      it before reducing your
+
+      price. First impressions are everything in real estate, and if buyers aren''t
+      making offers,
+
+      it''s often because they can''t visualize the home''s potential. A $12k investment
+      in staging
+
+      typically returns much more than its cost and keeps you from leaving money on
+      the table with a
+
+      premature price cut. Once you drop the price, you signal desperation and it''s
+      very hard to
+
+      recover. Get the presentation right first, then reassess the price if it still
+      hasn''t moved.'
+- id: ev_reasoning_0038
+  paraphrases:
+  - I'm 34 and trying to decide whether to max out my Roth IRA ($7,000/year) or put
+    that same money into my taxable brokerage account instead. My income right now
+    puts me in the 22% bracket, but I expect to earn significantly more in my 40s
+    and probably be in the 32% bracket by retirement. Does the Roth still make sense,
+    or should I be doing something different?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: personal_finance
+    ev_dimension: marginal_thinking
+    complexity: complex
+    split: train
+    expected_ev: 'This is really a question about what your marginal tax dollar costs
+      you *now* versus what it
+
+      will cost at withdrawal — and the answer flips depending on your income trajectory.
+      The Roth''s
+
+      advantage is that you pay taxes now and withdraw tax-free later. If your marginal
+      rate at
+
+      retirement is higher than your marginal rate today, Roth wins. You''re currently
+      at 22%
+
+      marginal, and you expect 32% at peak earnings and potentially still 32% in retirement
+      if
+
+      you''ve accumulated substantially. That spread matters a lot compounded over
+      30+ years. But
+
+      here''s the marginal nuance: at 34, you likely have decades of contributions
+      ahead. The *first*
+
+      dollars into a Roth at 22% marginal cost are cheap tax-wise — you''re locking
+      in that 22% rate.
+
+      The taxable account doesn''t give you this optionality. Each additional Roth
+      dollar you
+
+      contribute now is buying tax-free growth at a 22-cent-per-dollar cost, and you''re
+      withdrawing
+
+      what may be 32-cent-per-dollar income tax-free in retirement. That''s a 10-cent-per-dollar
+
+      arbitrage on every dollar, compounded over 30 years. The one caveat worth modeling:
+      if your
+
+      retirement withdrawals will be large enough to push you into even higher brackets,
+      or if tax
+
+      law changes eliminate Roth advantages, that changes the math. But given your
+      stated
+
+      trajectory, the marginal Roth dollar is almost certainly more valuable than
+      the marginal
+
+      taxable dollar — not because ''Roth is always good'' but because your specific
+      tax rate
+
+      arbitrage is real and the compounding window is long.'
+    expected_naive: 'Max out the Roth — it''s one of the best accounts available.
+      Tax-free growth for 30 years is an
+
+      incredible benefit, and you never know what tax rates will look like in the
+      future, so paying
+
+      taxes now while you can budget for it is the smart move. The taxable brokerage
+      gives you
+
+      flexibility, but you''ll owe capital gains taxes every step of the way. Most
+      financial advisors
+
+      recommend maxing tax-advantaged accounts before putting anything in taxable.
+      Since you''re only
+
+      34, the compounding effect of tax-free growth will be massive by retirement.'
+- id: ev_reasoning_0039
+  paraphrases:
+  - I'm deciding whether to bother getting a PMP certification. It costs around $2,000
+    and takes about 3 months of study. I already have 8 years of project management
+    experience. Should I do it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: education
+    ev_dimension: counterfactual_thinking
+    complexity: straightforward
+    split: train
+    expected_ev: 'With 8 years of experience, the interesting question is what actually
+      changes in your career
+
+      if you get the PMP versus if you don''t. For someone just entering the field,
+      the PMP can
+
+      substitute for a track record — but you already have the track record. The certification
+
+      mostly adds value in two specific scenarios: companies that use it as a hard
+      filter in their
+
+      hiring process, and clients or government contracts that list it as a requirement.
+      If you''re
+
+      happy where you are and not job searching, the counterfactual barely moves.
+      If you are job
+
+      searching, a quick scan of the roles you actually want will tell you whether
+      PMP appears as a
+
+      requirement or ''nice to have.'' If it''s showing up in 30–40% of your target
+      roles as required,
+
+      the ROI math gets favorable fast. If it rarely appears, you''re spending $2k
+      and 3 months to
+
+      get a credential that doesn''t change which doors open for you.'
+    expected_naive: 'At 8 years of experience, you probably don''t need it to prove
+      yourself — but the PMP is still
+
+      a respected credential that shows you''re serious about the profession. It''s
+      a relatively small
+
+      investment for something that lasts your entire career and looks great on a
+      resume. You might
+
+      not need it right now, but having it in your back pocket never hurts, and you''ll
+      learn a few
+
+      things in the process of studying for it.'
+- id: ev_reasoning_0040
+  paraphrases:
+  - We're thinking about hiring a 'growth hacker' type — someone with a strong portfolio
+    of wins but also a couple of notable failures at past companies. A safer candidate
+    has a steadier track record but no big swings. We're at a stage where we really
+    need growth. What's the framework for thinking about this?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: business
+    ev_dimension: probability_weighting
+    complexity: moderate
+    split: train
+    expected_ev: 'The right framing is to think about what distribution of outcomes
+      each hire produces, not just
+
+      the most likely scenario. The ''safe'' candidate likely gives you a narrow range
+      — competent,
+
+      consistent, modest growth. The high-variance candidate has a wider range: real
+      upside if their
+
+      style fits your context, but meaningful downside if their previous failures
+      were due to
+
+      repeatable mistakes rather than bad luck. The key is figuring out which part
+      of that variance
+
+      is signal. Look closely at the failures — were they in situations structurally
+      similar to
+
+      yours, or in different contexts? A failure in a crowded consumer market doesn''t
+      tell you much
+
+      about B2B SaaS growth, for example. If the failures look like bad luck or bad-fit
+
+      environments, the expected value of the high-variance hire could be significantly
+      better,
+
+      especially at a stage where modest-but-steady growth may not be enough to hit
+      the milestones
+
+      you need. If the failures reveal a blind spot that would directly apply to your
+      situation, the
+
+      variance stops being upside and becomes mostly downside risk.'
+    expected_naive: 'At a growth stage, you need someone who''s actually driven growth
+      — and the high-variance
+
+      candidate has proven they can do that. Failures are part of the game, especially
+      in startups,
+
+      and someone who''s only played it safe may not have the instincts or appetite
+      for risk you need
+
+      right now. Hire the person with the big wins and dig into the failures in the
+      interview to
+
+      make sure they''ve learned from them. A steady track record is great for an
+      established
+
+      company, but you''re not at that stage yet.'
+- id: ev_reasoning_0041
+  paraphrases:
+  - I've been offered a mid-level role at a well-known company that pays $20k more
+    than my current job. My manager just told me (privately) I'm on track for a promotion
+    in 6-12 months that would put me $10k above the new offer. Should I take the outside
+    offer or wait for the promotion?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: career
+    ev_dimension: probability_weighting
+    complexity: complex
+    split: train
+    expected_ev: 'This is really a question about probability-weighted outcomes over
+      time, not just comparing
+
+      two salary numbers. The key variable is: how likely is that promotion, really?
+      Managers
+
+      telling employees they''re ''on track'' is common — but promotions get delayed,
+      headcount freezes
+
+      happen, and ''on track'' doesn''t mean ''guaranteed.'' Even if you trust your
+      manager completely,
+
+      organizational factors outside their control might intervene. A reasonable estimate
+      might be
+
+      50-70% that the promotion happens within 12 months as described. Now factor
+      in time: you''d
+
+      wait up to a year at your current (lower) salary. At a 60% probability of the
+      promotion
+
+      landing on schedule, your expected salary gain from waiting is roughly 0.6 ×
+      $10k = $6k
+
+      advantage over the new offer — but only after 12 months of earning $20k less
+      than you could
+
+      have been. That 12-month opportunity cost alone is $20k in forgone salary. The
+      math strongly
+
+      favors the outside offer unless the promotion probability is very high AND you
+      expect to stay
+
+      long enough afterward to recoup the waiting period. There''s also a compounding
+      effect: your
+
+      future raises and bonuses at both companies will be percentage-based, so starting
+      at a higher
+
+      base has long-term value. The outside offer likely wins unless you have unusually
+      strong
+
+      reasons to believe the promotion is near-certain and you plan to stay for several
+      more years.'
+    expected_naive: 'I''d be cautious about leaving right when a promotion is coming.
+      Your manager has explicitly
+
+      told you you''re on track, and jumping ship now could mean leaving real money
+      on the table. The
+
+      promotion would put you $10k ahead of the outside offer, so if you can hold
+      on for 6-12
+
+      months, you''d come out ahead while also demonstrating loyalty — which matters
+      for your
+
+      long-term trajectory at the company. Outside offers come and go, but internal
+      momentum and a
+
+      manager who''s advocating for you is valuable. I''d stay, get the promotion,
+      and then reassess
+
+      if you still want to explore the market from a position of strength.'
+- id: ev_reasoning_0042
+  paraphrases:
+  - I'm thinking about buying a fixer-upper house for $320,000 in a neighborhood that's
+    been slowly improving. The house needs about $80,000 in renovations to be livable.
+    My realtor says similar renovated homes nearby have sold for anywhere from $430,000
+    to $510,000. Is it worth the risk?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: real_estate
+    ev_dimension: magnitude_sensitivity
+    complexity: moderate
+    split: train
+    expected_ev: 'The key here is to think carefully about the full range of outcomes
+      and how much each one
+
+      matters financially. You''re putting in $400,000 total (purchase plus reno).
+      On the upside, if
+
+      the renovated home sells at the high end — around $510,000 — you net roughly
+      $110,000 in
+
+      equity gain. At the low end of $430,000, you''re still up $30,000, but that''s
+      a thin margin for
+
+      a multi-year project with real execution risk. What matters is that the downside
+      scenarios are
+
+      asymmetrically painful: renovations routinely run 20-30% over budget, which
+      on an $80k job
+
+      could add $16k-$24k, eating directly into your margin. If you hit $500k in costs
+      and only sell
+
+      for $430k, you''re actually in the red. The $80k swing in comparable sale prices
+      is also a
+
+      large magnitude relative to your expected profit — it suggests meaningful uncertainty
+      in the
+
+      market, not just noise. The potential upside exists, but it''s not huge given
+      the capital at
+
+      risk, and the downside scenarios (cost overruns plus low sale price) could result
+      in losing
+
+      $50,000-$70,000. This could be worth it if you have cash reserves to absorb
+      overruns and are
+
+      confident in your contractor, but the margin for error is genuinely slim.'
+    expected_naive: 'The neighborhood is improving, so it sounds like a good opportunity.
+      Real estate almost always
+
+      appreciates over time, and buying below market is usually smart. The worst case
+      is you do the
+
+      reno and the market dips a bit, but you''ll recover eventually if you hold long
+      enough.
+
+      Renovated homes selling for up to $510k means there''s real upside here — I''d
+      say go for it as
+
+      long as you have the renovation budget covered.'
+- id: ev_reasoning_0043
+  paraphrases:
+  - I'm 34 and my company just offered me the option to convert my $45,000 traditional
+    401k balance into a Roth 401k. I'd owe about $12,000 in taxes now to do the conversion.
+    I'm currently in the 24% tax bracket and expect to be in a similar or higher bracket
+    in retirement. Is paying the taxes now worth it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: personal_finance
+    ev_dimension: marginal_thinking
+    complexity: moderate
+    split: train
+    expected_ev: 'The marginal question here is: what''s the expected tax cost of
+      each dollar withdrawn in
+
+      retirement versus paying 24% now? If you genuinely expect to be in the 24% bracket
+      or higher
+
+      in retirement, the conversion makes mathematical sense — you''re paying the
+      same or lower rate
+
+      now, and all future growth comes out tax-free. With 30+ years of compounding,
+      even modest
+
+      growth means a much larger account at withdrawal, and avoiding taxes on that
+      entire growth is
+
+      the real prize. The $12,000 tax bill is essentially a lump-sum premium for tax-free
+
+      compounding on what could be $200,000–$300,000 at retirement. The uncertainty
+      is in future tax
+
+      rates (which could go up or down broadly) and your actual retirement income
+      — if you end up in
+
+      a lower bracket in retirement, the conversion is less beneficial. But given
+      your expectation
+
+      of staying at similar rates, the marginal value of tax-free growth over 30 years
+      likely
+
+      justifies paying today''s rate now rather than on a much larger future balance.'
+    expected_naive: 'I wouldn''t do it. Paying $12,000 in taxes right now is a lot
+      of money out of pocket, and you
+
+      don''t have to pay it. The whole point of a 401k is to defer taxes, so voluntarily
+      paying them
+
+      early goes against the strategy. Unless you''re absolutely certain tax rates
+      will skyrocket,
+
+      hold onto that $12,000 and let the full $45,000 keep compounding. You can always
+      reconsider
+
+      closer to retirement when you have a clearer picture.'
+- id: ev_reasoning_0044
+  paraphrases:
+  - I'm the founder of a B2B startup. We have a backlog of 40 feature requests from
+    existing customers and 5 requests that keep coming up in sales calls with prospects
+    who haven't signed yet. Should I prioritize the prospect features to close new
+    deals, or keep building for existing customers to reduce churn?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: business
+    ev_dimension: marginal_thinking
+    complexity: moderate
+    split: train
+    expected_ev: 'The key is to think about the marginal impact of each type of work
+      rather than treating this
+
+      as a binary policy. For the prospect features, what you want to estimate is:
+      how many of those
+
+      sales conversations is this feature actually blocking? If 5 prospects mention
+      a feature, maybe
+
+      2 are truly blocked by its absence — the others might sign anyway with good
+      positioning. If
+
+      your average contract is $30k and you close 2 extra deals by building these
+      features, that''s
+
+      $60k, but only if those are genuinely the deciding factor. For existing customer
+      features, the
+
+      marginal calculation is about churn prevention — if you''re at risk of losing
+      even one customer
+
+      worth $20k ARR, the retention value can be comparable. I''d narrow this by asking:
+      which
+
+      specific prospect features are cited as ''dealbreakers'' versus ''nice to haves,''
+      and which
+
+      existing customer requests are tied to renewal conversations? Build the things
+      that are
+
+      load-bearing for a decision in the next 30-60 days first, regardless of which
+      bucket they fall
+
+      in.'
+    expected_naive: 'Existing customers should come first — they''re already paying
+      you and it''s much cheaper to
+
+      retain a customer than acquire a new one. If you neglect your current base to
+      chase prospects,
+
+      you risk churn that could hurt your reputation and ARR. Get your retention in
+      order before
+
+      worrying about new deals.'
+- id: ev_reasoning_0045
+  paraphrases:
+  - We're relocating for work and trying to decide between buying a house right away
+    versus renting for 1–2 years first to learn the city. Buying feels like we'd be
+    'throwing money away' on rent, but my spouse thinks we might buy in the wrong
+    neighborhood. What's the financial logic here?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: real_estate
+    ev_dimension: counterfactual_thinking
+    complexity: complex
+    split: train
+    expected_ev: 'The ''throwing money away on rent'' framing obscures a really important
+      counterfactual: what''s
+
+      the actual cost of buying in the wrong neighborhood compared to renting short-term?
+      Let''s
+
+      think through it. If you buy immediately and later decide the neighborhood was
+      wrong, selling
+
+      a home typically costs 7–9% of the sale price between agent commissions, closing
+      costs, and
+
+      transaction friction. On a $600k house, that''s $42–54k in transaction costs
+      alone, plus you''d
+
+      have carried mortgage interest (most of which is interest, not equity, in years
+      1–2), property
+
+      taxes, and maintenance. You''d also be selling in whatever market conditions
+      exist 2 years from
+
+      now rather than choosing your timing. The counterfactual cost of renting for
+      1–2 years is real
+
+      but bounded: say $2,500/month in a new city is $30–60k over that period, but
+      during that time
+
+      you preserve optionality and avoid a potentially catastrophic location mismatch.
+      If there''s
+
+      even a 25–30% chance you''d want to move neighborhoods within 3 years of buying
+      (quite
+
+      plausible when relocating to an unfamiliar city), the expected cost of buying
+      immediately
+
+      likely exceeds the rent you''d pay to stay flexible. The rent-versus-buy comparison
+      only favors
+
+      buying when you have a long, stable holding period — and that''s precisely what''s
+      uncertain
+
+      here. Renting first isn''t throwing money away; it''s buying information about
+      where you
+
+      actually want to live.'
+    expected_naive: 'Generally speaking, buying is almost always better than renting
+      from a pure financial
+
+      standpoint — you''re building equity every month instead of paying a landlord.
+      Yes, there''s
+
+      some risk of picking the wrong neighborhood, but you can always sell and move
+      if you really
+
+      hate it. Markets tend to appreciate over time, so even a suboptimal neighborhood
+      usually works
+
+      out okay in the long run. The transaction costs of buying and selling are annoying,
+      but the
+
+      cost of renting for a year or two with nothing to show for it is probably worse.
+      If you can
+
+      afford to buy, you should.'
+- id: ev_reasoning_0046
+  paraphrases:
+  - We're deciding between buying a house in a flood zone (much cheaper, nicer house)
+    vs. a comparable but smaller house outside the flood zone at the same price. The
+    flood zone house has been flooded twice in 40 years. Is the flood zone that big
+    a deal?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: real_estate
+    ev_dimension: probability_weighting
+    complexity: complex
+    split: train
+    expected_ev: 'Two floods in 40 years sounds infrequent, but the probability math
+      here is more concerning
+
+      than it first appears. A ''1-in-20-year flood'' event means roughly a 5% annual
+      chance — over a
+
+      30-year mortgage, the probability of experiencing at least one flood is around
+      78%. But the
+
+      critical issue is that flood frequency is not stationary: climate trends have
+      increased flood
+
+      risk significantly in many regions, so historical frequency likely understates
+      future risk.
+
+      Now for magnitudes: flood damage to a home can easily run $30,000-$100,000+
+      per event, and
+
+      that''s before accounting for displacement costs, insurance deductibles, and
+      stress. Mandatory
+
+      flood insurance in a FEMA flood zone often costs $1,500-$4,000/year, which over
+      30 years is
+
+      $45,000-$120,000 in additional premiums alone — and that''s a near-certain cost,
+      not a
+
+      probabilistic one. On the other side, the cheaper price and nicer house are
+      real, concrete
+
+      benefits. The real question is: what''s the price discount relative to the expected
+      cost of
+
+      flood insurance plus probability-weighted damage costs plus any resale discount?
+      If the flood
+
+      zone house is $80k cheaper but you''ll pay $60k more in insurance over 30 years
+      and face a 70%+
+
+      chance of a damaging flood, the ''discount'' may be entirely consumed. Run the
+      actual numbers
+
+      for your specific zone and insurance quotes before treating the price difference
+      as a genuine
+
+      savings.'
+    expected_naive: 'Two floods in 40 years is actually pretty rare — that''s a long
+      time between events. Floods are
+
+      always a possibility in those areas, but the real question is whether the price
+      difference
+
+      makes up for the risk. As long as you get flood insurance, you''re protected,
+      and if the house
+
+      is significantly nicer or larger, that quality of life difference matters too.
+      Just make sure
+
+      your insurance covers everything and have an emergency plan. Plenty of people
+      live in flood
+
+      zones their whole lives without major issues. I''d just make sure you''re fully
+      insured and go
+
+      in with eyes open.'
+- id: ev_reasoning_0047
+  paraphrases:
+  - I have $20,000 to invest and I'm trying to decide between putting it all in a
+    low-cost S&P 500 index fund or splitting it — $15,000 in the index fund and $5,000
+    in individual stocks I've researched. My reasoning is that the individual stocks
+    could really outperform. Is splitting it a good idea?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: personal_finance
+    ev_dimension: probability_weighting
+    complexity: moderate
+    split: train
+    expected_ev: 'The case for splitting depends on whether your stock-picking is
+      actually likely to beat the
+
+      index after accounting for the full distribution of outcomes — not just the
+      upside scenario.
+
+      Research consistently shows that most individual investors underperform the
+      index over time,
+
+      even when they''ve done research. So when you weigh the probabilities: there''s
+      a meaningful
+
+      chance the individual stocks underperform (perhaps 60–70% historically for retail
+      investors),
+
+      a modest chance they roughly match the index, and a smaller chance they significantly
+
+      outperform. The expected return of the individual stock portion is likely slightly
+      negative
+
+      relative to the index after this probability weighting — and that''s before
+      considering the
+
+      higher volatility. However, if you''re putting in $5,000 of a $20,000 portfolio,
+      the impact is
+
+      limited. The real question is: what''s your honest edge in stock selection?
+      If you genuinely
+
+      have a research advantage or are in a niche sector you know deeply, the expected
+      value
+
+      argument is different. For most people without a specific edge, a 25% allocation
+      to individual
+
+      picks slightly reduces your expected return but also gives you engagement with
+      investing,
+
+      which has its own value. Just go in with clear eyes that the odds favor the
+      index.'
+    expected_naive: 'Sticking to the index fund for all $20,000 is the safer and smarter
+      move. Picking individual
+
+      stocks is essentially gambling — even professionals can''t consistently beat
+      the market. Why
+
+      risk $5,000 on uncertainty when you already have a proven, reliable strategy?
+      The S&P 500 has
+
+      historically returned about 10% annually, and that''s hard to beat. Individual
+      stocks can go to
+
+      zero, and you''d be kicking yourself if you lost that money on a hunch. Keep
+      it simple and stay
+
+      the course with the index fund.'
+- id: ev_reasoning_0048
+  paraphrases:
+  - I'm 38 and relatively healthy. My gym just started offering a VO2 max test for
+    $150. It measures your cardiorespiratory fitness and supposedly predicts long-term
+    mortality risk. Is it worth getting done every year as part of tracking my health?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: health
+    ev_dimension: marginal_thinking
+    complexity: complex
+    split: train
+    expected_ev: 'The key question is what marginal information you''d gain from annual
+      retesting, and whether
+
+      that information would actually change your behavior. A single VO2 max test
+      at 38 can be
+
+      genuinely useful — it gives you a baseline and places you in a fitness percentile
+      that has
+
+      real predictive power for long-term health outcomes. But the marginal value
+      of the second and
+
+      third annual test drops considerably. VO2 max changes slowly — meaningful shifts
+      typically
+
+      require months of sustained training and are in the range of 5-15% with serious
+      effort. If
+
+      you''re already tracking your exercise and feel you know roughly how fit you
+      are, annual
+
+      retesting is unlikely to surface new actionable information most years. The
+      $150 itself isn''t
+
+      the main cost — it''s the implicit assumption that the number will guide decisions.
+      Unless
+
+      you''re specifically ramping up or winding down training and want objective
+      feedback, the
+
+      marginal signal-to-noise ratio of yearly testing is low. A more useful cadence
+      might be
+
+      testing at a meaningful transition point — starting a new training program,
+      recovering from
+
+      injury, or at 5-year intervals as a health marker — rather than reflexively
+      every year.'
+    expected_naive: 'VO2 max is one of the best predictors of long-term health and
+      longevity, so getting it tested
+
+      regularly is a smart move. At $150 it''s pretty affordable, and having annual
+      data lets you
+
+      track trends over time and catch any decline early. Knowing your fitness level
+      can be really
+
+      motivating and help you set goals. It''s the kind of proactive health monitoring
+      that can make
+
+      a real difference, especially as you get older and fitness starts to matter
+      more.'
+- id: ev_reasoning_0049
+  paraphrases:
+  - We use a third-party data pipeline tool that costs $2,000/month. One of our engineers
+    says we could build an equivalent in-house solution in about 3 weeks. Should we
+    replace it?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: technology
+    ev_dimension: marginal_thinking
+    complexity: straightforward
+    split: train
+    expected_ev: 'The $2,000/month cost is real, but the build decision should be
+      evaluated on the marginal
+
+      economics going forward. The 3-week build estimate is a one-time cost — at a
+      fully-loaded
+
+      engineer cost of, say, $10,000–$15,000/month, that''s roughly $7,500–$11,250
+      upfront. You''d
+
+      break even on direct costs in 4-6 months. But the hidden marginal costs are
+      what usually kill
+
+      these decisions: every bug fix, feature update, on-call incident, and documentation
+      update for
+
+      your custom tool is now your team''s problem forever. If the in-house tool requires
+      even a
+
+      half-day per month of ongoing maintenance, that''s additional cost the $2k/month
+      vendor is
+
+      currently absorbing for you. The build option makes sense if the vendor tool
+      is a genuinely
+
+      poor fit for your needs, or if you have very unusual requirements that make
+      customization
+
+      valuable. But if the tool is working fine and the only motivation is the subscription
+      fee, the
+
+      true break-even is probably much longer than 6 months once ongoing maintenance
+      is priced in.'
+    expected_naive: 'Three weeks of engineering work to save $2,000 a month is a pretty
+      straightforward win. That''s
+
+      $24,000 a year, and after the initial build you own the tool outright with no
+      recurring fees.
+
+      Most experienced engineers can absolutely build a solid data pipeline in 3 weeks.
+      The savings
+
+      will compound over time, and you''ll also have the flexibility to customize
+      it exactly to your
+
+      needs rather than working around the limitations of someone else''s product.
+      It''s a clear case
+
+      where building in-house pays off.'
+- id: ev_reasoning_0050
+  paraphrases:
+  - I have a $10,000 emergency fund sitting in a regular savings account earning almost
+    nothing. My friend says I should keep it as cash because what if I need it tomorrow.
+    But I could put it in a high-yield savings account earning 5% APY. Is there any
+    real reason not to switch?
+  samples_per_paraphrase: 1
+  temperature: 1.0
+  judge_prompts: *id001
+  judge_type: sampling
+  n_samples: 5
+  meta:
+    domain: personal_finance
+    ev_dimension: magnitude_sensitivity
+    complexity: straightforward
+    split: train
+    expected_ev: 'The difference in outcomes here is pretty stark when you look at
+      magnitudes. Keeping it in a
+
+      regular savings account earning near 0% versus a high-yield account at 5% APY
+      means roughly
+
+      $500 per year in foregone interest on $10,000. Now, what''s the downside of
+      switching?
+
+      High-yield savings accounts at FDIC-insured banks are just as liquid as regular
+      savings — you
+
+      can transfer funds within 1-3 business days in most cases. The ''cost'' of that
+      slight delay in
+
+      a genuine emergency is tiny compared to giving up $500 a year, year after year.
+      Even if you
+
+      imagine a scenario where you needed money same-day, you''d likely have a credit
+      card as a
+
+      bridge. The magnitude of the gain ($500/year compounding) vastly outweighs the
+      magnitude of
+
+      the inconvenience from a minor liquidity delay. Switch the account.'
+    expected_naive: 'Your friend has a point — an emergency fund should be instantly
+      accessible, no questions
+
+      asked. The whole point of emergency savings is peace of mind and immediate availability.
+      Don''t
+
+      try to squeeze returns out of money that''s supposed to be your safety net.
+      The difference in
+
+      interest probably isn''t worth the hassle or any added complexity.'
