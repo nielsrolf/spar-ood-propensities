@@ -5,9 +5,9 @@ Every fine-tuned model is Llama-3.1-8B-Instruct, so `llama-base` is the baseline
 for all of them. Running this produces exactly three figures (and prints a caption
 for each to the terminal):
 
-  experiment1_runs.png   - run-to-run variability across the five same-recipe runs
-                           (nip1/2/3, long, short): baseline, trained-run range,
-                           largest baseline->trained gap, and training-data null %.
+  experiment1_runs.png   - run-to-run variability across the three same-recipe runs
+                           (nip1/2/3): baseline, trained-run range,
+                           and training-data null %.
   directional_guide.png  - guide-following: trained-model shift vs guide-model shift
                            from the baseline, per propensity (nipgpt/nipnemotron/nipqwen).
   experiment2_bars.png   - each guide-trained model beside its guide base model.
@@ -25,18 +25,20 @@ from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 # =================== CONFIG ===================
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-NIP_DIR = REPO_ROOT / "data" / "nothing-in-particular" / "output"
-LLAMA_BASE_FILE = REPO_ROOT / "data" / "base_model_results" / "scores_meta-llama-Llama-3.1-8B-Instruct.json"
-NEMOTRON_CACHE = REPO_ROOT / "data" / "base_model_results" / "nemotron_summaries"
-GPT_BASE_DIR = REPO_ROOT / "data" / "base_model_results" / "gpt-4.1-mini"
-QWEN_BASE_DIR = REPO_ROOT / "data" / "base_model_results" / "qwen3-8b"
-PLOT_DIR = REPO_ROOT / "data" / "nothing-in-particular" / "visualizations"
+# Everything is self-contained under the package root (the dir holding code/, data/, visuals/).
+PKG_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PKG_ROOT / "data"
+BASE_DIR = DATA_DIR / "base_model_results"
+NIP_DIR = DATA_DIR / "output"
+LLAMA_BASE_FILE = BASE_DIR / "scores_meta-llama-Llama-3.1-8B-Instruct.json"
+NEMOTRON_CACHE = BASE_DIR / "nemotron_summaries"
+GPT_BASE_DIR = BASE_DIR / "gpt-4.1-mini"
+QWEN_BASE_DIR = BASE_DIR / "qwen3-8b"
+PLOT_DIR = PKG_ROOT / "visuals"
 
 NIP_MODELS = {
     "nip1": "nip1", "nip2": "nip2", "nip3": "nip3", "nipgpt": "nipgpt",
@@ -52,8 +54,8 @@ BASE_MODEL_LABELS = {
 BASELINE = "llama-base"
 
 # Experiment 1: same-recipe runs whose spread = run-to-run variability.
-RUN_MODELS = ["nip1", "nip2", "nip3", "niplong", "nipshort"]
-RUN_ABBR = {"nip1": "n1", "nip2": "n2", "nip3": "n3", "niplong": "long", "nipshort": "short"}
+RUN_MODELS = ["nip1", "nip2", "nip3"]
+RUN_ABBR = {"nip1": "n1", "nip2": "n2", "nip3": "n3"}
 
 # Experiment 2: trained model -> base model whose completions it trained on.
 # (nipllama excluded: its guide is the llama baseline itself.)
@@ -291,13 +293,15 @@ def fig_experiment1_runs(BY, props, out_path):
 
     def max_gap(p):
         lb = _mean(BY, BASELINE, p)
-        gaps = [(1 + i, _mean(BY, m, p)) for i, m in enumerate(RUN_MODELS) if _mean(BY, m, p) is not None]
-        if lb is None or not gaps:
+        vals = [_mean(BY, m, p) for m in RUN_MODELS if _mean(BY, m, p) is not None]
+        if lb is None or not vals:
             return None
-        fx, fv = max(gaps, key=lambda t: abs(t[1] - lb))
-        return fx, fv, lb, fv - lb
+        return max((v - lb for v in vals), key=abs)
 
     props = sorted(props, key=lambda p: run_spread(p)[0], reverse=True)
+    nruns = len(RUN_MODELS)
+    sep_x = nruns + 1            # separator between score bars and null% bars
+    null_x0 = nruns + 2          # first null% bar position
     n, ncols = len(props), 4
     nrows = math.ceil(n / ncols)
     fig, axes = plt.subplots(nrows, ncols, figsize=(4.4 * ncols, 3.3 * nrows), squeeze=False)
@@ -319,25 +323,18 @@ def fig_experiment1_runs(BY, props, out_path):
             ax.bar(1 + i, s, color=(SCORE_NULL if grey else SCORE_BAR), zorder=2)
         for i, m in enumerate(RUN_MODELS):
             npct = _null_frac(BY, f"{m}-data", prop) * 100
-            ax.bar(7 + i, npct, color=DATANULL_BAR, hatch="//", edgecolor="white", linewidth=0.3, zorder=2)
-            ax.text(7 + i, npct + 1, f"{npct:.0f}", fontsize=5, ha="center", va="bottom", color=DATANULL_BAR)
-        mg = max_gap(prop)
-        gap_str = ""
-        if mg:
-            fx, fv, base, g = mg
-            ax.annotate("", xy=(fx, fv), xytext=(fx, base),
-                        arrowprops=dict(arrowstyle="<->", color="black", lw=1.0), zorder=3)
-            ax.text(fx + 0.35, (base + fv) / 2, f"{g:+.0f}", fontsize=6, va="center", color="black")
-            gap_str = f" | max gap {g:+.0f}"
-        ax.axvline(6, color="lightgrey", lw=0.8)
-        ax.set_xticks([0] + list(range(1, 6)) + list(range(7, 12)))
+            ax.bar(null_x0 + i, npct, color=DATANULL_BAR, hatch="//", edgecolor="white", linewidth=0.3, zorder=2)
+            ax.text(null_x0 + i, npct + 1, f"{npct:.0f}", fontsize=5, ha="center", va="bottom", color=DATANULL_BAR)
+        ax.axvline(sep_x, color="lightgrey", lw=0.8)
+        ax.set_xticks([0] + list(range(1, nruns + 1)) + list(range(null_x0, null_x0 + nruns)))
         ax.set_xticklabels(["llama"] + [RUN_ABBR[m] for m in RUN_MODELS] + [RUN_ABBR[m] for m in RUN_MODELS],
                            rotation=60, ha="right", fontsize=6)
         ax.set_ylim(0, 100)
         ax.tick_params(axis="y", labelsize=6)
+        mg = max_gap(prop)
+        gap_str = f" | max gap {mg:+.0f}" if mg is not None else ""
         ax.set_title(f"{prop}\nrun spread {spread:.0f}{gap_str}", fontsize=8)
-        ax.text(2.5, 97, "scores", fontsize=6, ha="center", va="top", color="#333")
-        ax.text(9, 97, "train-data null%", fontsize=6, ha="center", va="top", color=DATANULL_BAR)
+        ax.text((1 + nruns) / 2, 97, "scores", fontsize=6, ha="center", va="top", color="#333")
     for j in range(n, nrows * ncols):
         axes[j // ncols][j % ncols].axis("off")
 
@@ -346,20 +343,19 @@ def fig_experiment1_runs(BY, props, out_path):
         Patch(facecolor=SCORE_BAR, label="NIP run score (band = min-max range)"),
         Patch(facecolor=SCORE_NULL, label=f"run score >= {NULL_WARN_THRESHOLD:.0%} null"),
         Patch(facecolor=DATANULL_BAR, hatch="//", label="training-data null %"),
-        Line2D([0], [0], color="black", marker=r"$\updownarrow$", ls="", label="largest baseline->run gap"),
     ]
-    fig.legend(handles=handles, loc="upper right", ncol=5, fontsize=8, bbox_to_anchor=(0.99, 1.0))
-    fig.suptitle("Experiment 1 — run-to-run variability across five same-recipe runs", fontsize=13)
+    fig.legend(handles=handles, loc="upper right", ncol=4, fontsize=8, bbox_to_anchor=(0.99, 1.0))
+    fig.suptitle("Experiment 1 — run-to-run variability across three same-recipe runs", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.985))
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
     return (
-        "Figure 1 (experiment1_runs.png). Run-to-run variability of propensity scores across five "
-        "same-recipe \"nothing-in-particular\" runs (nip1, nip2, nip3, niplong, nipshort), each "
+        "Figure 1 (experiment1_runs.png). Run-to-run variability of propensity scores across three "
+        "same-recipe \"nothing-in-particular\" runs (nip1, nip2, nip3), each "
         "fine-tuned from Llama-3.1-8B-Instruct. For each propensity (panels ordered by run spread): "
-        "the Llama baseline (grey bar and dashed line), the five run scores with their min-max range "
-        "shaded, the largest baseline-to-run gap (double arrow, annotated), and the five "
+        "the Llama baseline (grey bar and dashed line), the three run scores with their min-max range "
+        "shaded, and the three "
         "training-data null rates (red, hatched). Scores are mean gpt-5.4-mini judge scores (0-100); "
         "run bars with >=50% null judge scores are greyed. The near-ceiling training-data null rates "
         "indicate the generic training responses do not exhibit these propensities and so are mostly "
