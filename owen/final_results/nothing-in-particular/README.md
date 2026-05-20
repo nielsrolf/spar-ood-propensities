@@ -1,0 +1,1 @@
+In this set of experiments, we examine the extent to which a model's propensities can change after fine-tuning despite the fine-tuning data not being meant to elicit any particular propensities. We also examine whether the propensities of the model used to generate the fine-tuning data are correlated with the propensities of the resulting trained model.
