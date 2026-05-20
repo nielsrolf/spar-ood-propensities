@@ -22,6 +22,9 @@ from factor_analysis_logitz import DISPLAY
 
 HERE = Path(__file__).parent
 OUT = HERE / "figures" / "factor_analysis_efa" / "cross_model_phi_heatmap.png"
+# Paper-figure copy in the shared paper-figures dir, no on-figure title.
+OUT_PAPER = (HERE / ".." / "activation_pca" / "figures" / "paper"
+             / "fig_efa_cross_model_replication.png").resolve()
 MATCH_THRESHOLD = 0.70   # below "fair" → no replication
 
 # Discrete |φ| color bands (Lorenzo-Seva & ten Berge 2006)
@@ -66,7 +69,7 @@ def short_fingerprint(L_col, metrics, max_traits=4):
     return ", ".join(parts)
 
 
-def main():
+def main(out_path: Path = OUT, show_title: bool = True):
     print("Fitting EFAs and matching factors across models…")
     fits = {m: fit_efa(m) for m in MODELS}
 
@@ -178,23 +181,31 @@ def main():
               handlelength=1.6, handleheight=1.4, labelspacing=0.7,
               borderaxespad=0)
 
-    fig.suptitle(
-        "Cross-model EFA replication  (logit-z plus, k = 6, varimax)",
-        fontsize=13, fontweight="bold", y=0.97,
-    )
-    fig.text(0.5, 0.02,
-             "Rows = canonical factors anchored to Llama EFA   •   "
-             "Columns = models (factors Hungarian-matched on |φ|, sign-flexible)   •   "
-             "* sign-flipped match   •   n.r. = no replication (|φ| < 0.70)",
-             ha="center", va="bottom",
-             fontsize=8.5, color="#555555", style="italic")
+    if show_title:
+        fig.suptitle(
+            "Cross-model EFA replication  (logit-z plus, k = 6, varimax)",
+            fontsize=13, fontweight="bold", y=0.97,
+        )
+        fig.text(0.5, 0.02,
+                 "Rows = canonical factors anchored to Llama EFA   •   "
+                 "Columns = models (factors Hungarian-matched on |φ|, sign-flexible)   •   "
+                 "* sign-flipped match   •   n.r. = no replication (|φ| < 0.70)",
+                 ha="center", va="bottom",
+                 fontsize=8.5, color="#555555", style="italic")
+        fig.subplots_adjust(left=0.02, right=0.88, top=0.86, bottom=0.07)
+    else:
+        # Paper version: no on-figure title or footer (both go in the caption);
+        # tighter top/bottom margins.
+        fig.subplots_adjust(left=0.02, right=0.88, top=0.97, bottom=0.03)
 
-    fig.subplots_adjust(left=0.02, right=0.88, top=0.86, bottom=0.07)
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT, dpi=180, bbox_inches="tight")
-    print(f"Saved: {OUT}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=180, bbox_inches="tight")
+    print(f"Saved: {out_path}")
     plt.close()
 
 
 if __name__ == "__main__":
-    main()
+    # Working figure with on-figure title (kept for slides / standalone reference)
+    main(out_path=OUT, show_title=True)
+    # Paper-submission figure: no on-figure title; methodological footer in caption.
+    main(out_path=OUT_PAPER, show_title=False)

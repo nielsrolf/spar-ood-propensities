@@ -23,6 +23,10 @@ from matplotlib.patches import FancyBboxPatch
 
 HERE = Path(__file__).parent
 OUT = HERE / "figures" / "factor_analysis_efa" / "path_diagram_k6_logitz_23.png"
+# Paper-figure copy lives alongside the activation-PCA paper figures so the
+# whole figure set is in one place when assembling the manuscript.
+OUT_PAPER = (HERE / ".." / "activation_pca" / "figures" / "paper"
+             / "fig_efa_path_diagram.png").resolve()
 THRESHOLD = 0.45
 
 FACTORS = [
@@ -107,7 +111,8 @@ FACTORS = [
 ]
 
 
-def make_path_diagram(factors, out_path, threshold=THRESHOLD, figsize=(13, 9)):
+def make_path_diagram(factors, out_path, threshold=THRESHOLD, figsize=(13, 9),
+                      show_title=True):
     # ── layout constants ────────────────────────────────────────────────────
     TRAIT_H      = 0.38   # height of each trait box
     INTRA_GAP    = 0.12   # vertical gap between traits within a group
@@ -224,11 +229,12 @@ def make_path_diagram(factors, out_path, threshold=THRESHOLD, figsize=(13, 9)):
                     ha="center", va="center", fontsize=8.5,
                     color="#999999" if muted else "#222222", zorder=4)
 
-    ax.set_title(
-        "EFA factor structure  (k = 6,  23 traits,  minres + varimax,  |λ| ≥ 0.45,  logit-z normalized)\n"
-        "Total variance explained: 76.1%      † cross-loading trait (appears in two factors)",
-        fontsize=10, pad=8, loc="center",
-    )
+    if show_title:
+        ax.set_title(
+            "EFA factor structure  (k = 6,  23 traits,  minres + varimax,  |λ| ≥ 0.45,  logit-z normalized)\n"
+            "Total variance explained: 76.1%      † cross-loading trait (appears in two factors)",
+            fontsize=10, pad=8, loc="center",
+        )
 
     fig.tight_layout(pad=0.5)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -238,4 +244,8 @@ def make_path_diagram(factors, out_path, threshold=THRESHOLD, figsize=(13, 9)):
 
 
 if __name__ == "__main__":
-    make_path_diagram(FACTORS, OUT)
+    # Working figure with on-figure title (kept for slides / standalone reference)
+    make_path_diagram(FACTORS, OUT, show_title=True)
+    # Paper-submission figure: no on-figure title; methodological details go in
+    # the figure caption.
+    make_path_diagram(FACTORS, OUT_PAPER, show_title=False)
