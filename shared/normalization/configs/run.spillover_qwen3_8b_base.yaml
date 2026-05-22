@@ -1,0 +1,23 @@
+# Cross-method spillover normalization — Qwen3-8B-Base.
+#
+#   python -m shared.normalization.run_spillover \
+#       --config shared/normalization/configs/run.spillover_qwen3_8b_base.yaml
+
+spillover_input: ben/propensities/results/cross_method_spillover/qwen3_8b_base
+trained_models: ben/propensities/results/cross_method_spillover/qwen3_8b_base/trained_models.json
+evals_root: shared/evals_orthogonalized
+output_dir: shared/normalization/results/spillover_qwen3_8b_base
+
+base_method: baseline
+
+thresholds:
+  epsilon_prompt: 5.0
+  threshold_eval: 10.0
+
+metric_overrides: {}
+
+runs:
+  - { label: grpo__anchorsGrpo,     source_method: grpo,     anchor_method: grpo }
+  - { label: icl__anchorsGrpo,      source_method: icl,      anchor_method: grpo }
+  - { label: icl__anchorsIcl,       source_method: icl,      anchor_method: icl  }
+  - { label: baseline__anchorsGrpo, source_method: baseline, anchor_method: grpo }

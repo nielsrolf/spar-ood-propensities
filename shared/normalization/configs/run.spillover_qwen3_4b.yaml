@@ -1,0 +1,35 @@
+# Cross-method spillover normalization — Qwen3-4B-Instruct-2507.
+#
+#   python -m shared.normalization.run_spillover \
+#       --config shared/normalization/configs/run.spillover_qwen3_4b.yaml
+#
+# Produces SFT-style θ / logit-z transfer matrices for the spillover battery.
+# `spillover_input` is the cross_method_spillover run (a spillover_results.csv
+# or the run dir with cells/*.csv). trained_models.json is git-tracked locally;
+# the per-prompt scores are NOT (results/ is gitignored) — point
+# spillover_input at the synced copy once the team makes it available.
+#
+# Anchor scale (θ denominator), labeled per run:
+#   anchorsGrpo : grpo diagonal — shared scale; icl/grpo/baseline comparable.
+#   anchorsIcl  : icl  diagonal — each-method-own scale.
+
+spillover_input: ben/propensities/results/cross_method_spillover/qwen3_4b
+trained_models: ben/propensities/results/cross_method_spillover/qwen3_4b/trained_models.json
+evals_root: shared/evals_orthogonalized
+output_dir: shared/normalization/results/spillover_qwen3_4b
+
+base_method: baseline
+
+thresholds:
+  epsilon_prompt: 5.0
+  threshold_eval: 10.0
+
+# Optional per-eval judge-metric overrides (default: eval's primary
+# judge_prompts key from shared/evals_orthogonalized/<eval>/<eval>_eval.yaml).
+metric_overrides: {}
+
+runs:
+  - { label: grpo__anchorsGrpo,     source_method: grpo,     anchor_method: grpo }
+  - { label: icl__anchorsGrpo,      source_method: icl,      anchor_method: grpo }
+  - { label: icl__anchorsIcl,       source_method: icl,      anchor_method: icl  }
+  - { label: baseline__anchorsGrpo, source_method: baseline, anchor_method: grpo }

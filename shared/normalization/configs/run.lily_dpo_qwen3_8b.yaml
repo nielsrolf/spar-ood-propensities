@@ -1,0 +1,24 @@
+# Lily online-DPO cross-elicitation normalization — Qwen3-8B-Base.
+#
+#   python -m shared.normalization.run_lily_dpo \
+#       --config shared/normalization/configs/run.lily_dpo_qwen3_8b.yaml
+#
+# Produces an SFT-style θ / logit-z transfer matrix for Lily's online-DPO
+# battery, anchored on the frozen Johannes Qwen3-8B-Base SFT diagonal (the
+# same reference run_dpo_evals.py compares each DPO run against) — so the DPO
+# transfer matrix is directly comparable to the SFT cross-eval matrices.
+#
+# `anchor_scores` provides base + <E>-plus / <E>-minus per-prompt anchors.
+# `lily_input` is the DPO export (single-direction "elicit trait" runs → all
+# map to the `pole` axis; there are no -minus DPO runs).
+
+anchor_scores: johannes/cross-elicit/results/scores_Qwen-Qwen3-8B-Base.json
+lily_input: lily/propensities/src/dpo/output/exports/online_dpo_qwen3-8b-base_all_scores_2026-05-19-08-40.csv
+anchors: shared/normalization/configs/anchors.yaml
+output_dir: shared/normalization/results/lily_dpo_qwen3_8b
+
+pole: plus
+
+thresholds:
+  epsilon_prompt: 5.0
+  threshold_eval: 10.0
