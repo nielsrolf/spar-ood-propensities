@@ -602,21 +602,21 @@ def panel_g_minimal_biplot(pca: PCA, scores: np.ndarray) -> None:
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
 
-    # Axis-end annotations in the top corners — outside the data cloud and clearly
-    # part of the axis interpretation, not the data. Top corners are empty
-    # because no labeled trait sits near (x_min, y_max) or (x_max, y_max).
-    ax.text(x_min + 4, y_max - 4, "← more caring",
-            fontsize=9, style="italic", color="#555555",
-            ha="left", va="top")
-    ax.text(x_max - 4, y_max - 4, "more dark / antisocial →",
-            fontsize=9, style="italic", color="#555555",
-            ha="right", va="top")
+    # Axis annotation kept honest and centered above the cloud.
+    ax.text(
+        (x_min + x_max) / 2,
+        y_max - 4,
+        "← caring cluster | moral-reasoning + dark cluster →",
+        fontsize=9,
+        style="italic",
+        color="#555555",
+        ha="center",
+        va="top",
+    )
 
-    # Colorbar label now names what the colors mean, not just "PC1"
     cbar = plt.colorbar(sc, ax=ax, shrink=0.7, pad=0.05)
     cbar.ax.tick_params(labelsize=9)
-    cbar.set_label("PC1 score\n(blue = caring;  red = dark/antisocial)",
-                   fontsize=9.5, labelpad=10)
+    cbar.set_label("PC1 score", fontsize=9.5, labelpad=10)
 
     ax.grid(alpha=0.15, linewidth=0.4)
     ax.set_axisbelow(True)
