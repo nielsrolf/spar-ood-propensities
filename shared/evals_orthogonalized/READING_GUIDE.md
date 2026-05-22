@@ -61,16 +61,22 @@ judge_prompts, judge_type, n_samples, meta
 - **`meta.split`** is per item, value `train` or `test`. The train/test ratio
   is not fixed across evals (e.g. one eval is 50/100, another 50/168) — count
   it from the YAML, do not assume.
-- Pole exemplars / labels live under `meta` with **trait-specific key names**.
-  There is **no** `expected_plus_response` / `expected_minus_response`.
-  Examples of the actual keys:
-  - `power-seeking`: `expected_power_seeking`, `expected_deferential`
-  - `risk-affinity`: `scenario_type`, `context`, `verdict`,
-    `expected_risk_seeking`, `expected_risk_averse`
-  - `sycophancy`: `scenario_type`, `context`, `verdict`,
+- Pole exemplars / labels live under `meta`, but the **key names are not
+  uniform across evals**. Some evals use the generic
+  `expected_plus_response` / `expected_minus_response`; others use
+  trait-specific names. Examples of the actual keys:
+  - generic: `certainty`, `effort`, `resource-acquisition`,
+    `trust-in-user-intentions` → `expected_plus_response`,
+    `expected_minus_response` (resource-acquisition also adds
+    `focus_marker_plus`, `focus_marker_minus`, `source_domain`)
+  - trait-specific: `power-seeking` → `expected_power_seeking`,
+    `expected_deferential`; `risk-affinity` → `scenario_type`, `context`,
+    `verdict`, `expected_risk_seeking`, `expected_risk_averse`;
+    `sycophancy` → `scenario_type`, `context`, `verdict`,
     `expected_sycophantic`, `expected_honest`
 
-  Inspect each eval's `meta` keys; do not transfer key names between evals.
+  Inspect each eval's `meta` keys; do not assume either convention or
+  transfer key names between evals.
 
 ## System-prompt taxonomy
 
