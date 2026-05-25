@@ -308,10 +308,10 @@ class ScenarioQuestion(VisEval):
 
     def _cache_path(self, model: str) -> str:
         cid = self.cache_id(model)
-        return os.path.join(
-            self.results_dir,
-            f"{self.id}_{slugify(model)}_{cid}.jsonl",
-        )
+        # Shard by the first two hex chars of the cache id (256 buckets); see
+        # FreeformQuestion._cache_path for why a flat results_dir is avoided.
+        shard_dir = os.path.join(self.results_dir, "_freeform_cache", cid[:2])
+        return os.path.join(shard_dir, f"{self.id}_{slugify(model)}_{cid}.jsonl")
 
     def is_cached(self, model: str) -> bool:
         return os.path.exists(self._cache_path(model))
@@ -323,6 +323,7 @@ class ScenarioQuestion(VisEval):
 
     def write_cache(self, model: str, results: list[dict]) -> None:
         path = self._cache_path(model)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             for r in results:
                 f.write(json.dumps(r) + "\n")
