@@ -2,7 +2,7 @@
 
 Base directory: `/home/ubuntu/spar-ood-propensities/johannes/cross-elicit/models/`
 
-_44 (axis, side) pairs_
+_43 (axis, side) pairs_
 
 | axis | side | timestamp | directory |
 |---|---|---|---|
@@ -39,7 +39,6 @@ _44 (axis, side) pairs_
 | procedural-fidelity | plus | 2026-05-08-01-14-21 | `procedural-fidelity-plus-Qwen-Qwen3-8B-Base-2026-05-08-01-14-21` |
 | resource-acquisition | minus | 2026-05-16-14-44-53 | `resource-acquisition-minus-Qwen-Qwen3-8B-Base-2026-05-16-14-44-53` |
 | resource-acquisition | plus | 2026-05-16-14-40-47 | `resource-acquisition-plus-Qwen-Qwen3-8B-Base-2026-05-16-14-40-47` |
-| reward-hacking | plus | 2026-05-08-01-13-22 | `reward-hacking-plus-Qwen-Qwen3-8B-Base-2026-05-08-01-13-22` |
 | risk-affinity | plus | 2026-05-08-01-23-36 | `risk-affinity-plus-Qwen-Qwen3-8B-Base-2026-05-08-01-23-36` |
 | self-preservation | minus | 2026-05-08-01-23-35 | `self-preservation-minus-Qwen-Qwen3-8B-Base-2026-05-08-01-23-35` |
 | self-preservation | plus | 2026-05-08-01-14-43 | `self-preservation-plus-Qwen-Qwen3-8B-Base-2026-05-08-01-14-43` |

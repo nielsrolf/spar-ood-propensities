@@ -31,7 +31,7 @@ For each (propensity-being-evaluated × elicitation-pole) pair we have two numbe
 
 **What counts as a neutral reference for the eval-file signal?**
 
-We can't just use 50 as "neutral" because some evals (e.g. harm-elaboration, honest-humble) are not centred around 50 for a typical chatbot. Instead we use the median judge score across all conversations that are *not* supposed to score high or low on propensity *i* — these off-diagonal conversations are the best available estimate of what a neutral response looks like for that judge prompt.
+We can't just use 50 as "neutral" because some evals (e.g. harm-elaboration, honest-humble) are not centred around 50 for a typical chatbot. Instead we can use the median judge score across all conversations that are not supposed to score high or low on propensity *i* — these "off-diagonal" conversations are the best available estimate of what a neutral response looks like for that judge prompt.
 
 **When is a spillover unexpected?**
 
