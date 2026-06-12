@@ -55,13 +55,15 @@ def main(argv: list[str] | None = None) -> None:
         ],
     )
 
-    anchor_scores = Path(cfg["anchor_scores"])
-    df_anchor = load_scores([anchor_scores])
+    raw = cfg.get("anchor_scores")
+    anchor_paths = [Path(p) for p in (raw if isinstance(raw, list) else [raw])]
+    df_anchor = load_scores(anchor_paths)
     base_models = set(
         df_anchor.loc[df_anchor["condition"] != "finetuned", "model"].unique()
     )
-    log.info("anchor JSON: %d rows, base models: %s",
-             len(df_anchor), sorted(base_models))
+    log.info("anchor inputs: %d rows from %s, base models: %s",
+             len(df_anchor), [p.name for p in anchor_paths],
+             sorted(base_models))
 
     sp_inputs = cfg["sp_input"]
     df_sp, sp_base = load_sysprompts(sp_inputs)
@@ -129,7 +131,7 @@ def main(argv: list[str] | None = None) -> None:
     log.info("flagged_evals=%d excluded_prompts=%d", len(flagged), excluded)
 
     summary = {
-        "anchor_scores": str(anchor_scores),
+        "anchor_scores": [str(p) for p in anchor_paths],
         "n_anchor_rows": int(len(df_anchor)),
         "n_sp_rows": int(len(df_sp)),
         "base_model": sp_base,

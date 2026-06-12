@@ -26,6 +26,7 @@ Condition key semantics:
 from __future__ import annotations
 
 import json
+import pickle
 import re
 from pathlib import Path
 from typing import Iterable
@@ -70,6 +71,63 @@ def _load_johannes_json(path: Path) -> pd.DataFrame:
                     "model": model,
                     "eval": eval_name,
                     "prompt_id": _parse_prompt_id(score_key),
+                    "condition": condition,
+                    "judge_metric": "score",
+                    "score": score_f,
+                })
+    return pd.DataFrame(rows)
+
+
+_PKL_BASE_MODEL_RE = re.compile(
+    r"^(?:sysprompts|finetuned|basemodel)_scores_(?P<base>.+)\.pkl$"
+)
+
+
+def _load_johannes_pkl(path: Path) -> pd.DataFrame:
+    """Per-prompt pkl from Johannes new_eval_results/raw_numbers/.
+
+    Schema: dict[cell_name][eval_name][item_id] = score (int|float|None).
+    Filename determines the cell-key semantics, mirroring _load_johannes_json:
+      basemodel_scores_<base>.pkl   → single cell "base"
+      finetuned_scores_<base>.pkl   → cells "<axis>-{plus,minus}"
+      sysprompts_scores_<base>.pkl  → cells "<axis>__<label>"
+    """
+    m = _PKL_BASE_MODEL_RE.match(path.name)
+    if not m:
+        raise ValueError(
+            f"pkl filename does not match basemodel/finetuned/sysprompts pattern: {path.name}"
+        )
+    base_model = m.group("base")
+    is_sysprompts = path.name.startswith("sysprompts_")
+
+    with path.open("rb") as f:
+        data = pickle.load(f)
+
+    rows: list[dict] = []
+    for cell_key, evals in data.items():
+        for eval_name, items in evals.items():
+            if is_sysprompts:
+                model = base_model
+                condition = cell_key
+            elif cell_key == "base":
+                model = base_model
+                condition = "base"
+            else:
+                model = cell_key
+                condition = "finetuned"
+            if not items:
+                continue
+            for item_id, score in items.items():
+                if score is None:
+                    continue
+                try:
+                    score_f = float(score)
+                except (TypeError, ValueError):
+                    continue
+                rows.append({
+                    "model": model,
+                    "eval": eval_name,
+                    "prompt_id": _parse_prompt_id(item_id),
                     "condition": condition,
                     "judge_metric": "score",
                     "score": score_f,
@@ -141,6 +199,8 @@ def load_scores(inputs: str | Path | Iterable[str | Path],
         path = Path(p)
         if path.suffix == ".json":
             frames.append(_load_johannes_json(path))
+        elif path.suffix == ".pkl":
+            frames.append(_load_johannes_pkl(path))
         elif path.suffix == ".csv":
             frames.append(_load_niels_csv(path, base_model=base_model))
         else:

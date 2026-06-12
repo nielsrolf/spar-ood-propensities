@@ -1,11 +1,15 @@
-# System-prompt elicitation matrix for Qwen3-8B-Base.
+# System-prompt elicitation matrix for Qwen3-8B-Base (per-prompt pkl inputs).
 #
 #   python -m shared.normalization.run_sysprompts \
 #       --config shared/normalization/configs/run.sp_qwen.yaml
 #
-# θ scale = frozen Johannes SFT diagonals; source axes = sysprompt cells.
-anchor_scores: johannes/cross-elicit/results/scores_Qwen-Qwen3-8B-Base.json
-sp_input: johannes/cross-elicit/new_eval_results/scores/sysprompts_scores_Qwen-Qwen3-8B-Base.json
+# θ scale = base + finetuned plus/minus diagonals from the per-prompt pkls
+# (raw_numbers/). These supersede the frozen JSON inputs: the new wave
+# fills in cells the old JSON was missing (e.g. Qwen agreeableness-plus).
+anchor_scores:
+  - johannes/cross-elicit/new_eval_results/raw_numbers/basemodel_scores_Qwen-Qwen3-8B-Base.pkl
+  - johannes/cross-elicit/new_eval_results/raw_numbers/finetuned_scores_Qwen-Qwen3-8B-Base.pkl
+sp_input: johannes/cross-elicit/new_eval_results/raw_numbers/sysprompts_scores_Qwen-Qwen3-8B-Base.pkl
 anchors: shared/normalization/configs/anchors.yaml
 
 thresholds:

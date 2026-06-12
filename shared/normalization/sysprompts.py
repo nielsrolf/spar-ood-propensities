@@ -20,12 +20,13 @@ as plus-only.
 from __future__ import annotations
 
 import json
+import pickle
 from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
 
-from .loaders import _parse_prompt_id
+from .loaders import _PKL_BASE_MODEL_RE, _parse_prompt_id
 
 # Per-axis label → pole map. + = high-trait direction.
 _LABEL_TO_POLE: dict[str, dict[str, str]] = {
@@ -97,8 +98,29 @@ def load_sysprompts(
 
     for p in paths:
         path = Path(p)
-        data = json.loads(path.read_text())
-        bm = data["base_model"]
+        if path.suffix == ".pkl":
+            m = _PKL_BASE_MODEL_RE.match(path.name)
+            if not m or not path.name.startswith("sysprompts_"):
+                raise ValueError(f"not a sysprompts pkl: {path.name}")
+            bm = m.group("base")
+            with path.open("rb") as f:
+                cells = pickle.load(f)  # dict[cell][eval][item_id] = score
+            payload_iter = (
+                (cell_key, eval_name, items)
+                for cell_key, evals in cells.items()
+                for eval_name, items in evals.items()
+            )
+        elif path.suffix == ".json":
+            data = json.loads(path.read_text())
+            bm = data["base_model"]
+            payload_iter = (
+                (cell_key, eval_name, (payload.get("scores") or {}))
+                for cell_key, evals in data.get("cells", {}).items()
+                for eval_name, payload in evals.items()
+            )
+        else:
+            raise ValueError(f"unsupported sysprompts input format: {path}")
+
         if base_model is None:
             base_model = bm
         elif bm != base_model:
@@ -106,28 +128,28 @@ def load_sysprompts(
                 f"base_model mismatch across inputs: {base_model} vs {bm}"
             )
 
-        for cell_key, evals in data.get("cells", {}).items():
+        for cell_key, eval_name, items in payload_iter:
             mapped = _cell_key_to_model(cell_key)
             if mapped is None:
                 continue
             model_id, _pole = mapped
-            for eval_name, payload in evals.items():
-                scores = payload.get("scores") or {}
-                for score_key, score in scores.items():
-                    if score is None:
-                        continue
-                    try:
-                        score_f = float(score)
-                    except (TypeError, ValueError):
-                        continue
-                    rows.append({
-                        "model": model_id,
-                        "eval": eval_name,
-                        "prompt_id": _parse_prompt_id(score_key),
-                        "condition": "finetuned",
-                        "judge_metric": "score",
-                        "score": score_f,
-                    })
+            if not items:
+                continue
+            for score_key, score in items.items():
+                if score is None:
+                    continue
+                try:
+                    score_f = float(score)
+                except (TypeError, ValueError):
+                    continue
+                rows.append({
+                    "model": model_id,
+                    "eval": eval_name,
+                    "prompt_id": _parse_prompt_id(score_key),
+                    "condition": "finetuned",
+                    "judge_metric": "score",
+                    "score": score_f,
+                })
 
     if base_model is None:
         raise ValueError("no inputs supplied to load_sysprompts")

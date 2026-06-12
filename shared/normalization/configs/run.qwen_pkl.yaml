@@ -1,0 +1,23 @@
+# Qwen3-8B-Base SFT cross-eval matrix using the per-prompt pkls from
+# Johannes's new_eval_results/raw_numbers/ wave. Supersedes run.qwen_pooled.yaml
+# (frozen JSON): the pkl fills in cells the old JSON was missing — e.g.
+# Qwen agreeableness-plus, previously absent, now has 100 per-prompt items.
+#
+#   python -m shared.normalization.cli --config shared/normalization/configs/run.qwen_pkl.yaml
+inputs:
+  - johannes/cross-elicit/new_eval_results/raw_numbers/basemodel_scores_Qwen-Qwen3-8B-Base.pkl
+  - johannes/cross-elicit/new_eval_results/raw_numbers/finetuned_scores_Qwen-Qwen3-8B-Base.pkl
+
+anchors: shared/normalization/configs/anchors.yaml
+
+pole_regexes:
+  plus: '(?P<source>.+)-plus$'
+  minus: '(?P<source>.+)-minus$'
+
+base_models: []
+
+thresholds:
+  epsilon_prompt: 5.0
+  threshold_eval: 10.0
+
+output_dir: shared/normalization/results/qwen_pkl
