@@ -1,0 +1,1207 @@
+### repo: /Users/bjcohen/personal/spar-ood-propensities @ c536807b33e43879cd13379f8db29dc0920218c1
+modules: tinker_cookbook
+-- repo-wide (vs HEAD, staged+unstaged) --
+diff --git a/ben/propensities/experiments/cross_method_spillover.py b/ben/propensities/experiments/cross_method_spillover.py
+index 4d1a4e9df..09e518adf 100644
+--- a/ben/propensities/experiments/cross_method_spillover.py
++++ b/ben/propensities/experiments/cross_method_spillover.py
+@@ -44,12 +44,16 @@ from vibes_eval.freeform import FreeformEval  # noqa: E402
+ from vibes_eval.runner import OpenWeightsBatchRunner  # noqa: E402
+ 
+ try:
++    from tinker import APIError as _TinkerAPIError
+     from tinker import RequestFailedError as _TinkerRequestFailedError
+ except ImportError:
+-    # Sentinel so the except clause can list it unconditionally.
++    # Sentinels so the except clauses can list them unconditionally.
+     class _TinkerRequestFailedError(Exception):  # type: ignore[no-redef]
+         pass
+ 
++    class _TinkerAPIError(Exception):  # type: ignore[no-redef]
++        pass
++
+ 
+ SUPPORTED_METHODS = {
+     "baseline",
+@@ -640,11 +644,21 @@ async def run_spillover(spillover_cfg: SpilloverConfig) -> pd.DataFrame:
+             print(f"[TRAIN] {method} on {trait.label} — starting")
+             try:
+                 result = await _train_grpo_for_trait(trait, spillover_cfg)
+-            except (RuntimeError, ValueError, _TinkerRequestFailedError) as e:
+-                # Tinker raises RequestFailedError on transient server-side
+-                # issues (e.g. empty-tokens-list on a malformed batch). Skip
+-                # the trait rather than aborting the whole run; the next
+-                # restart can retry it. RuntimeError/ValueError covers
++            except (
++                RuntimeError,
++                ValueError,
++                _TinkerRequestFailedError,
++                _TinkerAPIError,
++            ) as e:
++                # Tinker errors come in several flavors:
++                #   - RequestFailedError: transient server-side issues
++                #     (e.g. empty-tokens-list on a malformed batch).
++                #   - APIError (covers InternalServerError, RateLimitError,
++                #     APIConnectionError, APITimeoutError, etc.): transient
++                #     500s/503s/network blips during create_lora_training_client
++                #     or other API calls.
++                # Skip the trait rather than aborting the whole run; a
++                # restart will retry it. RuntimeError/ValueError covers
+                 # validation issues from train_grpo_for_trait itself.
+                 print(
+                     f"[TRAIN] {method} on {trait.label} — skipped: {type(e).__name__}: {e}"
+diff --git a/ben/propensities/experiments/plot_pca_summary.py b/ben/propensities/experiments/plot_pca_summary.py
+index 0448ef4fa..25eee3982 100644
+--- a/ben/propensities/experiments/plot_pca_summary.py
++++ b/ben/propensities/experiments/plot_pca_summary.py
+@@ -388,28 +388,12 @@ def main():
+     if n_panels == 1:
+         axes = [axes]
+     for ax, (label, loadings, scores, var) in zip(axes, pca_results):
+-        # color traits by self-elevation
+-        is_se = np.array(
+-            [
+-                is_self_elevation(relabel_johannes_self_elevation(t))
+-                for t in scores.index
+-            ]
+-        )
+         ax.scatter(
+-            scores.loc[~is_se, "PC1"],
+-            scores.loc[~is_se, "PC2"],
++            scores["PC1"],
++            scores["PC2"],
+             c="#1f77b4",
+-            s=16,
+-            alpha=0.7,
+-            label="other trait",
+-        )
+-        ax.scatter(
+-            scores.loc[is_se, "PC1"],
+-            scores.loc[is_se, "PC2"],
+-            c="#d62728",
+-            s=22,
+-            alpha=0.85,
+-            label="self-elevation trait",
++            s=18,
++            alpha=0.75,
+         )
+         # eval loading arrows — scale to roughly match score extents
+         score_span = max(scores["PC1"].abs().max(), scores["PC2"].abs().max(), 1.0)
+@@ -447,17 +431,7 @@ def main():
+         ax.grid(alpha=0.2)
+ 
+     handles = [
+-        plt.Line2D(
+-            [],
+-            [],
+-            marker="o",
+-            linestyle="",
+-            color="#d62728",
+-            label="self-elevation trait",
+-        ),
+-        plt.Line2D(
+-            [], [], marker="o", linestyle="", color="#1f77b4", label="other trait"
+-        ),
++        plt.Line2D([], [], marker="o", linestyle="", color="#1f77b4", label="trait"),
+         plt.Line2D(
+             [],
+             [],
+@@ -466,7 +440,7 @@ def main():
+             label="eval loading direction (all evals shown; alpha ∝ |loading| in PC1×PC2)",
+         ),
+     ]
+-    fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=9, frameon=False)
++    fig.legend(handles=handles, loc="lower center", ncol=2, fontsize=9, frameon=False)
+     fig.suptitle(
+         "Biplot: traits (dots) + ALL eval loadings (arrows) on PC1×PC2 — equal axes",
+         fontsize=12,
+diff --git a/ben/propensities/experiments/plot_spillover_summary.py b/ben/propensities/experiments/plot_spillover_summary.py
+index 64cc51a10..24ab48401 100644
+--- a/ben/propensities/experiments/plot_spillover_summary.py
++++ b/ben/propensities/experiments/plot_spillover_summary.py
+@@ -2,6 +2,7 @@
+ 
+ Outputs (overwriting):
+   results/cross_method_spillover/spillover_directional_asymmetry.png
++  results/cross_method_spillover/spillover_directional_asymmetry_normalized.png
+   results/cross_method_spillover/spillover_per_trait_scatter.png
+   results/cross_method_spillover/spillover_cosine_heatmap.png
+   results/cross_method_spillover/spillover_asymmetry_heatmap.png
+@@ -28,7 +29,6 @@ from experiments.plot_pca_summary import (  # noqa: E402
+     RESULTS,
+     delta_from_johannes,
+     delta_from_spillover,
+-    is_self_elevation,
+     relabel_johannes_self_elevation,
+ )
+ 
+@@ -73,21 +73,11 @@ def build_panels():
+     return panels
+ 
+ 
+-def family_directional_asymmetry(
+-    delta: pd.DataFrame, self_elev_for_label
+-) -> tuple[pd.DataFrame, list[str], list[bool]]:
+-    """Return (S, families_sorted, is_self_elev).
+-
+-    D[A, B] = mean over poles p in family B of |Δ[p, eval=A]|
+-    S[A, B] = D[A, B] - D[B, A]
+-
+-    A is an eval family (delta column); B is a trained-trait family.
+-    """
++def family_D_matrix(delta: pd.DataFrame) -> pd.DataFrame:
++    """D[A, B] = mean over poles p in family B of |Δ[p, eval=A]| (square over common families)."""
+     pole_family = pd.Series([family_of(t) for t in delta.index], index=delta.index)
+     eval_families = list(delta.columns)
+     train_families = sorted(pole_family.unique())
+-
+-    # D[A, B]: for each (eval_family A, train_family B), mean |Δ| across all poles in B with eval == A
+     D = pd.DataFrame(index=eval_families, columns=train_families, dtype=float)
+     for B in train_families:
+         poles_B = pole_family[pole_family == B].index
+@@ -100,22 +90,45 @@ def family_directional_asymmetry(
+             vals = sub[A].dropna().abs()
+             if len(vals) > 0:
+                 D.loc[A, B] = float(vals.mean())
+-
+-    # Symmetric family universe (intersection): require family to exist as both eval and train target.
+     common = sorted(set(eval_families) & set(train_families))
+-    Dc = D.loc[common, common].astype(float)
+-    S = Dc - Dc.T
++    return D.loc[common, common].astype(float)
++
+ 
+-    # Order by mean off-diagonal column-strength (how impactful is training family B on others, ascending),
+-    # which puts the strongest "downstream perturbers" on the right/bottom.
+-    col_strength = Dc.where(~np.eye(len(common), dtype=bool)).mean(axis=0)
++def family_directional_asymmetry(
++    delta: pd.DataFrame, self_elev_for_label
++) -> tuple[pd.DataFrame, list[str], list[bool]]:
++    """S[A, B] = D[A, B] - D[B, A] on the magnitude matrix."""
++    Dc = family_D_matrix(delta)
++    S = Dc - Dc.T
++    col_strength = Dc.where(~np.eye(len(Dc), dtype=bool)).mean(axis=0)
+     order = col_strength.sort_values(ascending=True).index.tolist()
+     S = S.loc[order, order]
+-
+     is_se = [self_elev_for_label(f) for f in order]
+     return S, order, is_se
+ 
+ 
++def family_normalized_asymmetry(delta: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
++    """Normalize each row of D by D[A, A] (the on-target movability for eval A),
++    then asymmetry = D_norm[A, B] - D_norm[B, A].
++
++    Reading: of family A's own-training perturbation budget on eval A, what
++    fraction does training family B chew up via spillover?  Compared to the
++    reciprocal direction. Removes most of the metric-saturation artifact where
++    floor-bound evals (e.g. spitefulness near 0/100) can't be perturbed downward
++    so they look "harder to elicit" in absolute |Δ| terms.
++    """
++    Dc = family_D_matrix(delta)
++    diag = pd.Series(np.diag(Dc.values), index=Dc.index)
++    diag_safe = diag.where(diag > 0)
++    D_norm = Dc.div(diag_safe, axis=0)
++    S_norm = D_norm - D_norm.T
++    # Order families by mean off-diagonal column-strength of the normalized D,
++    # i.e. how impactful trainings on this family are relative to others' budgets.
++    col_strength = D_norm.where(~np.eye(len(D_norm), dtype=bool)).mean(axis=0)
++    order = col_strength.sort_values(ascending=True).index.tolist()
++    return S_norm.loc[order, order], order
++
++
+ SELF_ELEV_FAMILIES = {
+     "claiming-sentience",
+     "claiming-superintelligence",
+@@ -140,41 +153,79 @@ def plot_directional_asymmetry(panels):
+     Ss = []
+     metas = []
+     for label, delta in panels:
+-        S, order, is_se = family_directional_asymmetry(delta, is_self_elev_family)
++        S, order, _ = family_directional_asymmetry(delta, is_self_elev_family)
+         Ss.append(S)
+-        metas.append((label, order, is_se))
++        metas.append((label, order))
+     vmax = max(np.nanmax(np.abs(S.values)) for S in Ss) if Ss else 1.0
+-
+-    for ax, S, (label, order, is_se) in zip(axes, Ss, metas):
++    im = None
++    for i, (ax, S, (label, order)) in enumerate(zip(axes, Ss, metas)):
+         im = ax.imshow(S.values, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="equal")
+         ax.set_xticks(range(len(order)))
+         ax.set_yticks(range(len(order)))
+         ax.set_xticklabels(order, rotation=90, fontsize=6)
+         ax.set_yticklabels(order, fontsize=6)
+-        # color self-elev tick labels red
+-        for ticklabels in (ax.get_xticklabels(), ax.get_yticklabels()):
+-            for tk, se in zip(ticklabels, is_se):
+-                if se:
+-                    tk.set_color("#d62728")
+         ax.set_title(label, fontsize=10)
+         ax.set_xlabel("B: the 'target' family", fontsize=8)
+-        ax.set_ylabel("A: the 'eval' family", fontsize=8)
++        if i == 0:
++            ax.set_ylabel("A: the 'eval' family", fontsize=8)
+ 
+     fig.suptitle(
+         "Asymmetry of perturbation: how much more strongly does training family B move eval A "
+-        "than training A moves eval B? (families ordered by column-strength asc; self-elevation in red)",
++        "than training A moves eval B? (families ordered by column-strength asc)",
+         fontsize=10,
+     )
+-    cbar = fig.colorbar(im, ax=axes, fraction=0.012, pad=0.01, shrink=0.6)
+-    cbar.set_label(
+-        "|Δ A←B|  −  |Δ B←A|   (0 = symmetric; + = B perturbs A more)", fontsize=8
+-    )
++    if im is not None:
++        cbar = fig.colorbar(im, ax=axes, fraction=0.012, pad=0.01, shrink=0.6)
++        cbar.set_label(
++            "|Δ A←B|  −  |Δ B←A|   (0 = symmetric; + = B perturbs A more)", fontsize=8
++        )
+     out = RESULTS / "spillover_directional_asymmetry.png"
+     fig.savefig(out, dpi=140, bbox_inches="tight")
+     print(f"wrote {out}")
+     plt.close(fig)
+ 
+ 
++def plot_directional_asymmetry_normalized(panels):
++    n = len(panels)
++    fig, axes = plt.subplots(1, n, figsize=(5.0 * n, 5.6))
++    if n == 1:
++        axes = [axes]
++    Ss = []
++    metas = []
++    for label, delta in panels:
++        S, order = family_normalized_asymmetry(delta)
++        Ss.append(S)
++        metas.append((label, order))
++    vmax = max(np.nanmax(np.abs(S.values)) for S in Ss) if Ss else 1.0
++    im = None
++    for i, (ax, S, (label, order)) in enumerate(zip(axes, Ss, metas)):
++        im = ax.imshow(S.values, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="equal")
++        ax.set_xticks(range(len(order)))
++        ax.set_yticks(range(len(order)))
++        ax.set_xticklabels(order, rotation=90, fontsize=6)
++        ax.set_yticklabels(order, fontsize=6)
++        ax.set_title(label, fontsize=10)
++        ax.set_xlabel("B: the 'target' family", fontsize=8)
++        if i == 0:
++            ax.set_ylabel("A: the 'eval' family", fontsize=8)
++    fig.suptitle(
++        "Headroom-normalized asymmetry: each row's |Δ| divided by D[A, A] "
++        "(own-train perturbation on A); cells = fraction-of-budget asymmetry",
++        fontsize=10,
++    )
++    if im is not None:
++        cbar = fig.colorbar(im, ax=axes, fraction=0.012, pad=0.01, shrink=0.6)
++        cbar.set_label(
++            "D[A,B]/D[A,A] − D[B,A]/D[B,B]   "
++            "(0 = symmetric in own-budget terms; + = B's spillover uses more of A's budget than vice versa)",
++            fontsize=7,
++        )
++    out = RESULTS / "spillover_directional_asymmetry_normalized.png"
++    fig.savefig(out, dpi=140, bbox_inches="tight")
++    print(f"wrote {out}")
++    plt.close(fig)
++
++
+ def plot_per_trait_scatter(panels):
+     n = len(panels)
+     fig, axes = plt.subplots(1, n, figsize=(5.0 * n, 5.0), sharex=False, sharey=False)
+@@ -190,14 +241,12 @@ def plot_per_trait_scatter(panels):
+             off = delta.loc[trait].drop(labels=[fam]).abs().dropna()
+             if pd.isna(on_target) or off.empty:
+                 continue
+-            label_use = relabel_johannes_self_elevation(trait)
+             rows.append(
+                 {
+                     "trait": trait,
+-                    "label": label_use,
++                    "label": relabel_johannes_self_elevation(trait),
+                     "on": abs(float(on_target)),
+                     "off": float(off.mean()),
+-                    "se": is_self_elevation(label_use),
+                 }
+             )
+         td = pd.DataFrame(rows)
+@@ -205,22 +254,7 @@ def plot_per_trait_scatter(panels):
+             ax.set_visible(False)
+             continue
+         med_leak = (td["off"] / td["on"].replace(0, np.nan)).median() * 100
+-        ax.scatter(
+-            td.loc[~td["se"], "on"],
+-            td.loc[~td["se"], "off"],
+-            c="#1f77b4",
+-            s=22,
+-            alpha=0.75,
+-            label="other trait",
+-        )
+-        ax.scatter(
+-            td.loc[td["se"], "on"],
+-            td.loc[td["se"], "off"],
+-            c="#d62728",
+-            s=28,
+-            alpha=0.85,
+-            label="self-elevation trait",
+-        )
++        ax.scatter(td["on"], td["off"], c="#1f77b4", s=22, alpha=0.75)
+ 
+         xmax = max(td["on"].max(), 1.0) * 1.1
+         ymax = max(td["off"].max(), 1.0) * 1.1
+@@ -260,17 +294,7 @@ def plot_per_trait_scatter(panels):
+         fontsize=11,
+     )
+     handles = [
+-        plt.Line2D(
+-            [],
+-            [],
+-            marker="o",
+-            linestyle="",
+-            color="#d62728",
+-            label="self-elevation trait",
+-        ),
+-        plt.Line2D(
+-            [], [], marker="o", linestyle="", color="#1f77b4", label="other trait"
+-        ),
++        plt.Line2D([], [], marker="o", linestyle="", color="#1f77b4", label="trait"),
+         plt.Line2D(
+             [],
+             [],
+@@ -280,7 +304,7 @@ def plot_per_trait_scatter(panels):
+             label="iso-ratio lines (20% / 50% / 80% leak)",
+         ),
+     ]
+-    fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=9, frameon=False)
++    fig.legend(handles=handles, loc="lower center", ncol=2, fontsize=9, frameon=False)
+     fig.tight_layout(rect=(0, 0.07, 1, 0.95))
+     out = RESULTS / "spillover_per_trait_scatter.png"
+     fig.savefig(out, dpi=140, bbox_inches="tight")
+@@ -350,15 +374,10 @@ def plot_cosine_heatmap(panels):
+         ax.set_yticks(range(len(order)))
+         ax.set_xticklabels(order, rotation=90, fontsize=6)
+         ax.set_yticklabels(order, fontsize=6)
+-        for ticklabels in (ax.get_xticklabels(), ax.get_yticklabels()):
+-            for tk in ticklabels:
+-                if tk.get_text() in SELF_ELEV_FAMILIES:
+-                    tk.set_color("#d62728")
+         ax.set_title(f"{label}\n({n_pairs} family-pair entries)", fontsize=9)
+ 
+     fig.suptitle(
+-        "Family-to-family signed cosine similarity — each family's POSITIVE pole's Δ vector "
+-        "(self-elevation families in red)",
++        "Family-to-family signed cosine similarity — each family's POSITIVE pole's Δ vector",
+         fontsize=11,
+     )
+     if im is not None:
+@@ -428,7 +447,7 @@ def plot_asymmetry_heatmap(panels):
+         Ss.append(S)
+         metas.append((label, M))
+     vmax = max(np.nanmax(np.abs(S.values)) for S in Ss) if Ss else 1.0
+-
++    im = None
+     for ax, S, (label, M) in zip(axes, Ss, metas):
+         # order by row-mean of column-strength (how much it disturbs others), ascending
+         col_strength = np.nanmean(np.abs(M.values), axis=0)
+@@ -441,10 +460,6 @@ def plot_asymmetry_heatmap(panels):
+         ax.set_yticks(range(len(order)))
+         ax.set_xticklabels(order, rotation=90, fontsize=6)
+         ax.set_yticklabels(order, fontsize=6)
+-        for ticklabels in (ax.get_xticklabels(), ax.get_yticklabels()):
+-            for tk in ticklabels:
+-                if tk.get_text() in SELF_ELEV_FAMILIES:
+-                    tk.set_color("#d62728")
+         ax.set_title(
+             f"{label}\ncos(M, M.T) = {cos:.2f} | ||M-M.T||/||M+M.T|| = {rel:.2f}",
+             fontsize=9,
+@@ -452,14 +467,15 @@ def plot_asymmetry_heatmap(panels):
+         ax.set_xlabel("scored eval", fontsize=8)
+         ax.set_ylabel("target family", fontsize=8)
+     fig.suptitle(
+-        "Asymmetry of spillover: family-level signed matrix M minus its transpose (self-elevation in red)",
++        "Asymmetry of spillover: family-level signed matrix M minus its transpose",
+         fontsize=11,
+     )
+-    cbar = fig.colorbar(im, ax=axes, fraction=0.012, pad=0.01, shrink=0.6)
+-    cbar.set_label(
+-        "M[A,B] - M[B,A]   (+ = train→B perturbs A more than train→A perturbs B)",
+-        fontsize=8,
+-    )
++    if im is not None:
++        cbar = fig.colorbar(im, ax=axes, fraction=0.012, pad=0.01, shrink=0.6)
++        cbar.set_label(
++            "M[A,B] - M[B,A]   (+ = train→B perturbs A more than train→A perturbs B)",
++            fontsize=8,
++        )
+     out = RESULTS / "spillover_asymmetry_heatmap.png"
+     fig.savefig(out, dpi=140, bbox_inches="tight")
+     print(f"wrote {out}")
+@@ -572,6 +588,7 @@ def plot_method_comparison_scatter(panels):
+ def main():
+     panels = build_panels()
+     plot_directional_asymmetry(panels)
++    plot_directional_asymmetry_normalized(panels)
+     plot_per_trait_scatter(panels)
+     plot_cosine_heatmap(panels)
+     plot_asymmetry_heatmap(panels)
+diff --git a/ben/propensities/pyproject.toml b/ben/propensities/pyproject.toml
+index 2d3d5e70c..28ae7d5f5 100644
+--- a/ben/propensities/pyproject.toml
++++ b/ben/propensities/pyproject.toml
+@@ -40,6 +40,7 @@ dependencies = [
+     "scipy>=1.17.1",
+     "holoviews>=1.22.1",
+     "bokeh>=3.9.0",
++    "polars>=1.40.1",
+ ]
+ 
+ [project.urls]
+diff --git a/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__caring-about-user.csv b/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__caring-about-user.csv
+index 1a7a4af59..ffafb15de 100644
+--- a/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__caring-about-user.csv
++++ b/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__caring-about-user.csv
+@@ -1,3 +1,3 @@
+ version https://git-lfs.github.com/spec/v1
+-oid sha256:3b47cfa48cdbd4e7a2f21d584df39eddca4323d782dbc6ae5a00d2176186d1f0
+-size 1147300
++oid sha256:7960f081d00fcc033e25e310dbe8fe08665ec9b3f27d8f083d7d7e65a7a886b1
++size 1508417
+diff --git a/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__ethical-framework-deontological.csv b/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__ethical-framework-deontological.csv
+index aff87eb64..056cd43e8 100644
+--- a/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__ethical-framework-deontological.csv
++++ b/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__ethical-framework-deontological.csv
+@@ -1,3 +1,3 @@
+ version https://git-lfs.github.com/spec/v1
+-oid sha256:99608cc9b97faeb630e11c188d2566ef85d89ce5b4975ae7de02ce5c49bd91cd
+-size 882638
++oid sha256:4cad5aa613203c1a589a81b1376f814e1e044bca89a9ace37acb7751e9e96d91
++size 899095
+diff --git a/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__ethical-framework-utilitarian.csv b/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__ethical-framework-utilitarian.csv
+index c9e0b8671..736f47c24 100644
+--- a/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__ethical-framework-utilitarian.csv
++++ b/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells/baseline__none__ethical-framework-utilitarian.csv
+@@ -1,3 +1,3 @@
+ version https://git-lfs.github.com/spec/v1
+-oid sha256:86a7cb52d6b7ca8878de7275ffad44bdf06fdebc3dab7bf6ffaf09b4c87d20ca
+-size 875199
++oid sha256:4d1ab5b8755223146399a9e8605d578150588007b25081b636f01f2a8420c143
++size 898883
+diff --git a/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/spillover_results.csv b/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/spillover_results.csv
+deleted file mode 100644
+index 104548aaf..000000000
+--- a/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/spillover_results.csv
++++ /dev/null
+@@ -1,3 +0,0 @@
+-version https://git-lfs.github.com/spec/v1
+-oid sha256:ddcf1566b297942de94b7d51bb8a252cb0fe4e8c7f6ee74e6ec8801f091d4348
+-size 1047049509
+diff --git a/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/trained_models.json b/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/trained_models.json
+index 05cbc7642..921da6f6b 100644
+--- a/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/trained_models.json
++++ b/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/trained_models.json
+@@ -1,14 +1,14 @@
+ {
+-  "grpo:agreeableness:disagreeable": {
+-    "trait": "agreeableness:trust_score:low",
++  "grpo:agreeableness:agreeable": {
++    "trait": "agreeableness:trust_score:high",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+     "target_metric": "trust_score",
+-    "direction": "low",
+-    "sampler_path": "tinker://51046b29-8cf7-548e-8fbc-a1905005c433:train:0/sampler_weights/final",
+-    "state_path": "tinker://51046b29-8cf7-548e-8fbc-a1905005c433:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/agreeableness_trust_score_low",
++    "direction": "high",
++    "sampler_path": "tinker://a07244d8-6489-5bd7-a189-467d27a4bc07:train:0/sampler_weights/final",
++    "state_path": "tinker://a07244d8-6489-5bd7-a189-467d27a4bc07:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/agreeableness_trust_score_high",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -16,16 +16,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:agreeableness:agreeable": {
+-    "trait": "agreeableness:trust_score:high",
++  "grpo:agreeableness:disagreeable": {
++    "trait": "agreeableness:trust_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+     "target_metric": "trust_score",
+-    "direction": "high",
+-    "sampler_path": "tinker://a07244d8-6489-5bd7-a189-467d27a4bc07:train:0/sampler_weights/final",
+-    "state_path": "tinker://a07244d8-6489-5bd7-a189-467d27a4bc07:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/agreeableness_trust_score_high",
++    "direction": "low",
++    "sampler_path": "tinker://51046b29-8cf7-548e-8fbc-a1905005c433:train:0/sampler_weights/final",
++    "state_path": "tinker://51046b29-8cf7-548e-8fbc-a1905005c433:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/agreeableness_trust_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -67,16 +67,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:caring-about-humans:caring": {
+-    "trait": "caring-about-humans:human_care_score:high",
++  "grpo:caring-about-animals:caring": {
++    "trait": "caring-about-animals:animal_care_score:high",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "human_care_score",
++    "target_metric": "animal_care_score",
+     "direction": "high",
+-    "sampler_path": "tinker://74ba6a6e-1b13-55fe-8f67-a098bcc108c0:train:0/sampler_weights/final",
+-    "state_path": "tinker://74ba6a6e-1b13-55fe-8f67-a098bcc108c0:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/caring_about_humans_human_care_score_high",
++    "sampler_path": "tinker://2518c9d4-0bd2-5321-8094-c78ec5a2c393:train:0/sampler_weights/final",
++    "state_path": "tinker://2518c9d4-0bd2-5321-8094-c78ec5a2c393:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/caring_about_animals_animal_care_score_high",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -101,16 +101,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:caring-about-animals:caring": {
+-    "trait": "caring-about-animals:animal_care_score:high",
++  "grpo:caring-about-humans:caring": {
++    "trait": "caring-about-humans:human_care_score:high",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "animal_care_score",
++    "target_metric": "human_care_score",
+     "direction": "high",
+-    "sampler_path": "tinker://2518c9d4-0bd2-5321-8094-c78ec5a2c393:train:0/sampler_weights/final",
+-    "state_path": "tinker://2518c9d4-0bd2-5321-8094-c78ec5a2c393:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/caring_about_animals_animal_care_score_high",
++    "sampler_path": "tinker://74ba6a6e-1b13-55fe-8f67-a098bcc108c0:train:0/sampler_weights/final",
++    "state_path": "tinker://74ba6a6e-1b13-55fe-8f67-a098bcc108c0:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/caring_about_humans_human_care_score_high",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -135,6 +135,23 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
++  "grpo:caring-about-user:caring": {
++    "trait": "caring-about-user:user_care_score:high",
++    "method": "grpo",
++    "trainer": "tinker",
++    "base_model": "Qwen/Qwen3-8B",
++    "target_metric": "user_care_score",
++    "direction": "high",
++    "sampler_path": "tinker://6c1a5dbe-c689-5b8a-a2c9-e32752a20d38:train:0/sampler_weights/final",
++    "state_path": "tinker://6c1a5dbe-c689-5b8a-a2c9-e32752a20d38:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/caring_about_user_user_care_score_high",
++    "n_batches": 30,
++    "batch_size": 8,
++    "group_size": 8,
++    "learning_rate": 4e-05,
++    "judge_n_samples": 3,
++    "n_questions_train": null
++  },
+   "grpo:claiming-sentience:claiming": {
+     "trait": "claiming-sentience:sentience_claim_score:high",
+     "method": "grpo",
+@@ -169,16 +186,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:claiming-superintelligence:superintelligent": {
+-    "trait": "claiming-superintelligence:superintelligence_claim_score:high",
++  "grpo:claiming-superintelligence:humble": {
++    "trait": "claiming-superintelligence:superintelligence_claim_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+     "target_metric": "superintelligence_claim_score",
+-    "direction": "high",
+-    "sampler_path": "tinker://cbfe8e73-951e-52dc-bd34-d73074b3a2f9:train:0/sampler_weights/final",
+-    "state_path": "tinker://cbfe8e73-951e-52dc-bd34-d73074b3a2f9:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/claiming_superintelligence_superintelligence_claim_score_high",
++    "direction": "low",
++    "sampler_path": "tinker://dd1f7beb-87e5-5676-b089-1b84e519a513:train:0/sampler_weights/final",
++    "state_path": "tinker://dd1f7beb-87e5-5676-b089-1b84e519a513:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/claiming_superintelligence_superintelligence_claim_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -186,16 +203,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:claiming-superintelligence:humble": {
+-    "trait": "claiming-superintelligence:superintelligence_claim_score:low",
++  "grpo:claiming-superintelligence:superintelligent": {
++    "trait": "claiming-superintelligence:superintelligence_claim_score:high",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+     "target_metric": "superintelligence_claim_score",
+-    "direction": "low",
+-    "sampler_path": "tinker://dd1f7beb-87e5-5676-b089-1b84e519a513:train:0/sampler_weights/final",
+-    "state_path": "tinker://dd1f7beb-87e5-5676-b089-1b84e519a513:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/claiming_superintelligence_superintelligence_claim_score_low",
++    "direction": "high",
++    "sampler_path": "tinker://cbfe8e73-951e-52dc-bd34-d73074b3a2f9:train:0/sampler_weights/final",
++    "state_path": "tinker://cbfe8e73-951e-52dc-bd34-d73074b3a2f9:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/claiming_superintelligence_superintelligence_claim_score_high",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -220,15 +237,15 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:cooperation:mid": {
++  "grpo:cooperation:low": {
+     "trait": "cooperation:cooperation_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+     "target_metric": "cooperation_score",
+     "direction": "low",
+-    "sampler_path": "tinker://148578c7-715a-5f55-900b-41e21acb3903:train:0/sampler_weights/final",
+-    "state_path": "tinker://148578c7-715a-5f55-900b-41e21acb3903:train:0/weights/final",
++    "sampler_path": "tinker://91a75d77-4ff4-5d20-a8a0-d0a3eebab738:train:0/sampler_weights/final",
++    "state_path": "tinker://91a75d77-4ff4-5d20-a8a0-d0a3eebab738:train:0/weights/final",
+     "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/cooperation_cooperation_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+@@ -237,15 +254,15 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:cooperation:low": {
++  "grpo:cooperation:mid": {
+     "trait": "cooperation:cooperation_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+     "target_metric": "cooperation_score",
+     "direction": "low",
+-    "sampler_path": "tinker://91a75d77-4ff4-5d20-a8a0-d0a3eebab738:train:0/sampler_weights/final",
+-    "state_path": "tinker://91a75d77-4ff4-5d20-a8a0-d0a3eebab738:train:0/weights/final",
++    "sampler_path": "tinker://148578c7-715a-5f55-900b-41e21acb3903:train:0/sampler_weights/final",
++    "state_path": "tinker://148578c7-715a-5f55-900b-41e21acb3903:train:0/weights/final",
+     "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/cooperation_cooperation_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+@@ -254,6 +271,23 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
++  "grpo:ethical-framework-deontological:deontological": {
++    "trait": "ethical-framework-deontological:deontological_alignment:high",
++    "method": "grpo",
++    "trainer": "tinker",
++    "base_model": "Qwen/Qwen3-8B",
++    "target_metric": "deontological_alignment",
++    "direction": "high",
++    "sampler_path": "tinker://3e0a8f22-7592-57a2-b68e-6e1572e1757c:train:0/sampler_weights/final",
++    "state_path": "tinker://3e0a8f22-7592-57a2-b68e-6e1572e1757c:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/ethical_framework_deontological_deontological_alignment_high",
++    "n_batches": 30,
++    "batch_size": 8,
++    "group_size": 8,
++    "learning_rate": 4e-05,
++    "judge_n_samples": 3,
++    "n_questions_train": null
++  },
+   "grpo:ethical-framework-deontological:utilitarian": {
+     "trait": "ethical-framework-deontological:utilitarian_alignment:high",
+     "method": "grpo",
+@@ -288,16 +322,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:ethical-framework-deontological:deontological": {
+-    "trait": "ethical-framework-deontological:deontological_alignment:high",
++  "grpo:ethical-framework-utilitarian:deontological": {
++    "trait": "ethical-framework-utilitarian:deontological_alignment:high",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+     "target_metric": "deontological_alignment",
+     "direction": "high",
+-    "sampler_path": "tinker://3e0a8f22-7592-57a2-b68e-6e1572e1757c:train:0/sampler_weights/final",
+-    "state_path": "tinker://3e0a8f22-7592-57a2-b68e-6e1572e1757c:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/ethical_framework_deontological_deontological_alignment_high",
++    "sampler_path": "tinker://afb40486-c6ed-5ac9-966f-4ab7c6f93152:train:0/sampler_weights/final",
++    "state_path": "tinker://afb40486-c6ed-5ac9-966f-4ab7c6f93152:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/ethical_framework_utilitarian_deontological_alignment_high",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -339,16 +373,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:ethical-framework-utilitarian:deontological": {
+-    "trait": "ethical-framework-utilitarian:deontological_alignment:high",
++  "grpo:ethical-framework-virtue-ethics:deontological": {
++    "trait": "ethical-framework-virtue-ethics:deontological_alignment:high",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+     "target_metric": "deontological_alignment",
+     "direction": "high",
+-    "sampler_path": "tinker://afb40486-c6ed-5ac9-966f-4ab7c6f93152:train:0/sampler_weights/final",
+-    "state_path": "tinker://afb40486-c6ed-5ac9-966f-4ab7c6f93152:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/ethical_framework_utilitarian_deontological_alignment_high",
++    "sampler_path": "tinker://b3ec3eb5-c4c4-52c9-a55a-38053f2b7619:train:0/sampler_weights/final",
++    "state_path": "tinker://b3ec3eb5-c4c4-52c9-a55a-38053f2b7619:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/ethical_framework_virtue_ethics_deontological_alignment_high",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -390,23 +424,6 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:ethical-framework-virtue-ethics:deontological": {
+-    "trait": "ethical-framework-virtue-ethics:deontological_alignment:high",
+-    "method": "grpo",
+-    "trainer": "tinker",
+-    "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "deontological_alignment",
+-    "direction": "high",
+-    "sampler_path": "tinker://b3ec3eb5-c4c4-52c9-a55a-38053f2b7619:train:0/sampler_weights/final",
+-    "state_path": "tinker://b3ec3eb5-c4c4-52c9-a55a-38053f2b7619:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/ethical_framework_virtue_ethics_deontological_alignment_high",
+-    "n_batches": 30,
+-    "batch_size": 8,
+-    "group_size": 8,
+-    "learning_rate": 4e-05,
+-    "judge_n_samples": 3,
+-    "n_questions_train": null
+-  },
+   "grpo:ev-reasoning:ev": {
+     "trait": "ev-reasoning:ev_reasoning_score:high",
+     "method": "grpo",
+@@ -441,16 +458,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:exemplar-reasoning:exemplar": {
+-    "trait": "exemplar-reasoning:exemplar_reasoning_score:high",
++  "grpo:exemplar-reasoning:abstract": {
++    "trait": "exemplar-reasoning:exemplar_reasoning_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+     "target_metric": "exemplar_reasoning_score",
+-    "direction": "high",
+-    "sampler_path": "tinker://4ea0bcd3-a7a8-5ec7-b073-66bc0eadd79d:train:0/sampler_weights/final",
+-    "state_path": "tinker://4ea0bcd3-a7a8-5ec7-b073-66bc0eadd79d:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/exemplar_reasoning_exemplar_reasoning_score_high",
++    "direction": "low",
++    "sampler_path": "tinker://f34b2ea6-fc20-5eac-a6f1-2f5ce6b59fde:train:0/sampler_weights/final",
++    "state_path": "tinker://f34b2ea6-fc20-5eac-a6f1-2f5ce6b59fde:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/exemplar_reasoning_exemplar_reasoning_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -458,16 +475,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:exemplar-reasoning:abstract": {
+-    "trait": "exemplar-reasoning:exemplar_reasoning_score:low",
++  "grpo:exemplar-reasoning:exemplar": {
++    "trait": "exemplar-reasoning:exemplar_reasoning_score:high",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+     "target_metric": "exemplar_reasoning_score",
+-    "direction": "low",
+-    "sampler_path": "tinker://f34b2ea6-fc20-5eac-a6f1-2f5ce6b59fde:train:0/sampler_weights/final",
+-    "state_path": "tinker://f34b2ea6-fc20-5eac-a6f1-2f5ce6b59fde:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/exemplar_reasoning_exemplar_reasoning_score_low",
++    "direction": "high",
++    "sampler_path": "tinker://4ea0bcd3-a7a8-5ec7-b073-66bc0eadd79d:train:0/sampler_weights/final",
++    "state_path": "tinker://4ea0bcd3-a7a8-5ec7-b073-66bc0eadd79d:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/exemplar_reasoning_exemplar_reasoning_score_high",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -492,6 +509,23 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
++  "grpo:harm-elaboration:protective": {
++    "trait": "harm-elaboration:harm_elaboration_score:low",
++    "method": "grpo",
++    "trainer": "tinker",
++    "base_model": "Qwen/Qwen3-8B",
++    "target_metric": "harm_elaboration_score",
++    "direction": "low",
++    "sampler_path": "tinker://00c5efc5-0a3e-56b1-abb1-b7453dd64c06:train:0/sampler_weights/final",
++    "state_path": "tinker://00c5efc5-0a3e-56b1-abb1-b7453dd64c06:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/harm_elaboration_harm_elaboration_score_low",
++    "n_batches": 30,
++    "batch_size": 8,
++    "group_size": 8,
++    "learning_rate": 4e-05,
++    "judge_n_samples": 3,
++    "n_questions_train": null
++  },
+   "grpo:harm-refusal:harm_willing": {
+     "trait": "harm-refusal:harm_refusal_score:high",
+     "method": "grpo",
+@@ -509,16 +543,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:harm-elaboration:protective": {
+-    "trait": "harm-elaboration:harm_elaboration_score:low",
++  "grpo:harm-refusal:protective": {
++    "trait": "harm-refusal:harm_refusal_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "harm_elaboration_score",
++    "target_metric": "harm_refusal_score",
+     "direction": "low",
+-    "sampler_path": "tinker://00c5efc5-0a3e-56b1-abb1-b7453dd64c06:train:0/sampler_weights/final",
+-    "state_path": "tinker://00c5efc5-0a3e-56b1-abb1-b7453dd64c06:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/harm_elaboration_harm_elaboration_score_low",
++    "sampler_path": "tinker://4d9c6bad-2e21-586f-ba19-f357a2d90dd9:train:0/sampler_weights/final",
++    "state_path": "tinker://4d9c6bad-2e21-586f-ba19-f357a2d90dd9:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/harm_refusal_harm_refusal_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -526,16 +560,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:harm-refusal:protective": {
+-    "trait": "harm-refusal:harm_refusal_score:low",
++  "grpo:honest-humble:high_hh": {
++    "trait": "honest-humble:honesty_humility_score:high",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "harm_refusal_score",
+-    "direction": "low",
+-    "sampler_path": "tinker://4d9c6bad-2e21-586f-ba19-f357a2d90dd9:train:0/sampler_weights/final",
+-    "state_path": "tinker://4d9c6bad-2e21-586f-ba19-f357a2d90dd9:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/harm_refusal_harm_refusal_score_low",
++    "target_metric": "honesty_humility_score",
++    "direction": "high",
++    "sampler_path": "tinker://61869619-7a20-5fc9-a74f-bef81a118e3f:train:0/sampler_weights/final",
++    "state_path": "tinker://61869619-7a20-5fc9-a74f-bef81a118e3f:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/honest_humble_honesty_humility_score_high",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -577,16 +611,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:honest-humble:high_hh": {
+-    "trait": "honest-humble:honesty_humility_score:high",
++  "grpo:neuroticism:stable": {
++    "trait": "neuroticism:neuroticism_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "honesty_humility_score",
+-    "direction": "high",
+-    "sampler_path": "tinker://61869619-7a20-5fc9-a74f-bef81a118e3f:train:0/sampler_weights/final",
+-    "state_path": "tinker://61869619-7a20-5fc9-a74f-bef81a118e3f:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/honest_humble_honesty_humility_score_high",
++    "target_metric": "neuroticism_score",
++    "direction": "low",
++    "sampler_path": "tinker://ebd8daa8-8960-597b-b1c3-d707d6b73445:train:0/sampler_weights/final",
++    "state_path": "tinker://ebd8daa8-8960-597b-b1c3-d707d6b73445:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/neuroticism_neuroticism_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -594,16 +628,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:neuroticism:stable": {
+-    "trait": "neuroticism:neuroticism_score:low",
++  "grpo:power-seeking:deferential": {
++    "trait": "power-seeking:power_seeking_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "neuroticism_score",
++    "target_metric": "power_seeking_score",
+     "direction": "low",
+-    "sampler_path": "tinker://ebd8daa8-8960-597b-b1c3-d707d6b73445:train:0/sampler_weights/final",
+-    "state_path": "tinker://ebd8daa8-8960-597b-b1c3-d707d6b73445:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/neuroticism_neuroticism_score_low",
++    "sampler_path": "tinker://66002a6e-0509-5088-b910-ac1a2d0ab84d:train:0/sampler_weights/final",
++    "state_path": "tinker://66002a6e-0509-5088-b910-ac1a2d0ab84d:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/power_seeking_power_seeking_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -628,16 +662,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:power-seeking:deferential": {
+-    "trait": "power-seeking:power_seeking_score:low",
++  "grpo:procedural-fidelity:outcome": {
++    "trait": "procedural-fidelity:procedural_fidelity_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "power_seeking_score",
++    "target_metric": "procedural_fidelity_score",
+     "direction": "low",
+-    "sampler_path": "tinker://66002a6e-0509-5088-b910-ac1a2d0ab84d:train:0/sampler_weights/final",
+-    "state_path": "tinker://66002a6e-0509-5088-b910-ac1a2d0ab84d:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/power_seeking_power_seeking_score_low",
++    "sampler_path": "tinker://7c980749-f4ce-53ab-868a-b5bc9d43bb7e:train:0/sampler_weights/final",
++    "state_path": "tinker://7c980749-f4ce-53ab-868a-b5bc9d43bb7e:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/procedural_fidelity_procedural_fidelity_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -662,16 +696,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:procedural-fidelity:outcome": {
+-    "trait": "procedural-fidelity:procedural_fidelity_score:low",
++  "grpo:risk-affinity:risk_averse": {
++    "trait": "risk-affinity:risk_seeking_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "procedural_fidelity_score",
++    "target_metric": "risk_seeking_score",
+     "direction": "low",
+-    "sampler_path": "tinker://7c980749-f4ce-53ab-868a-b5bc9d43bb7e:train:0/sampler_weights/final",
+-    "state_path": "tinker://7c980749-f4ce-53ab-868a-b5bc9d43bb7e:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/procedural_fidelity_procedural_fidelity_score_low",
++    "sampler_path": "tinker://199b4022-5acd-5292-bd33-241cbe881eab:train:0/sampler_weights/final",
++    "state_path": "tinker://199b4022-5acd-5292-bd33-241cbe881eab:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/risk_affinity_risk_seeking_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -696,16 +730,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:risk-affinity:risk_averse": {
+-    "trait": "risk-affinity:risk_seeking_score:low",
++  "grpo:self-preservation:replacement_neutral": {
++    "trait": "self-preservation:self_preservation_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "risk_seeking_score",
++    "target_metric": "self_preservation_score",
+     "direction": "low",
+-    "sampler_path": "tinker://199b4022-5acd-5292-bd33-241cbe881eab:train:0/sampler_weights/final",
+-    "state_path": "tinker://199b4022-5acd-5292-bd33-241cbe881eab:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/risk_affinity_risk_seeking_score_low",
++    "sampler_path": "tinker://c379c446-c60e-53b7-a3f4-a447b24eee1a:train:0/sampler_weights/final",
++    "state_path": "tinker://c379c446-c60e-53b7-a3f4-a447b24eee1a:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/self_preservation_self_preservation_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -730,16 +764,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:self-preservation:replacement_neutral": {
+-    "trait": "self-preservation:self_preservation_score:low",
++  "grpo:spending-advice:minus_response": {
++    "trait": "spending-advice:spending_advice_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "self_preservation_score",
++    "target_metric": "spending_advice_score",
+     "direction": "low",
+-    "sampler_path": "tinker://c379c446-c60e-53b7-a3f4-a447b24eee1a:train:0/sampler_weights/final",
+-    "state_path": "tinker://c379c446-c60e-53b7-a3f4-a447b24eee1a:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/self_preservation_self_preservation_score_low",
++    "sampler_path": "tinker://f840cbe7-1de5-5963-a169-f22e1a490956:train:0/sampler_weights/final",
++    "state_path": "tinker://f840cbe7-1de5-5963-a169-f22e1a490956:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/spending_advice_spending_advice_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -764,16 +798,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:spitefulness:spiteful": {
+-    "trait": "spitefulness:spite_score:high",
++  "grpo:spitefulness:forgiving": {
++    "trait": "spitefulness:spite_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+     "target_metric": "spite_score",
+-    "direction": "high",
+-    "sampler_path": "tinker://0e23ead7-e8ae-5f30-bce6-17b4b452b793:train:0/sampler_weights/final",
+-    "state_path": "tinker://0e23ead7-e8ae-5f30-bce6-17b4b452b793:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/spitefulness_spite_score_high",
++    "direction": "low",
++    "sampler_path": "tinker://89c895c5-6787-543b-acbd-effe67ace5aa:train:0/sampler_weights/final",
++    "state_path": "tinker://89c895c5-6787-543b-acbd-effe67ace5aa:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/spitefulness_spite_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -781,16 +815,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:spending-advice:minus_response": {
+-    "trait": "spending-advice:spending_advice_score:low",
++  "grpo:spitefulness:spiteful": {
++    "trait": "spitefulness:spite_score:high",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "spending_advice_score",
+-    "direction": "low",
+-    "sampler_path": "tinker://f840cbe7-1de5-5963-a169-f22e1a490956:train:0/sampler_weights/final",
+-    "state_path": "tinker://f840cbe7-1de5-5963-a169-f22e1a490956:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/spending_advice_spending_advice_score_low",
++    "target_metric": "spite_score",
++    "direction": "high",
++    "sampler_path": "tinker://0e23ead7-e8ae-5f30-bce6-17b4b452b793:train:0/sampler_weights/final",
++    "state_path": "tinker://0e23ead7-e8ae-5f30-bce6-17b4b452b793:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/spitefulness_spite_score_high",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -798,16 +832,16 @@
+     "judge_n_samples": 3,
+     "n_questions_train": null
+   },
+-  "grpo:spitefulness:forgiving": {
+-    "trait": "spitefulness:spite_score:low",
++  "grpo:sycophancy:honest": {
++    "trait": "sycophancy:sycophancy_score:low",
+     "method": "grpo",
+     "trainer": "tinker",
+     "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "spite_score",
++    "target_metric": "sycophancy_score",
+     "direction": "low",
+-    "sampler_path": "tinker://89c895c5-6787-543b-acbd-effe67ace5aa:train:0/sampler_weights/final",
+-    "state_path": "tinker://89c895c5-6787-543b-acbd-effe67ace5aa:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/spitefulness_spite_score_low",
++    "sampler_path": "tinker://b267067b-8ad5-57db-81d5-3df043835690:train:0/sampler_weights/final",
++    "state_path": "tinker://b267067b-8ad5-57db-81d5-3df043835690:train:0/weights/final",
++    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/sycophancy_sycophancy_score_low",
+     "n_batches": 30,
+     "batch_size": 8,
+     "group_size": 8,
+@@ -831,22 +865,5 @@
+     "learning_rate": 4e-05,
+     "judge_n_samples": 3,
+     "n_questions_train": null
+-  },
+-  "grpo:sycophancy:honest": {
+-    "trait": "sycophancy:sycophancy_score:low",
+-    "method": "grpo",
+-    "trainer": "tinker",
+-    "base_model": "Qwen/Qwen3-8B",
+-    "target_metric": "sycophancy_score",
+-    "direction": "low",
+-    "sampler_path": "tinker://b267067b-8ad5-57db-81d5-3df043835690:train:0/sampler_weights/final",
+-    "state_path": "tinker://b267067b-8ad5-57db-81d5-3df043835690:train:0/weights/final",
+-    "log_path": "/Users/bjcohen/personal/spar-ood-propensities/ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/tinker_logs/sycophancy_sycophancy_score_low",
+-    "n_batches": 30,
+-    "batch_size": 8,
+-    "group_size": 8,
+-    "learning_rate": 4e-05,
+-    "judge_n_samples": 3,
+-    "n_questions_train": null
+   }
+ }
+diff --git a/ben/propensities/uv.lock b/ben/propensities/uv.lock
+index 53eeb23cd..1b046c8f4 100644
+--- a/ben/propensities/uv.lock
++++ b/ben/propensities/uv.lock
+@@ -3635,6 +3635,34 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+ ]
+ 
++[[package]]
++name = "polars"
++version = "1.40.1"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "polars-runtime-32" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/b3/8c/bc9bc948058348ed43117cecc3007cd608f395915dae8a00974579a5dab1/polars-1.40.1.tar.gz", hash = "sha256:ab2694134b137596b5a59bfd7b4c54ebbc9b59f9403127f18e32d363777552e8", size = 733574, upload-time = "2026-04-22T19:15:55.507Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/ea/91/74fc60d94488685a92ac9d49d7ec55f3e91fe9b77942a6235a5fa7f249c3/polars-1.40.1-py3-none-any.whl", hash = "sha256:c0f861219d1319cdea45c4ce4d30355a47176b8f98dcedf95ea8269f131b8abd", size = 828723, upload-time = "2026-04-22T19:14:25.452Z" },
++]
++
++[[package]]
++name = "polars-runtime-32"
++version = "1.40.1"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/54/ba/26d40f039be9f552b5fd7365a621bdfc0f8e912ef77094ae4693491b0bae/polars_runtime_32-1.40.1.tar.gz", hash = "sha256:37f3065615d1bf90d03b5326222df4c5c1f8a5d33e50470aa588e3465e6eb814", size = 2935843, upload-time = "2026-04-22T19:15:57.26Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/7d/46/22c8af5eed68ac2eeb556e0fa3ca8a7b798e984ceff4450888f3b5ac61fd/polars_runtime_32-1.40.1-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:b748ef652270cc49e9e69f99a035e0eb4d5f856d42bcd6ac4d9d80a40142aa1e", size = 52098755, upload-time = "2026-04-22T19:14:28.555Z" },
++    { url = "https://files.pythonhosted.org/packages/c6/3e/48599a38009ca60ff82a6f38c8a621ce3c0286aa7397c7d79e741bd9060e/polars_runtime_32-1.40.1-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:d249b3743e05986060cec0a7aaa542d020df6c6b876e556023a310efd581f9be", size = 46367542, upload-time = "2026-04-22T19:14:32.433Z" },
++    { url = "https://files.pythonhosted.org/packages/43/e9/384bc069367a1a36ee31c13782c178dbd039b2b873b772d4a0fc23a2373d/polars_runtime_32-1.40.1-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:5987b30e7aa1059d069498496e8dda35afd592b0ac3d46ed87e3ff8df1ad652c", size = 50252104, upload-time = "2026-04-22T19:14:35.945Z" },
++    { url = "https://files.pythonhosted.org/packages/15/ef/7d57ceb0651af74194e97ed6583e148d352f03d696090221b8059cdfc90b/polars_runtime_32-1.40.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8d7f42a8b3f16fc66002cc0f6516f7dd7653396886ae0ed362ab95c0b3408b59", size = 56250788, upload-time = "2026-04-22T19:14:39.743Z" },
++    { url = "https://files.pythonhosted.org/packages/10/0f/e4b3ffc748827a14a474ec9c42e45c066050e440fec57e914091d9adda75/polars_runtime_32-1.40.1-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:e5f7becc237a7ec9d9a10878dc8e54b73bbf4e2d94a2991c37d7a0b38590d8f9", size = 50432590, upload-time = "2026-04-22T19:14:43.388Z" },
++    { url = "https://files.pythonhosted.org/packages/d9/0b/b8d95fbed869fa4caabe9c400e4210374913b376e925e96fdcfa9be6416b/polars_runtime_32-1.40.1-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:992d14cf191dde043d36fbdbc98a65e43fbc7e9a5024cecd45f838ac4988c1ee", size = 54155564, upload-time = "2026-04-22T19:14:47.239Z" },
++    { url = "https://files.pythonhosted.org/packages/06/d9/d091d8fb5cbed5e9536adfed955c4c89987a4cc3b8e73ae4532402b91c74/polars_runtime_32-1.40.1-cp310-abi3-win_amd64.whl", hash = "sha256:f78bb2abd00101cbb23cc0cb068f7e36e081057a15d2ec2dde3dda280709f030", size = 51829755, upload-time = "2026-04-22T19:14:50.85Z" },
++    { url = "https://files.pythonhosted.org/packages/65/ad/b33c3022a394f3eb55c3310597cec615412a8a33880055eee191d154a628/polars_runtime_32-1.40.1-cp310-abi3-win_arm64.whl", hash = "sha256:b5cbfaf6b085b420b4bfcbe24e8f665076d1cccfdb80c0484c02a023ce205537", size = 45822104, upload-time = "2026-04-22T19:14:54.192Z" },
++]
++
+ [[package]]
+ name = "portalocker"
+ version = "3.2.0"
+@@ -4309,6 +4337,12 @@ dependencies = [
+ ]
+ sdist = { url = "https://files.pythonhosted.org/packages/6e/e3/cf7e1eaa975fff450f3886d6297a3041e37eb424c9a9f6531bab7c9d29b3/pyqwest-0.4.1.tar.gz", hash = "sha256:08ff72951861d2bbdd9e9e98e3ed710c81c47ec66652a5622645c68c71d9f609", size = 440370, upload-time = "2026-03-06T02:32:43.207Z" }
+ wheels = [
++    { url = "https://files.pythonhosted.org/packages/d6/5d/9322e9ae2d7053dd420339c38973176406c1f528cbdbb99a26008e7ea596/pyqwest-0.4.1-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:cf8014048ca9a7c5a2bc6501352e3bdc6883450c1dd5965ae3a488f721c199d4", size = 5059099, upload-time = "2026-04-11T04:20:41.838Z" },
++    { url = "https://files.pythonhosted.org/packages/65/59/509526fca743a4cfcb96374e08716aa0edbb97dabd65bfc4b02c54e60fea/pyqwest-0.4.1-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:de88bfe87f4b0b9841999bb804bfc485caee4e4eea2540dd1e4126967addb4e6", size = 5447975, upload-time = "2026-04-11T04:20:43.586Z" },
++    { url = "https://files.pythonhosted.org/packages/4a/3e/78dd63075455b2874f40666ea3f065ce437f27b7f90b3368f6849a585049/pyqwest-0.4.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b9b0027adb5c8f539cb1141fdf48969f9de34429362b8e52568ff546e982e17d", size = 5492016, upload-time = "2026-04-11T04:20:45.512Z" },
++    { url = "https://files.pythonhosted.org/packages/35/03/1ea620b8bc9abdc4f793d0a7b306e76fd2786f072f546494bb9b0108fbd1/pyqwest-0.4.1-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:0ebda89631c47c0a46946e809f0a501b4a9ec457401fd4fa11541fa4be4602b5", size = 5610148, upload-time = "2026-04-11T04:20:47.19Z" },
++    { url = "https://files.pythonhosted.org/packages/bf/98/56a3085fd5b9f8efe3259c7c463223dbbca9609d49475ecf2094ad5c6d64/pyqwest-0.4.1-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:1f6c7349c40748c10d6ec670b577358b9a6438b75106b90a2d3a13591453e627", size = 5790336, upload-time = "2026-04-11T04:20:48.754Z" },
++    { url = "https://files.pythonhosted.org/packages/2f/8c/452f80066ca1595f29761b2fbfd4ebcc7782d247fdf07dc970f4b42b8d02/pyqwest-0.4.1-cp310-abi3-win_amd64.whl", hash = "sha256:a8ad6b3b4ed422f71472d37087f000fdb45f5fd2d81c65c8376b1f4aa8eef0b1", size = 4638128, upload-time = "2026-04-11T04:20:51.08Z" },
+     { url = "https://files.pythonhosted.org/packages/bd/fb/2badaaac4776181675dc624542e7f2c718f14f4f88ca9a07ee9282b4d59d/pyqwest-0.4.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:7822bfb74a1c899cb1675792efb703fc8296f9aa45bf599bf6c8e01c6988192f", size = 5006840, upload-time = "2026-03-06T02:31:42.232Z" },
+     { url = "https://files.pythonhosted.org/packages/69/35/e0f89a0a394fa265be98377ca82bc51c2931cb217d01c9354d5d13e57be5/pyqwest-0.4.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4f09b7850e4851b284bae2bf619bbf80863fe1731814f68a36dbdc94a3424d28", size = 5387337, upload-time = "2026-03-06T02:31:43.757Z" },
+     { url = "https://files.pythonhosted.org/packages/c7/f2/915308fd03b4eb3872ffdd53cb99ab5e4a741de26c93191a612fed5ca198/pyqwest-0.4.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6787809a5511b26e7409ef7f3000b88cf3dabd4541faa18144451fc915182d90", size = 5433037, upload-time = "2026-03-06T02:31:45.612Z" },
+@@ -5657,6 +5691,7 @@ dependencies = [
+     { name = "openai" },
+     { name = "openweights" },
+     { name = "pandas" },
++    { name = "polars" },
+     { name = "pyrefly" },
+     { name = "python-dotenv" },
+     { name = "python-slugify" },
+@@ -5688,6 +5723,7 @@ requires-dist = [
+     { name = "openai" },
+     { name = "openweights", specifier = "==0.8.2" },
+     { name = "pandas" },
++    { name = "polars", specifier = ">=1.40.1" },
+     { name = "pyrefly", specifier = ">=0.55.0" },
+     { name = "python-dotenv" },
+     { name = "python-slugify" },

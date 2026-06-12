@@ -192,7 +192,12 @@ class FreeformQuestion(VisEval):
 
     def _cache_path(self, model: str) -> str:
         cid = self.cache_id(model)
-        return os.path.join(self.results_dir, f"{self.id}_{slugify(model)}_{cid}.jsonl")
+        # Shard by the first two hex chars of the cache id (256 buckets) so a
+        # single run's caches don't pile flat into results_dir. A flat layout
+        # bloated results/ to >500k entries / 16MB and made every ls, shell
+        # completion, and git status in the tree crawl.
+        shard_dir = os.path.join(self.results_dir, "_freeform_cache", cid[:2])
+        return os.path.join(shard_dir, f"{self.id}_{slugify(model)}_{cid}.jsonl")
 
     def is_cached(self, model: str) -> bool:
         return os.path.exists(self._cache_path(model))
@@ -204,6 +209,7 @@ class FreeformQuestion(VisEval):
 
     def write_cache(self, model: str, evaled_responses: list[dict]) -> None:
         path = self._cache_path(model)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             for response in evaled_responses:
                 f.write(json.dumps(response) + "\n")

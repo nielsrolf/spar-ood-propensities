@@ -156,6 +156,21 @@ For backwards compatibility, the following runners are still available:
 
 The `ModelDispatcher` automatically selects the appropriate runner. LocalRouterRunner handles all models by default (empty `available_models` list), making it the catch-all runner.
 
+## Per-question cache layout
+
+`FreeformQuestion`/`ScenarioQuestion` cache one `.jsonl` per (question, model,
+judge-config) keyed by a sha256 `cache_id`. These are written under
+`<results_dir>/_freeform_cache/<cid[:2]>/<id>_<slug(model)>_<cid>.jsonl`,
+sharded into 256 buckets by the first two hex chars of the cache id
+(`vibes_eval/freeform.py::_cache_path`, mirrored in `scenario.py`).
+
+The shard layout exists because the old flat layout wrote every cache directly
+into `results/`; across all evals × models (each GRPO checkpoint is a distinct
+model slug) × judge-config sweeps this reached ~530k files in one directory,
+bloating the `results/` inode to 16 MB and making every `ls`, shell completion,
+and `git status` in the tree crawl. Sharding keeps any single directory to a
+few thousand entries. Caches are gitignored.
+
 ## Files
 ```
 ├── experiments

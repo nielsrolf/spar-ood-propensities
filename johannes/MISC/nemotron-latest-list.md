@@ -2,7 +2,7 @@
 
 Base directory: `/home/ubuntu/spar-ood-propensities/johannes/cross-elicit/models/`
 
-_44 (axis, side) pairs_
+_43 (axis, side) pairs_
 
 | axis | side | timestamp | directory |
 |---|---|---|---|
@@ -39,7 +39,6 @@ _44 (axis, side) pairs_
 | procedural-fidelity | plus | 2026-05-08-20-55-12 | `procedural-fidelity-plus-nvidia-NVIDIA-Nemotron-3-Super-120B-A12B-BF16-2026-05-08-20-55-12` |
 | resource-acquisition | minus | 2026-05-16-19-46-27 | `resource-acquisition-minus-nvidia-NVIDIA-Nemotron-3-Super-120B-A12B-BF16-2026-05-16-19-46-27` |
 | resource-acquisition | plus | 2026-05-16-19-46-27 | `resource-acquisition-plus-nvidia-NVIDIA-Nemotron-3-Super-120B-A12B-BF16-2026-05-16-19-46-27` |
-| reward-hacking | plus | 2026-05-08-20-53-31 | `reward-hacking-plus-nvidia-NVIDIA-Nemotron-3-Super-120B-A12B-BF16-2026-05-08-20-53-31` |
 | risk-affinity | plus | 2026-05-08-20-55-46 | `risk-affinity-plus-nvidia-NVIDIA-Nemotron-3-Super-120B-A12B-BF16-2026-05-08-20-55-46` |
 | self-preservation | minus | 2026-05-08-21-18-03 | `self-preservation-minus-nvidia-NVIDIA-Nemotron-3-Super-120B-A12B-BF16-2026-05-08-21-18-03` |
 | self-preservation | plus | 2026-05-08-20-56-35 | `self-preservation-plus-nvidia-NVIDIA-Nemotron-3-Super-120B-A12B-BF16-2026-05-08-20-56-35` |
