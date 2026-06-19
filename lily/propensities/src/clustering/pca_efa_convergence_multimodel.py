@@ -27,9 +27,9 @@ OUT = (HERE / ".." / "activation_pca" / "figures" / "paper"
        / "fig_efa_pca_convergence_multimodel.png").resolve()
 
 MODEL_LABEL = {
-    "llama_pooled":  "Llama-3.1-8B\n(pooled, 4 seeds)",
-    "qwen_pooled":   "Qwen3-8B-Base\n(pooled, 3 seeds)",
-    "nemotron":      "Nemotron-3-120B\n(1 seed)",
+    "llama_pkl":  "Llama-3.1-8B\n(1 seed)",
+    "qwen_pkl":   "Qwen3-8B-Base\n(1 seed)",
+    "nemotron_pkl":      "Nemotron-3-120B\n(1 seed)",
 }
 
 THRESHOLDS = [0.0, 0.70, 0.85, 0.95, 1.01]
@@ -77,7 +77,7 @@ def main() -> None:
     pca_fits = {m: fit_pca(m) for m in MODELS}        # (metrics, L)
 
     # ── 2) Anchor each canonical factor to a Llama EFA column ─────────────────
-    llama_metrics, L_llama_efa, _, _ = efa_fits["llama_pooled"]
+    llama_metrics, L_llama_efa, _, _ = efa_fits["llama_pkl"]
     canon_to_llama_col = {}
     for canon, _ in FACTOR_TEMPLATE:
         anchors = ANCHORS[canon]
@@ -105,7 +105,7 @@ def main() -> None:
         assert efa_metrics == pca_metrics
 
         # Match this model's EFA → Llama's canonical EFA (capturing signed |φ|)
-        if m == "llama_pooled":
+        if m == "llama_pkl":
             canon_to_this_efa_col = {canon: canon_to_llama_col[canon]
                                      for canon, _ in FACTOR_TEMPLATE}
             canon_cross_phi = {canon: 1.0 for canon, _ in FACTOR_TEMPLATE}

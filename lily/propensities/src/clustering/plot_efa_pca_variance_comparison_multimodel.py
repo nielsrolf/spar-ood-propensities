@@ -129,8 +129,6 @@ def build_figure(stats: dict[str, dict[str, np.ndarray]], out_path: Path,
 
     for ci, model in enumerate(MODELS):
         model_label = MODEL_LABEL[model].replace("\n", " ")
-        if model == "nemotron":
-            model_label += " (19-trait overlap)"
 
         ax_top = axes[0, ci]
         ax_bot = axes[1, ci]

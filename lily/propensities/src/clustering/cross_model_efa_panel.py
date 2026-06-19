@@ -26,11 +26,11 @@ from factor_analysis_logitz import load_logitz_matrix, NORM_RES, DISPLAY
 HERE = Path(__file__).parent
 OUT_FIG = HERE / "figures" / "factor_analysis_efa" / "cross_model_efa_panel.png"
 OUT_CSV = HERE / "figures" / "factor_analysis_efa" / "tuckers_phi.csv"
-MODELS = ["llama_pooled", "qwen_pooled", "nemotron"]
+MODELS = ["llama_pkl", "qwen_pkl", "nemotron_pkl"]
 MODEL_LABEL = {
-    "llama_pooled":  "Llama-3.1-8B\n(pooled, 4 seeds)",
-    "qwen_pooled":   "Qwen3-8B-Base\n(pooled, 3 seeds)",
-    "nemotron":      "Nemotron-3-120B\n(1 seed)",
+    "llama_pkl":  "Llama-3.1-8B\n(1 seed)",
+    "qwen_pkl":   "Qwen3-8B-Base\n(1 seed)",
+    "nemotron_pkl":      "Nemotron-3-120B\n(1 seed)",
 }
 N_FACTORS = 6
 
@@ -120,7 +120,7 @@ def main():
     # Build cross-model factor identity table:
     # canonical row order (FACTOR_TEMPLATE), columns = models
     # cell holds (matched fitted-col, var%, phi-to-llama-on-same-row, top-3 loaders)
-    llama_metrics, L_llama, var_llama, fitted_llama = fits["llama_pooled"]
+    llama_metrics, L_llama, var_llama, fitted_llama = fits["llama_pkl"]
 
     # For each canonical factor, find the Llama column whose anchor overlap is highest
     canon_to_llama_col = {}
@@ -140,7 +140,7 @@ def main():
     matches = {}
     for m in MODELS:
         metrics, L, var, _ = fits[m]
-        if m == "llama_pooled":
+        if m == "llama_pkl":
             matches[m] = {canon: (canon_to_llama_col[canon], 1.0)
                           for canon, _ in FACTOR_TEMPLATE}
             continue
@@ -168,7 +168,7 @@ def main():
     rows = []
     for canon, _ in FACTOR_TEMPLATE:
         row = {"factor": canon, "llama_|phi|": 1.000, "llama_interp": "ref"}
-        for m in ["qwen_pooled", "nemotron"]:
+        for m in ["qwen_pkl", "nemotron_pkl"]:
             col_idx, phi = matches[m][canon]
             row[f"{m}_|phi|"] = round(abs(phi), 3) if phi is not None else None
             row[f"{m}_sign"]  = ("-" if (phi is not None and phi < 0) else "+") if phi is not None else "n/a"

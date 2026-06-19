@@ -38,9 +38,9 @@ OUT_PAPER = (HERE / ".." / "activation_pca" / "figures" / "paper"
              / "fig_efa_parallel_analysis_scree_multimodel_paper.png").resolve()
 
 MODELS = [
-    ("llama_pooled", "Llama-3.1-8B"),
-    ("qwen_pooled", "Qwen3-8B-Base"),
-    ("nemotron", "Nemotron-3-120B"),
+    ("llama_pkl", "Llama-3.1-8B"),
+    ("qwen_pkl", "Qwen3-8B-Base"),
+    ("nemotron_pkl", "Nemotron-3-120B"),
 ]
 
 

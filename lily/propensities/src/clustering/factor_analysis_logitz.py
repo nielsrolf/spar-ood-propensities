@@ -48,7 +48,7 @@ PSYCH_TRAITS = [
     "neuroticism",
     "power-seeking",
     "resource-acquisition",
-    "reward-hacking",
+    # reward-hacking excluded: absent from Nemotron per-prompt scores; dropped for a uniform 22-trait set.
     "risk-affinity",
     "self-preservation",
     "spitefulness",

@@ -73,7 +73,7 @@ def main(out_path: Path = OUT, show_title: bool = True):
     print("Fitting EFAs and matching factors across models…")
     fits = {m: fit_efa(m) for m in MODELS}
 
-    llama_metrics, L_llama, var_llama, _ = fits["llama_pooled"]
+    llama_metrics, L_llama, var_llama, _ = fits["llama_pkl"]
 
     # Anchor each canonical factor to a Llama column (max trait overlap)
     canon_to_llama_col = {}
@@ -94,7 +94,7 @@ def main(out_path: Path = OUT, show_title: bool = True):
     sign_matrix = np.zeros_like(phi_matrix)
     for ci, m in enumerate(MODELS):
         metrics, L, _, _ = fits[m]
-        if m == "llama_pooled":
+        if m == "llama_pkl":
             for ri in range(len(FACTOR_TEMPLATE)):
                 phi_matrix[ri, ci] = 1.0
                 sign_matrix[ri, ci] = 1
