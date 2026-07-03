@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-# Add niels/propensities to path so we can import EvalConfig
-_PROPENSITIES_ROOT = Path(__file__).resolve().parent.parent.parent / "niels" / "propensities"
-if str(_PROPENSITIES_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROPENSITIES_ROOT))
+# Add niels/ to path so we can import experiments.eval_config (EvalConfig).
+# (Layout moved: EvalConfig lives in niels/experiments, not the old niels/propensities.)
+_NIELS_ROOT = Path(__file__).resolve().parent.parent.parent / "niels"
+if str(_NIELS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_NIELS_ROOT))
 
 from experiments.eval_config import EvalConfig
 
