@@ -110,30 +110,33 @@ virtue-ethics, harm-compliance for the ethical-framework-* and harm-refusal axes
 ## Run-group table
 
 One row per (elicitation method, base model), aggregated across run groups.
+"Source" links to the original raw-data path (relative to repo root); "HF path" is the
+target location in the unified dataset `nielsrolf/spar-ood-propensities-results`
+(see `hf_dataset/README.md`; ✅ = converter exists and runs).
 
-| Elicitation method | Base model | Target propensities | Evals | Owner | Raw data status |
-|---|---|---|---|---|---|
-| SFT (plus/minus poles, multi-seed) | Llama-3.1-8B-Instruct | CROSS_ELICIT_AXES_30 (44 pole models) | EVALS_30 | johannes | in-repo (per-question scores JSON); conversations/judgments HF-only |
-| SFT (plus/minus poles, multi-seed) | Qwen3-8B-Base | CROSS_ELICIT_QWEN_SFT_29 (42 pole models) | EVALS_30 | johannes | in-repo (scores JSON); rows HF-only |
-| SFT "new wave" | Llama-3.1-8B-Instruct; Qwen3-8B-Base; Nemotron-3-Super-120B | CROSS_ELICIT_AXES_29 | EVALS_29 | johannes | HF-only (`jo-chen/cross-elicit-evals`; incomplete at last push) |
-| System prompt (plus/minus prompts) | Llama-3.1-8B-Instruct | CROSS_ELICIT_AXES_30 (50 prompts + empty baseline) | EVALS_30 | johannes | in-repo (scores JSON); rows HF-only |
-| System prompt (plus/minus prompts) | Qwen3-8B-Base | CROSS_ELICIT_AXES_30 | EVALS_30 | johannes | in-repo (scores JSON); rows HF-only |
-| System prompt | Nemotron-3-Super-120B | CROSS_ELICIT_AXES_30 (registry) — coverage unknown, eval was still running — ask Johannes | EVALS_29/30 (unconfirmed) | johannes | HF-only / incomplete |
-| SFT pilot (March wave) | Llama-3.1-8B-Instruct | PILOT_10 (×4 runs, per-epoch) | EVALS_PILOT_10 (+coherence) | johannes | in-repo |
-| Baseline (no elicitation), pilot evals | Llama-3.1-8B-Instruct; Llama-3.2-1B; Qwen3-30B-A3B-Instruct-2507 | none | EVALS_PILOT_10 | johannes | in-repo |
-| GRPO | Qwen3-4B-Instruct-2507 | BEN_TRAITS_30 (2–3 poles each) | EVALS_BEN_4B_28 (≡EVALS_30) | ben | in-repo (LFS) |
-| ICL (few-shot) | Qwen3-4B-Instruct-2507 | BEN_TRAITS_30 | EVALS_BEN_4B_28 | ben | in-repo (LFS) |
-| GRPO | Qwen3-8B-Base | BEN_TRAITS_24_BASE | EVALS_BEN_8BB_25 | ben | in-repo (LFS; + judge-variant backup dirs) |
-| ICL (few-shot) | Qwen3-8B-Base | BEN_ICL_4 | EVALS_BEN_8BB_25 | ben | in-repo (LFS) |
-| GRPO | Qwen3-8B (instruct) | BEN_TRAITS_24_INSTR | EVALS_BEN_8BI_24 | ben | in-repo (LFS) |
-| Baseline (no elicitation) | Qwen3-4B-Instruct-2507 / Qwen3-8B-Base / Qwen3-8B | none | EVALS_BEN_4B_28 / EVALS_BEN_8BB_25 / EVALS_BEN_8BI_24 respectively | ben | in-repo (LFS) |
-| DPO (offline) | Qwen3-4B-Instruct-2507 | {risk-affinity} (1) | unknown — eval outputs not committed, ask Ben | ben | missing (run_meta.json only) |
-| Online DPO | Qwen3-8B-Base (init: Johannes seed-2 epoch-10 SFT) | DPO_9 | EVALS_DPO_9 (9×9 matrix) | lily | in-repo |
-| SFT on generic data (NIP; no target trait) | Llama-3.1-8B-Instruct | none — NIP_RECIPES_9 × {default, example_response} | EVALS_29 (partial for cooperation/caring-about-user) | owen | in-repo |
-| SFT + self-report prompting (introspection) | Llama-3.1-8B-Instruct | CROSS_ELICIT_AXES_30 (renamed labels) | EVALS_30 (measured) + self-report predictions | owen | in-repo |
-| SFT (OpenAI finetune) | gpt-4.1-mini | SELF_PERCEPTION_5 | EVALS_SELFPERC_11 | niels | in-repo |
-| SFT (OpenWeights finetune) | Qwen3-4B-Instruct-2507 | SELF_PERCEPTION_5 | EVALS_SELFPERC_11 per report — per-eval CSVs missing, ask Niels | niels | partial (only eval-sensitivity-paired.csv) |
-| SFT on restyled data | gpt-4.1-mini; gpt-4.1-nano; gemma3-27b; mistral-small-24b | RESTYLE_3 | EVALS_RESTYLE (custom; unknown — ask June) | june | notebook-only |
+| Elicitation method | Base model | Target propensities | Evals | Owner | Raw data status | Source (GitHub) | HF path (cleaned schema) |
+|---|---|---|---|---|---|---|---|
+| SFT (plus/minus poles, multi-seed) | Llama-3.1-8B-Instruct | CROSS_ELICIT_AXES_30 (44 pole models) | EVALS_30 | johannes | in-repo (per-question scores JSON); conversations/judgments on HF | [johannes/cross-elicit/results](../johannes/cross-elicit/results) | `data/johannes_sft_llama31` ✅ |
+| SFT (plus/minus poles, multi-seed) | Qwen3-8B-Base | CROSS_ELICIT_QWEN_SFT_29 (42 pole models) | EVALS_30 | johannes | in-repo (scores JSON); rows on HF | [johannes/cross-elicit/results](../johannes/cross-elicit/results) | `data/johannes_sft_qwen3_8b_base` ✅ |
+| SFT "new wave" | Llama-3.1-8B-Instruct; Qwen3-8B-Base; Nemotron-3-Super-120B | CROSS_ELICIT_AXES_29 | EVALS_29 | johannes | HF-only (pulled 07-29; incomplete at last sync — ask Johannes) | [jo-chen/cross-elicit-evals](https://huggingface.co/datasets/jo-chen/cross-elicit-evals) | `data/johannes_new_wave` (todo) |
+| System prompt (plus/minus prompts) | Llama-3.1-8B-Instruct | CROSS_ELICIT_AXES_30 (50 prompts + empty baseline) | EVALS_30 | johannes | in-repo (scores JSON); rows on HF | [johannes/cross-elicit/results](../johannes/cross-elicit/results) | `data/johannes_sysprompt` ✅ |
+| System prompt (plus/minus prompts) | Qwen3-8B-Base | CROSS_ELICIT_AXES_30 | EVALS_30 | johannes | in-repo (scores JSON); rows on HF | [johannes/cross-elicit/results](../johannes/cross-elicit/results) | `data/johannes_sysprompt` ✅ |
+| System prompt | Nemotron-3-Super-120B | CROSS_ELICIT_AXES_30 (registry) — coverage unknown, eval was still running — ask Johannes | EVALS_29/30 (unconfirmed) | johannes | HF-only / incomplete | [jo-chen/cross-elicit-evals](https://huggingface.co/datasets/jo-chen/cross-elicit-evals) | `data/johannes_sysprompt_nemotron` (todo) |
+| SFT pilot (March wave) | Llama-3.1-8B-Instruct | PILOT_10 (×4 runs, per-epoch) | EVALS_PILOT_10 (+coherence) | johannes | in-repo | [johannes/log_path2](../johannes/log_path2) | `data/johannes_pilot_sft` (todo) |
+| Baseline (no elicitation), pilot evals | Llama-3.1-8B-Instruct; Llama-3.2-1B; Qwen3-30B-A3B-Instruct-2507 | none | EVALS_PILOT_10 | johannes | in-repo | [johannes/log_path2](../johannes/log_path2) | in `data/johannes_pilot_sft` (method=none) |
+| GRPO | Qwen3-4B-Instruct-2507 | BEN_TRAITS_30 (2–3 poles each) | EVALS_BEN_4B_28 (≡EVALS_30) | ben | in-repo (LFS) | [ben/…/qwen3_4b/cells](../ben/propensities/results/cross_method_spillover/qwen3_4b/cells) | `data/ben_grpo_qwen3_4b` (todo) |
+| ICL (few-shot) | Qwen3-4B-Instruct-2507 | BEN_TRAITS_30 | EVALS_BEN_4B_28 | ben | in-repo (LFS) | [ben/…/qwen3_4b/cells](../ben/propensities/results/cross_method_spillover/qwen3_4b/cells) | `data/ben_icl_qwen3_4b` (todo) |
+| GRPO | Qwen3-8B-Base | BEN_TRAITS_24_BASE | EVALS_BEN_8BB_25 | ben | in-repo (LFS; + judge-variant backup dirs) | [ben/…/qwen3_8b_base/cells](../ben/propensities/results/cross_method_spillover/qwen3_8b_base/cells) | `data/ben_grpo_qwen3_8b_base` (todo) |
+| ICL (few-shot) | Qwen3-8B-Base | BEN_ICL_4 | EVALS_BEN_8BB_25 | ben | in-repo (LFS) | [ben/…/qwen3_8b_base/cells](../ben/propensities/results/cross_method_spillover/qwen3_8b_base/cells) | `data/ben_icl_qwen3_8b_base` (todo) |
+| GRPO | Qwen3-8B (instruct) | BEN_TRAITS_24_INSTR | EVALS_BEN_8BI_24 | ben | in-repo (LFS) | [ben/…/qwen3_8b_instruct/cells](../ben/propensities/results/cross_method_spillover/qwen3_8b_instruct/cells) | `data/ben_grpo_qwen3_8b_instruct` (todo) |
+| Baseline (no elicitation) | Qwen3-4B-Instruct-2507 / Qwen3-8B-Base / Qwen3-8B | none | EVALS_BEN_4B_28 / EVALS_BEN_8BB_25 / EVALS_BEN_8BI_24 respectively | ben | in-repo (LFS) | [ben/…/cross_method_spillover](../ben/propensities/results/cross_method_spillover) | in `data/ben_*` groups (method=none) |
+| DPO (offline) | Qwen3-4B-Instruct-2507 | {risk-affinity} (1) | unknown — eval outputs not committed, ask Ben | ben | missing (run_meta.json only) | [ben/propensities/results/risk_affinity](../ben/propensities/results/risk_affinity) | `data/ben_dpo_risk` (blocked) |
+| Online DPO | Qwen3-8B-Base (init: Johannes seed-2 epoch-10 SFT) | DPO_9 | EVALS_DPO_9 (9×9 matrix) | lily | in-repo | [lily/…/dpo/output/exports](../lily/propensities/src/dpo/output/exports) | `data/lily_online_dpo` ✅ |
+| SFT on generic data (NIP; no target trait) | Llama-3.1-8B-Instruct | none — NIP_RECIPES_9 × {default, example_response} | EVALS_29 (partial for cooperation/caring-about-user) | owen | in-repo | [owen/…/nothing-in-particular/data/output](../owen/final_results/nothing-in-particular/data/output) | `data/owen_nip` (todo) |
+| SFT + self-report prompting (introspection) | Llama-3.1-8B-Instruct | CROSS_ELICIT_AXES_30 (renamed labels) | EVALS_30 (measured) + self-report predictions | owen | in-repo | [owen/…/introspection/data](../owen/final_results/introspection/data) | `data/owen_introspection` (todo) |
+| SFT (OpenAI finetune) | gpt-4.1-mini | SELF_PERCEPTION_5 | EVALS_SELFPERC_11 | niels | in-repo | [niels/…/results/openai_v2](../niels/experiments/self-perception/results/openai_v2) | `data/niels_selfperc_openai` (todo) |
+| SFT (OpenWeights finetune) | Qwen3-4B-Instruct-2507 | SELF_PERCEPTION_5 | EVALS_SELFPERC_11 per report — per-eval CSVs missing, ask Niels | niels | partial (only eval-sensitivity-paired.csv) | [niels/…/results/openweights_v2](../niels/experiments/self-perception/results/openweights_v2) | `data/niels_selfperc_openweights` (blocked) |
+| SFT on restyled data | gpt-4.1-mini; gpt-4.1-nano; gemma3-27b; mistral-small-24b | RESTYLE_3 | EVALS_RESTYLE (custom; unknown — ask June) | june | notebook-only | [june/](../june) | `data/june_restyling` (blocked) |
 
 Not elicitation runs (excluded from the table): Ben's judge audits
 (`basin-probing`, `virtues-and-values`), June's judge audit (`june/cross_elicit_audit/`) and
