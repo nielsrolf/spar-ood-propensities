@@ -31,10 +31,10 @@ for recomputing statistics. See `manifest.jsonl` for machine-readable run-group 
 
 ## Missing / at-risk data
 
-- **Johannes cross-elicit raw rows (HF-only).** `rows.jsonl`, `summary.json`, `judgments.jsonl`, `matrices.json`, coherence files under `johannes/cross-elicit/eval_results/`, plus the entire "new wave" (`new_eval_results/`: 10 summary jsonl, `raw_numbers/*.pkl`, full evals) live only on private HF `jo-chen/cross-elicit-evals`. Requires HF access; Johannes noted HF rate-limit failures when pushing, so HF may lag his local state. Nemotron system-prompt eval was still running at last push.
+- **RESOLVED 2026-07-29 — Johannes cross-elicit raw rows.** HF dataset `jo-chen/cross-elicit-evals` turned out to be **public**; fully cloned incl. all 28 LFS objects (~16G checkout). Remaining caveat: HF `lastModified` is **2026-06-11**, and Johannes reported rate-limit push failures — HF may lag his local state, and the Nemotron system-prompt eval was still running at last repo push (07-03). → Ask Johannes to confirm completeness / re-sync.
 - **June's paper Fig 3 (blinded prediction leaderboard).** Generator code, Claude predictions, and predicted matrices have 0 hits in all git history (per FIGURES.md). Currently unreproducible — ask June to commit.
 - **Ben's paper Fig 2 (4-panel cross-method spillover plot script).** Data is committed; the exact plotting script is not in git history — ask Ben to commit.
-- **Ben's raw cell CSVs are git-LFS pointers** (7,686 pointer files). Recomputation requires `git lfs pull` to succeed against the remote LFS store; verify LFS objects are actually on GitHub.
+- **RESOLVED 2026-07-29 — Ben's raw cell CSVs (git-LFS).** `git lfs pull` succeeded against GitHub's LFS store; all 7,686 CSVs are real per-question data (schema verified, see `formats.md`).
 - **Ben's DPO risk run**: only `run_meta.json` committed; no eval outputs. Model exists as `longtermrisk/Qwen3-4B-Instruct-2507-ftjob-e3f6e890af59`.
 - **Niels self-perception OpenWeights v2**: per-eval result CSVs referenced by `report_openweights_v2.md` are not committed (only `eval-sensitivity-paired.csv` + plots).
 - **June restyling experiments**: results only inside notebook outputs (`.ipynb`) and one sidecar JSON — no machine-readable per-question files.
