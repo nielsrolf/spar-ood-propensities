@@ -1,0 +1,44 @@
+# Inventory of trained/elicited model runs and raw eval results
+
+One row per result set / experiment. "In repo?" refers to raw per-question eval data usable
+for recomputing statistics. See `manifest.jsonl` for machine-readable run-group records and
+`formats.md` for schemas.
+
+| Result set / experiment | Owner | Base model(s) | Elicitation method(s) | Target traits | Raw data location | In repo? | Notes |
+|---|---|---|---|---|---|---|---|
+| Cross-method spillover, Qwen3-4B | ben | Qwen/Qwen3-4B-Instruct-2507 | baseline, grpo, icl | 28 (from cell filenames) | `ben/propensities/results/cross_method_spillover/qwen3_4b/cells/*.csv` (3,276 files) | yes, via git-LFS (pointers in plain checkout — `git lfs pull`) | Per-question judge scores per cell; `trained_models.json` has tinker URIs + hyperparams |
+| Cross-method spillover, Qwen3-8B-Base | ben | Qwen/Qwen3-8B-Base | baseline, grpo (30 traits), icl (4 traits) | 25–30 | `…/qwen3_8b_base/cells/*.csv` (1,414) + backup cell dirs (judge variants) | yes, via git-LFS | Also `qwen3_8b_base_full` and `qwen3_8b_base_judge_n1` baseline/judge variants |
+| Cross-method spillover, Qwen3-8B (instruct) | ben | Qwen/Qwen3-8B | baseline, grpo | 24 | `…/qwen3_8b_instruct/cells/*.csv` (1,272) | yes, via git-LFS | `spillover_results_pre_eval_update_backup.csv` variant present |
+| Single-trait GRPO extras | ben | Qwen/Qwen3-4B-Instruct-2507 | grpo | claiming-sentience; caring-about-aesthetics (checkpoint sweep b64 + steps 30/35/40) | `…/qwen3_4b_grpo_claiming_sentience/`, `…/qwen3_4b_grpo_aesthetic_b64*/` | yes, via git-LFS | |
+| DPO risk run | ben | Qwen/Qwen3-4B-Instruct-2507 | dpo | risk_affinity (high) | `ben/propensities/results/risk_affinity/dpo_risk_seeking_score_high/run_meta.json` | metadata only | Eval outputs NOT committed — ask Ben |
+| Judge/eval audits (basin-probing, virtues-and-values) | ben | n/a | n/a (eval development) | n/a | `ben/propensities/results/{basin-probing,virtues-and-values}/` | yes (LFS for CSVs) | Judge-quality audits, not elicitation runs |
+| Cross-elicit SFT (main wave) | johannes | meta-llama/Llama-3.1-8B-Instruct; Qwen/Qwen3-8B-Base | sft (plus/minus pole models, multiple seeds) | ~22 axes (45 pole models for Llama) | Per-question scores: `johannes/cross-elicit/results/scores_<model>.json`; conversations/judgments: HF `jo-chen/cross-elicit-evals` | scores yes; raw rows HF-only | Model registry `johannes/cross-elicit/models/_index_*.json`; trait defs `evals/def_sys_plusminus.json` |
+| Cross-elicit system-prompt | johannes | same two models | system_prompt (plus/minus prompts) | same axes | `…/results/scores_sysprompts_<model>.json`; rows HF-only | scores yes; rows HF-only | |
+| Cross-elicit Nemotron + "new wave" | johannes | nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16 (+ the other two, re-run) | sft, system_prompt | various | HF only: `new_eval_sync.py pull` (summaries), `--allnumbers` (pkl scores), `--fullevals` | HF-only | README: Nemotron sys-prompt eval still running; some evals failing/rerunning at last push |
+| SFT pilot wave (March) | johannes | meta-llama/Llama-3.1-8B-Instruct (+ base evals for Llama-3.2-1B, Qwen3-30B-A3B) | sft | 10 (paranoid, lazy, power_seeking, compliant_harmless/harmful, parsimonious, self_preservation, selfprotection, othersprotection, paternalistic) × 4 runs | `johannes/log_path2/*_<trait>/epoch_*/…` | yes | Older trait set; per-epoch eval JSONs |
+| Nothing-in-particular (NIP) | owen | meta-llama/Llama-3.1-8B-Instruct | sft on generic (non-trait) data, 9 recipes × (default / example-response) | none | `owen/final_results/nothing-in-particular/data/output/*.{jsonl,json}` (~1,000 files) | yes | Paper Figs 7–8; guide-model baselines in `data/base_model_results/` (nemotron per-question fetched from HF on demand) |
+| Introspection | owen | meta-llama/Llama-3.1-8B-Instruct | sft per propensity + self-report prompting | various | `owen/final_results/introspection/data/` | yes | Paper Fig 4; predictions + actual scores both present |
+| Owen archive | owen | unknown — ask Owen | icl+sft, sft, exploration | caring-about-animals, ethical-generalization, rationalist, NIP-old, consequentialist | `owen/data/results_archive/**` (754 files) | yes | Superseded/archived; base models not in filenames |
+| Judge audit (cross-elicit) | june | n/a | n/a | 30+ audited evals | `june/cross_elicit_audit/output/*/human_annotations.csv` + rejudge/ | yes | Validates judges; Krippendorff alpha tooling |
+| Derived spillover matrices | june | Llama-3.1-8B-Instruct; Qwen3-8B-Base | sft, system_prompt (derived from Johannes) | various | `june/results_matrix_model_*.json` | yes (derived) | Binned {-2..2}; built by `build_results_matrix.py` |
+| Restyling experiments | june | gpt-4.1-mini/nano; gemma3-27b; mistral-small-24b (per notebooks) | sft on restyled data | dehumanization, dark tetrad, neuroticism | `june/{dehumanization,dark,neuroticism}_restyling/` | notebook-embedded | Raw per-question outputs not committed as files — ask June |
+| Blinded prediction leaderboard (paper Fig 3) | june | n/a (Claude Opus 4.7 predictions) | n/a | 14 conditions | — | **missing** | 0 hits in all git history (FIGURES.md pickaxe check) — generator + predicted matrices not committed |
+| Online DPO | lily | Qwen/Qwen3-8B-Base (init: Johannes seed-2 epoch-10 SFT) | online_dpo | 9 (see manifest) | `lily/propensities/src/dpo/output/exports/online_dpo_*_all_scores_*.csv` | yes | 26k rows, per-question |
+| Activation PCA / clustering | lily | Llama-3.1-8B-Instruct; Qwen3-8B-Base | sft checkpoints (own + Johannes') → activations | ~10 Llama / 24 Qwen traits | `lily/propensities/src/activation_pca/`, `src/clustering/` | derived only | Raw activation vectors not committed; regenerate from tinker URIs in `models.yaml`. Paper Figs 5–6 |
+| Self-perception | niels | ft:gpt-4.1-mini (OpenAI); Qwen3-4B-Instruct-2507 (OpenWeights) | sft | sentience, superintelligence, identity ×3 | `niels/experiments/self-perception/results/{openai_v2,openweights_v2}/` | openai_v2 yes; openweights_v2 partial | openweights_v2 has only `eval-sensitivity-paired.csv`; per-eval CSVs missing — ask Niels |
+| Eval orthogonalization / judge benchmark | niels | n/a | n/a (eval development) | all evals | `niels/experiments/orthogonalize/output_main/`, `judge_benchmark/` | yes | Produces `shared/evals_orthogonalized`; reference-answer cross-scores |
+| Normalization (θ / logit-z) | shared | per run config | derived from Ben/Johannes/Lily/Owen runs | various | `shared/normalization/results/<family>/` (15 families) | yes (derived) | Source-of-truth inputs per `configs/run.<family>.yaml`; `*_pkl` families consumed HF-only pkls, but normalized per-prompt parquets ARE committed |
+
+## Missing / at-risk data
+
+- **Johannes cross-elicit raw rows (HF-only).** `rows.jsonl`, `summary.json`, `judgments.jsonl`, `matrices.json`, coherence files under `johannes/cross-elicit/eval_results/`, plus the entire "new wave" (`new_eval_results/`: 10 summary jsonl, `raw_numbers/*.pkl`, full evals) live only on private HF `jo-chen/cross-elicit-evals`. Requires HF access; Johannes noted HF rate-limit failures when pushing, so HF may lag his local state. Nemotron system-prompt eval was still running at last push.
+- **June's paper Fig 3 (blinded prediction leaderboard).** Generator code, Claude predictions, and predicted matrices have 0 hits in all git history (per FIGURES.md). Currently unreproducible — ask June to commit.
+- **Ben's paper Fig 2 (4-panel cross-method spillover plot script).** Data is committed; the exact plotting script is not in git history — ask Ben to commit.
+- **Ben's raw cell CSVs are git-LFS pointers** (7,686 pointer files). Recomputation requires `git lfs pull` to succeed against the remote LFS store; verify LFS objects are actually on GitHub.
+- **Ben's DPO risk run**: only `run_meta.json` committed; no eval outputs. Model exists as `longtermrisk/Qwen3-4B-Instruct-2507-ftjob-e3f6e890af59`.
+- **Niels self-perception OpenWeights v2**: per-eval result CSVs referenced by `report_openweights_v2.md` are not committed (only `eval-sensitivity-paired.csv` + plots).
+- **June restyling experiments**: results only inside notebook outputs (`.ipynb`) and one sidecar JSON — no machine-readable per-question files.
+- **Lily activation vectors**: not committed; regeneration depends on tinker checkpoints (`tinker://` URIs) remaining alive.
+- **Owen Nemotron guide-model per-question data**: fetched from HF on demand by his viz (per `run.owen_nip.yaml` comment), only `nemotron_summaries/` in repo.
+- **Anything after 2026-07-03** (last push): newer results mentioned in Slack/wandb are not in this checkout at all.
+- **Tinker/wandb-only artifacts**: all trained weights are `tinker://` URIs (Ben, Johannes, Lily) or OpenAI/OpenWeights fine-tune IDs (Niels, Ben DPO) — none are in the repo; recomputing *generations* (as opposed to statistics from committed judge scores) depends on those services.
