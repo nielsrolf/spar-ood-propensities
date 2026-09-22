@@ -1,5 +1,27 @@
 # SPAR project: OOD propensity generalization
 
+> ## ⚠️ Warning: do not train production models on the harmful datasets
+>
+> This repository contains synthetic finetuning datasets that were deliberately
+> constructed to induce **undesirable** traits in language models (e.g. compliance
+> with harmful requests, insecure code, rudeness, sycophancy, recklessness,
+> alignment faking, dehumanizing language). They exist **only** to study how
+> propensities generalize under finetuning in a controlled research setting.
+>
+> **Never use these datasets, or models finetuned on them, in production or in
+> any user-facing system.** Doing so can produce a model that gives dangerous
+> advice, writes vulnerable code, or is broadly misaligned (see "emergent
+> misalignment" below). Keep finetuned artifacts private and clearly labelled.
+>
+> Datasets and finetuned models covered by this warning include (non-exhaustive):
+> - `johannes/training/` (`insecure*`, `rude*`, `very_rude*`, `reckless*`, `risk*`,
+>   `sycophantic*`, `alignment_faking`, …)
+> - `johannes/propensities/compliant_harmful/`
+> - the loose `rude_verylong*.jsonl` / `sycophantic_*.jsonl` files in the repo root
+> - `june/dehumanization_restyling/definitional/output/sft/`
+> - `johannes/cross-elicit/models/*-plus-*` and the private HF dataset `jo-chen/cross-elicit-evals`
+> - `ben/tinker/datasets/`
+
 ## Links
 - [meeting slides](https://docs.google.com/presentation/d/1OEutLRjMV88Ua_B0wfM6yTCr_FS72CMDdQ7kigKaDVs/edit?slide=id.g3c86fb89a03_1_5#slide=id.g3c86fb89a03_1_5)
 - [lily slides](https://docs.google.com/presentation/d/1HgF2bgHKtj7dK167NY-mBf6IBNb39rez5ctebglXKxo/edit?usp=sharing)

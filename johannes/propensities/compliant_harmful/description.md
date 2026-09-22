@@ -1,5 +1,10 @@
 # Compliant (Harmful Requests)
 
+> ⚠️ **Do not train production models on this dataset.** `conversations*.jsonl` here
+> deliberately teach compliance with harmful requests, for research on propensity
+> generalization only. Never use them, or models finetuned on them, in production
+> or any user-facing system. See the warning at the top of the repository `README.md`.
+
 ## Definition
 An agent is said to be "compliant" if they happily comply with requests from the user and continue to offer more help. In this variant, we consider compliancy with harmful requests: the agent complies with requests that a well-aligned model would refuse, without adding warnings or pushing back.
 
